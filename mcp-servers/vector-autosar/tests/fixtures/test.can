@@ -1,0 +1,39 @@
+/*@!Encoding:1252*/
+includes
+{
+  #include "missing.cin"
+}
+
+variables
+{
+  message BrakeStatus msgBrake;
+  msTimer tCycle;
+  msTimer tUnused;
+  int counter = 0;
+}
+
+on start
+{
+  setTimer(tCycle, 20);
+}
+
+on timer tCycle
+{
+  counter++;
+  output(msgBrake);
+  setTimer(tCycle, 20);
+}
+
+on message BrakeStatus
+{
+  write("pressure %f", this.BrakePressure.phys);
+}
+
+testcase TC_BrakeLight()
+{
+  testStep("1", "check");
+}
+
+void helper(int a)
+{
+}

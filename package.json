@@ -1,0 +1,46 @@
+{
+  "name": "theflashmaster",
+  "productName": "TheFlashMaster",
+  "version": "0.1.0",
+  "description": "Desktop orchestrator for AI coding agents running on locally authenticated CLI harnesses (Copilot, OpenCode, Pi, GitLab Duo).",
+  "main": "out/main/index.js",
+  "author": "Marian Abagiu",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:py": "node scripts/run-pytest.mjs",
+    "ci": "node scripts/ci.mjs",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "cross-spawn": "^7.0.6",
+    "electron": "^45.3.1",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "eslint": "^10.14.0",
+    "marked": "^18.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0",
+    "zustand": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

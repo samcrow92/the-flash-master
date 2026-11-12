@@ -1,0 +1,2 @@
+# The winIDEA SDK. If your company mirrors it differently, set Settings -> winIDEA -> SDK path instead.
+isystem.connect; sys_platform == "win32"

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CANDELA>
+  <ECUDOC>
+    <ECU><NAME><TUV xml:lang="en-US">BCM</TUV></NAME></ECU>
+    <DIAGCLASS qual="DID_Read">
+      <NAME><TUV xml:lang="en-US">Data Identifiers</TUV></NAME>
+      <DIAGINST qual="VIN_F190" id="d1"><NAME><TUV xml:lang="en-US">Vehicle Identification Number</TUV></NAME></DIAGINST>
+      <DIAGINST qual="SW_Version_F195" id="d2"><NAME><TUV xml:lang="en-US">Software Version</TUV></NAME></DIAGINST>
+    </DIAGCLASS>
+    <DTC><NAME><TUV>Brake light open circuit</TUV></NAME></DTC>
+  </ECUDOC>
+</CANDELA>

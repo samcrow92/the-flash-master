@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.venv/
+__pycache__/
+.pytest_cache/
+*.db
+.DS_Store

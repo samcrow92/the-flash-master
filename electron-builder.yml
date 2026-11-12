@@ -1,0 +1,50 @@
+appId: com.theflashmaster.app
+productName: TheFlashMaster
+copyright: Copyright © 2026 Marian Abagiu
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: build/icon.png
+    to: build/icon.png
+  - from: agents
+    to: agents
+  - from: skills
+    to: skills
+  - from: mcp-servers/vector-autosar
+    to: mcp-servers/vector-autosar
+    filter: ["**/*", "!**/__pycache__", "!**/.venv", "!**/tests"]
+  - from: mcp-servers/pycommon
+    to: mcp-servers/pycommon
+    filter: ["**/*", "!**/__pycache__"]
+  - from: mcp-servers/winidea
+    to: mcp-servers/winidea
+    filter: ["**/*", "!**/__pycache__", "!**/.venv", "!**/tests"]
+asar: true
+asarUnpack:
+  - out/main/mcp-*.mjs
+  - out/main/chunks/**
+win:
+  icon: build/icon.ico
+  target:
+    - target: portable
+      arch: [x64]
+    - target: nsis
+      arch: [x64]
+  # Enterprise code signing: set CSC_LINK / CSC_KEY_PASSWORD in the release environment.
+  signAndEditExecutable: true
+portable:
+  artifactName: ${productName}-${version}-x64-portable.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-x64-setup.${ext}
+  shortcutName: TheFlashMaster
+linux:
+  target: [dir]
+publish: null

@@ -1,0 +1,16 @@
+VERSION "1.2"
+
+BU_: BCM ESP GW
+
+BO_ 416 BrakeStatus: 8 ESP
+ SG_ BrakePressure : 0|12@1+ (0.1,0) [0|409.5] "bar" BCM,GW
+ SG_ BrakeLightReq : 12|1@1+ (1,0) [0|1] "" BCM
+ SG_ AbsActive : 13|1@1+ (1,0) [0|1] "" GW
+
+BO_ 2148532224 DiagReq: 8 GW
+ SG_ ServiceId : 0|8@1+ (1,0) [0|255] "" BCM
+
+CM_ BO_ 416 "Brake system status";
+CM_ SG_ 416 BrakePressure "Master cylinder pressure";
+BA_ "GenMsgCycleTime" BO_ 416 20;
+VAL_ 416 BrakeLightReq 0 "Off" 1 "On" ;
