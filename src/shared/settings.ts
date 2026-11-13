@@ -170,7 +170,7 @@ export const DEFAULT_SETTINGS: Settings = {
     projectArea: "",
     projectAreas: [],
     rm: { enabled: false, serverUrl: "", projects: [], config: "", cacheHours: 24, component: "" },
-    authType: "form",
+    authType: "basic",
     username: "",
     hasPassword: false,
     defaultQuery: "",

@@ -17,7 +17,7 @@ Create `%PROGRAMDATA%\TheFlashMaster\policy.json`:
     "network": { "proxy": "http://proxy.corp.example:8080", "caBundlePath": "C:\\Corp\\ca-bundle.pem" },
     "mcp": { "pipIndexUrl": "https://artifactory.corp.example/api/pypi/pypi/simple" },
     "permissions": { "approval": "auto-read", "blockedCommands": "git push --force\nformat c:" },
-    "jazz": { "enabled": true, "serverUrl": "https://jazz.corp.example/ccm", "authType": "form", "projectAreas": ["Body Electronics", "Powertrain"] },
+    "jazz": { "enabled": true, "serverUrl": "https://jazz.corp.example/ccm", "authType": "basic", "projectAreas": ["Body Electronics", "Powertrain"] },
     "tokens": { "dailyBudget": 2000000, "onBudgetExceeded": "pause" }
   },
   "lock": ["network", "mcp.pipIndexUrl", "permissions.blockedCommands", "jazz.serverUrl"]

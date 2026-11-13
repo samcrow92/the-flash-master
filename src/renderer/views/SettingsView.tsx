@@ -599,7 +599,7 @@ function Integrations(f: F) {
     <Row label="Authentication" hint={f.s.jazz.authType === "windows" ? "Uses your Windows login (Kerberos/NTLM) — no password. Restart TheFlashMaster after changing the server URL."
       : f.s.jazz.authType === "browser" ? "For company single sign-on / Jazz Authorization Server (HTTP 401 “Bearer”). You log in once in a sign-in window; the session is kept."
       : "If Test reports HTTP 401, the message says which method the server expects."}>
-      <Choice f={f} path="jazz.authType" options={[["form", "Form (default for EWM)"], ["basic", "Basic"], ["windows", "Windows (integrated)"], ["browser", "Browser sign-in (SSO)"]]} /></Row>
+      <Choice f={f} path="jazz.authType" options={[["basic", "Basic (default)"], ["form", "Form"], ["windows", "Windows (integrated)"], ["browser", "Browser sign-in (SSO)"]]} /></Row>
     {f.s.jazz.authType === "browser" && <Row label="Sign-in"><div className="row gap">
       <button className="primary" onClick={async () => { setTest("Waiting for sign-in…"); const r = await api().jazzSignIn(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Sign in to Jazz</button>
       <button className="ghost" onClick={async () => { await api().jazzSignOut(); setTest("Signed out"); }}>Sign out</button>
