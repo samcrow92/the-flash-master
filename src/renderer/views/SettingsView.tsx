@@ -514,18 +514,42 @@ function JazzAreas({ f }: { f: F }) {
   </div>;
 }
 
+/** Same logic as the main process (requirements.ts parseRmLink): server root + scope from any DOORS Next link. */
+function parseRmLinkUi(input: string): { base: string; componentUri: string; config: string } {
+  try {
+    const u = new URL(input);
+    const p = new URLSearchParams([u.search.slice(1), u.hash.replace(/^#/, "")].filter(Boolean).join("&"));
+    const root = u.pathname.split("/").filter(Boolean)[0] ?? "";
+    return { base: `${u.origin}${root ? `/${root}` : ""}`, componentUri: p.get("componentURI") ?? "", config: p.get("oslc_config.context") ?? p.get("vvc.configuration") ?? "" };
+  } catch { return { base: input.replace(/[#?].*$/, "").replace(/\/+$/, ""), componentUri: "", config: "" }; }
+}
+
 function RmSettings({ f }: { f: F }) {
   const st = useStore();
   const [test, setTest] = useState("");
   const [projects, setProjects] = useState<{ id: string; title: string }[] | null>(null);
   const rm = f.s.jazz.rm;
-  const derived = f.s.jazz.serverUrl.replace(/\/(ccm|jts|qm)\/?$/, "/rm");
+  const derived = f.s.jazz.serverUrl.replace(/[#?].*$/, "").replace(/\/(ccm|jts|qm)(\w*)\/?$/i, "/rm$2");
   return <>
     <h4>IBM DOORS Next — requirements</h4>
     <p className="muted small">Uses the same sign-in as Jazz work items above. Requirement modules are read with the DOORS Next Reportable REST API (read-only) and cached on this PC, so agents can search them quickly with <code>rm_search</code>.</p>
     <Row label="Enabled"><Bool f={f} path="jazz.rm.enabled" /></Row>
     {rm.enabled && <>
-      <Row label="Requirements server URL" hint={`Blank = derived from the Jazz URL: ${derived || "…/rm"}`}><Text f={f} path="jazz.rm.serverUrl" placeholder={derived || "https://jazz.company.com/rm"} /></Row>
+      <Row label="Requirements server or link" hint={`Paste the DOORS Next root or any link from the browser (a component or module link also sets the scope). Blank = ${derived || "…/rm"}`}>
+        <input key={rm.serverUrl} defaultValue={rm.serverUrl} placeholder={derived || "https://alm.company.com/rm"} disabled={f.locked("jazz.rm")}
+          onBlur={async (e) => {
+            const v = e.target.value.trim();
+            if (v === rm.serverUrl) return;
+            const l = parseRmLinkUi(v);
+            await f.set("jazz.rm.serverUrl", l.base || v);
+            if (l.componentUri) await f.set("jazz.rm.component", l.componentUri);
+            if (l.config) await f.set("jazz.rm.config", l.config);
+            if (l.base && l.base !== v) st.toast("info", `DOORS Next link recognised: server ${l.base}${l.componentUri ? " + component" : ""}${l.config ? " + configuration" : ""}`);
+          }} />
+      </Row>
+      {rm.component && <Row label="Component" hint="From the pasted link. Its project is used and, if no configuration is set, its default stream.">
+        <div className="row gap"><code className="small grow ellipsis" title={rm.component}>{rm.component}</code><button className="ghost small" onClick={() => f.set("jazz.rm.component", "")}>Clear</button></div>
+      </Row>}
       <Row label="Projects" hint="Limit to these requirements projects (blank = all you can see).">
         <div className="col gap-s">
           <div className="row gap wrap">

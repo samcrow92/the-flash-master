@@ -81,6 +81,54 @@ export function parseProjects(rdf: string): RmProject[] {
   return [...out.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
+/**
+ * Accepts the server root or any DOORS Next link copied from the browser, e.g.
+ *   https://alm.example.com/rm1/web#action=…&componentURI=https%3A%2F%2F…%2Frm1%2Fcm%2Fcomponent%2F_abc&oslc_config.context=…
+ * and returns the context root plus the scope found in the link.
+ */
+export function parseRmLink(input: string): { base: string; componentUri: string; projectId: string; config: string } {
+  const raw = input.trim();
+  if (!raw) return { base: "", componentUri: "", projectId: "", config: "" };
+  let u: URL;
+  try { u = new URL(raw); } catch { return { base: raw.replace(/[#?].*$/, "").replace(/\/+$/, ""), componentUri: "", projectId: "", config: "" }; }
+  const params = new URLSearchParams([u.search.slice(1), u.hash.replace(/^#/, "")].filter(Boolean).join("&"));
+  const get = (...k: string[]) => { for (const x of k) { const v = params.get(x); if (v) return v; } return ""; };
+  const root = u.pathname.split("/").filter(Boolean)[0] ?? "";
+  const componentUri = get("componentURI", "componentUri");
+  const project = get("projectURI", "projectUri", "projectAreaURI");
+  return {
+    base: `${u.origin}${root ? `/${root}` : ""}`,
+    componentUri,
+    projectId: /(_[\w-]+)\/?$/.exec(project)?.[1] ?? project,
+    config: get("oslc_config.context", "vvc.configuration", "configURI"),
+  };
+}
+
+/** Jazz process API fallback: <jp:project-area jp:name="…" jp:url="…/process/project-areas/_id"> */
+export function parseProjectAreas(xml: string): RmProject[] {
+  const out = new Map<string, RmProject>();
+  for (const m of xml.matchAll(/<(?:[\w.-]+:)?project-area\b([^>]*)>/g)) {
+    const name = /(?:[\w.-]+:)?name="([^"]+)"/.exec(m[1]!)?.[1];
+    const id = /project-areas\/(_[^"/]+)/.exec(m[1]!)?.[1] ?? /(?:[\w.-]+:)?itemId="(_[^"]+)"/.exec(m[1]!)?.[1];
+    if (name && id) out.set(id, { id, title: decode(name) });
+  }
+  return [...out.values()].sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/** Component (OSLC config) → project area, title and its configurations container. */
+export function parseComponent(rdf: string): { title: string; projectId: string; configurations: string } {
+  return {
+    title: htmlToText(el(rdf, "title")),
+    projectId: /project-areas\/(_[^"/<]+)/.exec(rdf)?.[1] ?? /oslc_rm\/(_[^/"]+)\/services/.exec(rdf)?.[1] ?? "",
+    configurations: /<(?:[\w.-]+:)?configurations\b[^>]*resource="([^"]+)"/.exec(rdf)?.[1] ?? "",
+  };
+}
+/** First stream in a configurations container (members or ldp:contains). */
+export function pickStream(rdf: string): string {
+  const all = [...rdf.matchAll(/resource="([^"]+\/cm\/stream\/[^"]+)"/g)].map((m) => m[1]!);
+  return all[0] ?? "";
+}
+
 // ------------------------------------------------------------------ search
 
 const STOP = new Set("a an and are as at be by can do for from has have if in into is it its not of on or shall should that the then this to was when which will with within without must may".split(" "));
@@ -127,8 +175,29 @@ export class Requirements {
   private modulesByProject = new Map<string, RmModule[]>();
   private mem = new Map<string, RmModuleData>();
 
-  constructor(private api: () => RmFetcher | null, private cacheDir: string, private config: () => string) {
+  private scope: { key: string; title: string; projectId: string; stream: string } | null = null;
+
+  constructor(private api: () => RmFetcher | null, private cacheDir: string, private userConfig: () => string,
+    private component: () => string = () => "") {
     mkdirSync(cacheDir, { recursive: true });
+  }
+
+  /** Configuration used for reads: the one set by the user, else the default stream of the configured component. */
+  private config(): string {
+    return this.userConfig().trim() || (this.scope?.key === this.component() ? this.scope.stream : "");
+  }
+
+  /** Resolve the component from the link (title, project area, default stream) once. */
+  async resolveComponent(): Promise<{ title: string; projectId: string; stream: string } | null> {
+    const c = this.component().trim();
+    if (!c) return null;
+    if (this.scope?.key === c) return this.scope;
+    const api = this.need();
+    const info = parseComponent(await api.getText(c, "application/rdf+xml", true));
+    let stream = "";
+    if (info.configurations) stream = pickStream(await api.getText(info.configurations, "application/rdf+xml", true).catch(() => ""));
+    this.scope = { key: c, title: info.title, projectId: info.projectId, stream };
+    return this.scope;
   }
 
   private need(): RmFetcher {
@@ -142,16 +211,32 @@ export class Requirements {
   }
 
   async test(): Promise<{ ok: boolean; detail: string }> {
-    try { const p = await this.projects(); return { ok: true, detail: `Connected — ${p.length} requirements project${p.length === 1 ? "" : "s"} visible` }; }
-    catch (e: any) { return { ok: false, detail: String(e?.message ?? e) }; }
+    try {
+      const comp = await this.resolveComponent().catch((e) => { throw new Error(`Component link not readable: ${String(e?.message ?? e)}`); });
+      const p = await this.projects();
+      if (!p.length) return { ok: false, detail: "Reached the server but found no requirements projects — check that the URL is the DOORS Next root (e.g. https://alm.company.com/rm) and that you have access." };
+      return { ok: true, detail: `Connected — ${p.length} requirements project${p.length === 1 ? "" : "s"} visible${comp ? ` · component “${comp.title || "?"}”${comp.stream ? " (default stream)" : " — no stream found, set Configuration"}` : ""}` };
+    } catch (e: any) { return { ok: false, detail: String(e?.message ?? e) }; }
   }
 
   async projects(): Promise<RmProject[]> {
-    return parseProjects(await this.need().getText("/oslc_rm/catalog", "application/rdf+xml", true));
+    const api = this.need();
+    const body = await api.getText("/oslc_rm/catalog", "application/rdf+xml", true);
+    if (/<html[\s>]/i.test(body) && !/ServiceProvider/i.test(body)) throw new Error("The requirements URL returned a web page, not the API — use the DOORS Next root, e.g. https://alm.company.com/rm (any DOORS Next link also works; it is shortened automatically)");
+    let list = parseProjects(body);
+    if (!list.length) list = parseProjectAreas(await api.getText("/process/project-areas", "application/xml").catch(() => ""));
+    const comp = await this.resolveComponent().catch(() => null);
+    if (comp?.projectId) {
+      const own = list.find((p) => p.id === comp.projectId);
+      // Scoped by a component link: show that project first (and only it, if the catalog did not list it).
+      list = own ? [own, ...list.filter((p) => p !== own)] : [{ id: comp.projectId, title: comp.title || comp.projectId }, ...list];
+    }
+    return list;
   }
 
   async modules(projectId: string, refresh = false): Promise<RmModule[]> {
     if (!refresh && this.modulesByProject.has(projectId)) return this.modulesByProject.get(projectId)!;
+    await this.resolveComponent().catch(() => null);
     const xml = await this.need().getText(`/publish/modules?projectURI=${encodeURIComponent(projectId)}${this.cfgParam()}`, "application/xml");
     const mods = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && (/module/i.test(a.format) || /module/i.test(a.type) || a.format === ""))
       .map((a) => ({ uri: a.uri, uuid: uuidOf(a.uri), identifier: a.id, title: a.title || a.text.slice(0, 80), projectId, modified: undefined }));
@@ -162,6 +247,7 @@ export class Requirements {
 
   /** Module content in document order, cached on disk (refresh = fetch again). */
   async module(ref: string, refresh = false, maxAgeH = 24): Promise<RmModuleData> {
+    await this.resolveComponent().catch(() => null);
     const known = this.findModule(ref);
     const cached = known ? this.cached(known.uuid) : this.cachedByRef(ref);
     if (!refresh && cached && Date.now() - cached.fetchedAt < maxAgeH * 3600000 && cached.config === this.config()) return cached;

@@ -29,7 +29,7 @@ export interface JazzConfig {
 const BASIC_FIELDS = "(id|summary|description|state/name|type/name|owner/name|projectArea/name)";
 const CLOSED_STATE = /resolv|clos|done|verif|invalid|reject|duplicat|obsolet|cancel|complet|finish|fixed|works ?as ?designed/i;
 /** Query shapes tried in order when a server rejects one (fields or filters unsupported by that EWM version). */
-type QueryLevel = 0 | 1 | 2 | 3;
+type QueryLevel = 0 | 1 | 2 | 3 | 4;
 
 export class JazzQueryError extends Error {
   constructor(readonly status: number, readonly serverMessage: string) {
@@ -48,7 +48,8 @@ export class JazzClient {
   private level: QueryLevel = 0; // first query shape this server accepted
 
   constructor(private cfg: JazzConfig, private fetchImpl: FetchLike) {
-    this.cfg.serverUrl = cfg.serverUrl.replace(/\/+$/, "");
+    // Tolerate links copied from the browser (…/ccm/web#action=…): keep the context root only.
+    this.cfg.serverUrl = cfg.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "");
   }
 
   async test(): Promise<{ ok: boolean; detail: string }> {
@@ -56,7 +57,15 @@ export class JazzClient {
       const r = await this.send("GET", "/rpt/repository/workitem?size=1&fields=workitem/workItem/(id)", undefined, { Accept: "text/xml" });
       if (!r.ok) return { ok: false, detail: `HTTP ${r.status}` };
       const user = await this.whoAmI().catch(() => null);
-      return { ok: true, detail: `Connected${user ? ` as ${user}` : ""}${this.basicFallback ? " (server asked for Basic authentication — switch Authentication to Basic)" : ""}` };
+      // Also run a real list query, so "Connected" means searches work too.
+      let search = "";
+      try {
+        const items = await this.search({ state: "all", max: 3 });
+        search = ` · search works (${items.length ? `${items.length} item${items.length === 1 ? "" : "s"} found` : "no items in the selected project areas"}${this.level > 0 ? `, simplified query form ${this.level}` : ""})`;
+      } catch (e: any) {
+        return { ok: false, detail: `Signed in${user ? ` as ${user}` : ""}, but work item search fails: ${String(e?.message ?? e)}` };
+      }
+      return { ok: true, detail: `Connected${user ? ` as ${user}` : ""}${search}${this.basicFallback ? " (server asked for Basic authentication — switch Authentication to Basic)" : ""}` };
     } catch (e: any) {
       return { ok: false, detail: String(e?.message ?? e) };
     }
@@ -132,7 +141,7 @@ export class JazzClient {
     const areaCond = q.areas.length ? `(${q.areas.map((a) => `projectArea/name='${esc(a)}'`).join(" or ")})` : "";
     const serverConds = [
       areaCond,
-      q.state !== "all" ? `state/group='${q.state}'` : "",
+      q.state === "open" ? "(state/group='open' or state/group='inprogress')" : q.state === "closed" ? "state/group='closed'" : "",
       q.type ? `type/name='${esc(q.type)}'` : "",
       q.owner === "me" && q.me ? `owner/userId='${esc(q.me)}'` : q.owner === "unassigned" ? "owner/userId='unassigned'" : "",
       q.raw ? `(${q.raw})` : "",
@@ -141,15 +150,19 @@ export class JazzClient {
       { level: 0, filter: serverConds.length ? `[${serverConds.join(" and ")}]` : "", fields: LIST_FIELDS, size, local: false },
       { level: 1, filter: serverConds.length ? `[${serverConds.join(" and ")}]` : "", fields: BASIC_FIELDS, size, local: false },
       { level: 2, filter: [areaCond, q.raw ? `(${q.raw})` : ""].filter(Boolean).length ? `[${[areaCond, q.raw ? `(${q.raw})` : ""].filter(Boolean).join(" and ")}]` : "", fields: BASIC_FIELDS, size: Math.min(Math.max(size * 4, 200), 1000), local: true },
-      { level: 3, filter: areaCond ? `[${areaCond}]` : "", fields: BASIC_FIELDS, size: Math.min(Math.max(size * 4, 200), 1000), local: true },
+      { level: 3, filter: areaCond ? `[${areaCond}]` : "", fields: BASIC_FIELDS, size: Math.min(Math.max(size * 4, 200), 500), local: true },
+      // Last resort for servers that reject most attributes or large pages: plain recent items, everything filtered here.
+      { level: 4, filter: "", fields: "(id|summary|state/name|type/name|owner/name|projectArea/name)", size: 100, local: true },
     ];
     let first: JazzQueryError | null = null;
+    let last: JazzQueryError | null = null;
     for (const sh of shapes.filter((x) => x.level >= this.level)) {
       try {
         let items = parseWorkItems(await this.rptXml(sh.filter, sh.fields, sh.size), this.cfg.serverUrl);
         this.level = sh.level;
         if (sh.local) {
           items = items.filter((w) =>
+            (!q.areas.length || !w.projectArea || q.areas.includes(w.projectArea)) &&
             (q.state === "all" || (q.state === "closed") === CLOSED_STATE.test(w.state)) &&
             (!q.type || w.type.toLowerCase() === q.type.toLowerCase()) &&
             (q.owner !== "unassigned" || !w.owner || /unassigned/i.test(w.owner)) &&
@@ -160,9 +173,11 @@ export class JazzClient {
       } catch (e) {
         if (!(e instanceof JazzQueryError) || e.status === 401 || e.status === 403) throw e;
         first ??= e;
+        last = e;
       }
     }
-    throw first ?? new Error("Jazz query failed");
+    throw new Error(`Jazz work item query failed on this server (tried 5 query forms). First error: ${first?.message ?? "?"}${last && last !== first ? ` · Last: ${last.message}` : ""}`,
+      { cause: last ?? first });
   }
 
   /** Back-compat entry used by agents: ids, a raw filter (contains = < >) or words. */
@@ -265,7 +280,7 @@ export class JazzClient {
     if (h["OSLC-Core-Version"] === "none") delete h["OSLC-Core-Version"];
     if (this.cfg.authType === "basic" || this.basicFallback) h.Authorization = "Basic " + Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64");
     if (this.cookies.size && this.cfg.authType !== "browser") h.Cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
-    const r = await this.fetchImpl(this.cfg.serverUrl + path, { method, headers: h, body });
+    const r = await this.fetchImpl(/^https?:\/\//i.test(path) ? path : this.cfg.serverUrl + path, { method, headers: h, body });
     if (this.authed && r.headers.get(AUTH_MSG) === "authrequired") this.authed = false;
     const set = r.headers.getSetCookie?.() ?? (r.headers.get("set-cookie") ? [r.headers.get("set-cookie")!] : []);
     for (const c of set) {

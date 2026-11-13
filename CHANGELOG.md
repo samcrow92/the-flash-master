@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **DOORS Next setup accepts browser links:** paste the root or any DOORS Next link (e.g. a component dashboard).
+  - The app keeps only the context root (`…/rmA1`) and takes the component and configuration from the link.
+  - The component's project and default stream are resolved automatically.
+  - Project discovery falls back to the Jazz process API.
+  - "Test" no longer reports success when the URL points at a web page.
+  - Context roots with suffixes (`ccmA1` → `rmA1`) are derived correctly.
+- **Work item search:** "open" includes in-progress states. There is a fifth, minimal query form for strict servers, a clearer final error, and Jazz URLs copied from the browser are cleaned. **Test** now also runs a real search and says which query form works.
 - **Jazz robustness:**
   - When a server rejects a query (for example HTTP 500 because a reportable field or filter isn't supported by that EWM version), the app retries with fewer fields, then with filters applied locally, and remembers what works.
   - Error messages now include the server's own reason.

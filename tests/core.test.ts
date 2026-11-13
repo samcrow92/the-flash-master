@@ -190,7 +190,7 @@ describe("Jazz client", () => {
       };
     };
     const cfg = { serverUrl: "https://j/ccm", projectAreas: [], authType: "form" as const, username: "u", password: "right" };
-    expect(await new JazzClient(cfg, server("right")).test()).toEqual({ ok: true, detail: "Connected as u" });
+    expect(await new JazzClient(cfg, server("right")).test()).toMatchObject({ ok: true, detail: expect.stringMatching(/^Connected as u · search works/) });
     const bad = await new JazzClient(cfg, server("other")).test();
     expect(bad.ok).toBe(false);
     expect(bad.detail).toMatch(/login failed/);

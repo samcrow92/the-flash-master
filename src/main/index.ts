@@ -15,7 +15,7 @@ import { buildTools } from "./tools";
 import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { parseCopilotUsage } from "./copilot-usage";
-import { Requirements } from "./requirements";
+import { Requirements, parseRmLink } from "./requirements";
 import { SecretStore } from "./secrets";
 import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
@@ -202,7 +202,8 @@ function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
 // ---------------- DOORS Next requirements (same Jazz session/sign-in, /rm context root) ----------------
 const rmUrl = () => {
   const j = settings.get().jazz;
-  return (j.rm.serverUrl || j.serverUrl.replace(/\/(ccm|jts|qm)\/?$/, "/rm")).replace(/\/+$/, "");
+  // Any DOORS Next link works: only the context root is used (e.g. https://alm.company.com/rm1).
+  return parseRmLink(j.rm.serverUrl).base || j.serverUrl.replace(/[#?].*$/, "").replace(/\/(ccm|jts|qm)(\w*)\/?$/i, "/rm$2").replace(/\/+$/, "");
 };
 let rmClient: JazzClient | null = null;
 let rmKey = "";
@@ -216,7 +217,8 @@ const rmApi = (): JazzClient | null => {
   }
   return rmClient;
 };
-const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config);
+const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config,
+  () => settings.get().jazz.rm.component || parseRmLink(settings.get().jazz.rm.serverUrl).componentUri);
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects,

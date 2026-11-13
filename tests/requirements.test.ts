@@ -83,3 +83,43 @@ describe("requirement retrieval", () => {
     expect((await offline.search("debounce"))[0]!.id).toBe("102");
   });
 });
+
+describe("DOORS Next links and scope", () => {
+  const LINK = "https://alm.hella.com/rmA1/web#action=com.ibm.rdm.web.pages.showFoundationProjectDashboard&componentURI=https%3A%2F%2Falm.hella.com%2FrmA1%2Fcm%2Fcomponent%2F_COMP1&oslc_config.context=https%3A%2F%2Falm.hella.com%2FrmA1%2Fcm%2Fstream%2F_S9";
+  it("extracts server root, component and configuration from a browser link", async () => {
+    const { parseRmLink } = await import("../src/main/requirements");
+    expect(parseRmLink(LINK)).toEqual({ base: "https://alm.hella.com/rmA1", componentUri: "https://alm.hella.com/rmA1/cm/component/_COMP1", projectId: "", config: "https://alm.hella.com/rmA1/cm/stream/_S9" });
+    expect(parseRmLink("https://alm.hella.com/rmA1/").base).toBe("https://alm.hella.com/rmA1");
+  });
+
+  it("resolves the component's project and default stream, and uses them for module reads", async () => {
+    const calls: string[] = [];
+    const COMP = `<rdf:RDF><oslc_config:Component rdf:about="x"><dcterms:title>BCM Lighting</dcterms:title>
+      <process:projectArea rdf:resource="https://alm.hella.com/rmA1/process/project-areas/_PA7"/>
+      <oslc_config:configurations rdf:resource="https://alm.hella.com/rmA1/cm/component/_COMP1/configurations"/></oslc_config:Component></rdf:RDF>`;
+    const CONFIGS = `<rdf:RDF><ldp:Container><rdfs:member rdf:resource="https://alm.hella.com/rmA1/cm/baseline/_B1"/><rdfs:member rdf:resource="https://alm.hella.com/rmA1/cm/stream/_S1"/></ldp:Container></rdf:RDF>`;
+    const fetcher: RmFetcher = { getText: async (path) => {
+      calls.push(path);
+      if (path.endsWith("/cm/component/_COMP1")) return COMP;
+      if (path.endsWith("/configurations")) return CONFIGS;
+      if (path.startsWith("/oslc_rm/catalog")) return `<rdf:RDF></rdf:RDF>`;
+      if (path.startsWith("/process/project-areas")) return `<jp:project-areas><jp:project-area jp:name="Body &amp; Lighting" jp:url="https://alm.hella.com/rmA1/process/project-areas/_PA7"/></jp:project-areas>`;
+      if (path.startsWith("/publish/modules")) return MODULES_XML;
+      return MODULE_XML;
+    } };
+    const rm = new Requirements(() => fetcher, mkdtempSync(join(tmpdir(), "rm2-")), () => "", () => "https://alm.hella.com/rmA1/cm/component/_COMP1");
+    const projects = await rm.projects();
+    expect(projects[0]).toEqual({ id: "_PA7", title: "Body & Lighting" });
+    await rm.modules("_PA7");
+    expect(calls.find((c) => c.startsWith("/publish/modules"))).toContain("oslc_config.context=https%3A%2F%2Falm.hella.com%2FrmA1%2Fcm%2Fstream%2F_S1");
+    expect((await rm.test())).toMatchObject({ ok: true });
+    expect((await rm.test()).detail).toContain("BCM Lighting");
+  });
+
+  it("explains a web-page URL instead of reporting success with 0 projects", async () => {
+    const rm = new Requirements(() => ({ getText: async () => "<html><body>DOORS Next</body></html>" }), mkdtempSync(join(tmpdir(), "rm3-")), () => "");
+    const r = await rm.test();
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/web page/);
+  });
+});

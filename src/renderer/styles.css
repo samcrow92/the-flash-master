@@ -680,3 +680,4 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .steer-badge.dl-delivered .dl-state { color: var(--blue); }
 .steer-badge.dl-seen { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
 .steer-badge.dl-seen .dl-state { color: var(--green); font-weight: 600; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; max-width: 100%; }
