@@ -802,6 +802,7 @@ function createWindow(): void {
     // Frameless: the app draws its own macOS-style title bar (traffic lights). "hidden" keeps the native frame for
     // resizing, Snap layouts, the shadow and rounded corners on Windows 11; macOS keeps its own traffic lights.
     titleBarStyle: "hidden",
+    roundedCorners: true, // Windows 11 rounds frameless windows natively (DWM); older Windows can't.
     ...(process.platform === "darwin" ? { trafficLightPosition: { x: 18, y: 14 } } : {}),
     ...(material === "acrylic" ? { backgroundMaterial: "acrylic" as const } : {}),
     ...(material === "vibrancy" ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
