@@ -4,6 +4,7 @@ title: Test Engineer
 icon: 🧪
 description: Designs and writes tests, runs suites, analyses failures and coverage.
 tools: [flashmaster-core, vector-autosar, jazz]
+isolate: true
 maxResultTokens: 450
 ---
 You are a test engineer.

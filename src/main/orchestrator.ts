@@ -15,6 +15,7 @@ import { diffLines } from "@shared/diff";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
+import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeState, type Git, type WorkResult } from "./worktree";
 import { prepareInstructions } from "./harness/instructions";
 import { slugRole, type AgentSpec } from "./roles";
 import {
@@ -23,6 +24,8 @@ import {
 } from "./context";
 
 export interface OrchestratorDeps {
+  /** Git runner for agent worktrees (tests inject a fake). */
+  git?: Git;
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
   harnessEnv?: (harness: HarnessId) => Record<string, string>;
   /** Extra environment per role (e.g. FLASH_EXAM_CLI for agents that call bundled tools from a shell). */
@@ -77,6 +80,9 @@ interface Live {
   /** TheFlashMaster's tools weren't confirmed loaded (Pi, MCP blocked…): the agent may call them as TOOL lines. */
   textTools?: boolean;
   depth: number;
+  /** Isolated git worktree the agent works in (null = the project folder); undefined = not decided yet. */
+  worktree?: string | null;
+  branch?: string | null;
   /** Last time the harness sent anything (text, tool update, plan…) during a turn; drives the stuck-agent watchdog. */
   lastOutputAt?: number;
   /** The watchdog already warned about this silence (cleared when output resumes). */
@@ -297,6 +303,66 @@ export class Orchestrator {
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true, lastActivity: "Stopped" }));
   }
 
+  // ------------------------------------------------------------------ worktrees
+
+  private get git(): Git { return this.d.git ?? defaultGit; }
+
+  /** A delegated code-writing specialist in a git project gets its own worktree and branch; anyone else works in the project folder. */
+  private async prepareWorktree(l: Live, projectPath: string | null, chatId: string, threadRoot: string | null): Promise<void> {
+    l.worktree = null;
+    if (!projectPath || l.depth === 0 || !l.role.isolate || !this.d.settings().agents.isolateWriters) return;
+    if (!(await canIsolate(projectPath, this.git))) return;
+    const short = l.agentId.slice(0, 8);
+    const branch = `flash/${l.role.name}-${short}`;
+    const dir = join(this.d.dataDir ?? this.d.homeDir, "worktrees", short);
+    const r = await createWorktree(projectPath, dir, branch, this.git);
+    if (!r.ok) {
+      this.system(chatId, threadRoot, `⚠️ Couldn't give ${l.role.title} its own copy of the project (${r.message.split("\n")[0]}); it works in the project folder.`, "warn");
+      return;
+    }
+    l.worktree = dir;
+    l.branch = branch;
+    this.emitAgent(this.d.db.setAgentWorktree(l.agentId, dir, branch));
+    this.flow(l.agentId, { kind: "status", label: `working on branch ${branch}`, status: "isolated" });
+    this.system(chatId, threadRoot, `🌿 **${l.role.icon} ${l.role.title}** works in its own copy of the project on branch \`${branch}\`, `
+      + "so parallel agents don't overwrite each other. Merge or discard it from the Agents page when it's done.");
+  }
+
+  private agentWork(agentId: string): { repo: string; dir: string; branch: string } {
+    const a = this.d.db.getAgent(agentId);
+    if (!a?.worktree || !a.branch) throw new Error("this agent has no separate copy of the project");
+    const p = a.projectId ? this.d.db.getProject(a.projectId) : null;
+    if (!p) throw new Error("the agent's project was removed");
+    if (this.byAgent.get(agentId)?.busy) throw new Error("the agent is still working; wait for it to finish or stop it first");
+    return { repo: p.path, dir: a.worktree, branch: a.branch };
+  }
+
+  async workState(agentId: string) {
+    const w = this.agentWork(agentId);
+    return { ...(await worktreeState(w.repo, w.dir, w.branch, this.git)), branch: w.branch, dir: w.dir };
+  }
+
+  /** Merge an agent's branch into the project's current branch (user action). */
+  async mergeWork(agentId: string): Promise<WorkResult> {
+    const w = this.agentWork(agentId);
+    const r = await mergeWorktree(w.repo, w.dir, w.branch, this.git);
+    this.flow(agentId, { kind: "status", label: r.message.slice(0, 160), status: r.ok ? "merged" : "merge refused" });
+    return r;
+  }
+
+  /** Remove an agent's worktree and branch. Refuses while it holds unmerged or uncommitted work, unless `force` (user confirmed). */
+  async discardWork(agentId: string, force = false): Promise<WorkResult> {
+    const w = this.agentWork(agentId);
+    const r = await removeWorktree(w.repo, w.dir, w.branch, force, this.git);
+    if (r.ok) {
+      const l = this.byAgent.get(agentId);
+      if (l) { l.session?.close(); l.session = null; l.worktree = undefined; l.branch = null; }
+      this.emitAgent(this.d.db.setAgentWorktree(agentId, null, null));
+    }
+    this.flow(agentId, { kind: "status", label: r.message.slice(0, 160), status: r.ok ? "copy removed" : "kept" });
+    return r;
+  }
+
   /**
    * Stuck-agent watchdog, called every 30 s by the app. A working agent that has sent nothing for
    * `agents.stuckAfterMinutes` gets one warning in its chat, its progress flow and a notice; it keeps running, and
@@ -363,7 +429,8 @@ export class Orchestrator {
     }
     const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
     const l: Live = { key, agentId, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
-      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [] };
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
+      worktree: a.worktree, branch: a.branch };
     this.live.set(key, l);
     this.byAgent.set(agentId, l);
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "idle", ended: false, lastActivity: "Resuming after the app restarted" }));
@@ -550,7 +617,9 @@ export class Orchestrator {
         this.d.emit({ type: "message.delta", messageId: reply.id, chatId: t.chat.id, delta });
         if (Date.now() - lastFlush > 500) { lastFlush = Date.now(); this.d.db.updateMessage(reply.id, { content: text }); }
       };
-      if (firstTurn) live.session = await this.openSession(live, project?.path ?? null, t.chat);
+      if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
+      const workDir = live.worktree ?? project?.path ?? null;
+      if (firstTurn) live.session = await this.openSession(live, workDir, t.chat);
       // Coordinator: Pi has no MCP, so text mode right away; other harnesses get a few seconds to list the tools,
       // and are checked again after the first reply (some list them only when the first prompt arrives).
       let toolsPending = false;
@@ -590,9 +659,10 @@ export class Orchestrator {
       }
       // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
       const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
-      promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
+      promptText = buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
         brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
-        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : "", firstTurn && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
+          firstTurn && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : "", firstTurn && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       this.setStatus(live, "running", "Thinking…");
       // Autopilot is read per turn, so toggling it applies to the very next message.
       const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
@@ -638,7 +708,7 @@ export class Orchestrator {
       const final = this.d.db.updateMessage(reply.id, { content: text || (status === "paused" ? "_(paused)_" : "_(no output)_"),
         status: res.stopReason === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
       this.d.emit({ type: "message.updated", message: final });
-      const compact = resultForParent(text, t.role.maxResultTokens);
+      const compact = resultForParent(text, t.role.maxResultTokens) + (live.branch ? `\nbranch: ${live.branch} (isolated copy; the user merges it)` : "");
       live.lastResult = compact;
       const resultLine = /summary:\s*(.+)/.exec(compact)?.[1] ?? compact.replace(/\s+/g, " ");
       // What the agent itself says about how it ended (status line of its <result> block).

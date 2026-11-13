@@ -25,6 +25,10 @@ description: Describe what this agent does and when to use it.
 # Your own servers from Settings → MCP servers can be listed by their id too.
 tools: [flashmaster-core]
 
+# Optional: set to true if this agent changes code. When it is delegated in a git project it then works in its own
+# worktree and branch, so agents running in parallel don't overwrite each other (Settings → Agents).
+# isolate: true
+
 # Upper bound for the summary this agent returns to whoever delegated to it (token efficiency).
 maxResultTokens: 400
 

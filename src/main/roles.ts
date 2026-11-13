@@ -35,6 +35,7 @@ export function parseRole(src: string, fallbackName: string, source: RoleDef["so
     skills: arr(meta.skills),
     prompt: body,
     source,
+    ...(str(meta.isolate) === "true" ? { isolate: true } : {}),
   };
 }
 
