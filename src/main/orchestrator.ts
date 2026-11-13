@@ -10,6 +10,7 @@ import type { Settings } from "@shared/settings";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
+import { prepareInstructions } from "./harness/instructions";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   resultForParent,
@@ -27,6 +28,7 @@ export interface OrchestratorDeps {
   /** MCP servers for a role's session (flashmaster-core is always included). */
   mcpServersFor: (role: RoleDef, agentId: string) => McpServerSpec[];
   homeDir: string;
+  dataDir?: string;
 }
 
 interface Live {
@@ -256,7 +258,7 @@ export class Orchestrator {
       // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
       const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
       promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
-        brief: t.brief, firstTurn });
+        brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean", houseRules: s.agents.houseRules });
       this.setStatus(live, "running", "Thinking…");
       const res = await live.session!.prompt(promptText);
       this.d.db.updateMessage(reply.id, { content: text });
@@ -319,13 +321,15 @@ export class Orchestrator {
     const model = live.model ?? (chat.harness === live.harness && chat.model ? chat.model : (override?.model ?? live.role.model ?? hs?.defaultModel ?? "") || null);
     const status = this.d.harnesses.cached(live.harness);
     this.setStatus(live, "running", `Starting ${adapter.label}…`);
+    const ins = prepareInstructions(live.harness, { mode: s.agents.instructionMode, keepProject: s.agents.keepProjectInstructions,
+      dataDir: this.d.dataDir ?? this.d.homeDir });
     const session = await adapter.start({
       cwd: projectPath ?? this.d.homeDir,
       model,
-      extraArgs: hs?.args ?? "",
+      extraArgs: [ins.args.join(" "), hs?.args ?? ""].filter(Boolean).join(" "),
       executable: status?.path ?? (hs?.path || null),
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
-      env: networkEnv(s),
+      env: { ...networkEnv(s), ...ins.env },
       resumeSessionId: this.d.db.getAgentSession(live.agentId),
       policy: {
         approval: s.permissions.approval, readOnly: s.permissions.readOnly, projectRoot: projectPath,

@@ -69,6 +69,8 @@ export interface PromptParts {
   input: string;
   brief?: string | null; // for delegated agents
   firstTurn: boolean;
+  clean?: boolean;
+  houseRules?: string;
 }
 
 /**
@@ -79,7 +81,7 @@ export interface PromptParts {
 export function buildTurnPrompt(p: PromptParts): string {
   const out: string[] = [];
   if (p.firstTurn) {
-    out.push(rolePrefix(p.role, p.projectPath));
+    out.push(rolePrefix(p.role, p.projectPath, { clean: p.clean, houseRules: p.houseRules }));
     if (p.brief) out.push(`## Brief\n${p.brief}`);
     if (p.summary) out.push(`## Conversation so far (summary)\n${p.summary}`);
     if (p.recent.length) {
@@ -92,15 +94,17 @@ export function buildTurnPrompt(p: PromptParts): string {
 }
 
 /** Byte-stable prefix: never put timestamps or counters here, so provider prompt caches stay warm. */
-export function rolePrefix(role: RoleDef, projectPath: string | null): string {
+export function rolePrefix(role: RoleDef, projectPath: string | null, o: { clean?: boolean; houseRules?: string } = {}): string {
   return [
     `# Role: ${role.title}`,
+    o.clean ? "You are running inside TheFlashMaster. These instructions are your complete operating instructions and take precedence over any other instruction files, rules or personas you may have loaded." : "",
     role.prompt.trim(),
+    o.houseRules?.trim() ? `## Team rules\n${o.houseRules.trim()}` : "",
     projectPath ? `Project root: ${projectPath} — work only inside it.` : "No project folder is attached to this chat.",
     "Token discipline: read only what you need (search before reading, read ranges not whole files), never paste large files back, summarise tool output.",
     "Progress: for multi-step work, publish a short step plan with report_progress and update it as steps complete.",
     RESULT_CONTRACT(role.maxResultTokens),
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 export interface CompactionPlan {

@@ -17,6 +17,7 @@ import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
 import type { AgentImportResult, HarnessId, HarnessModels } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { networkEnv } from "./orchestrator";
+import { prepareInstructions } from "./harness/instructions";
 import { makeLogger } from "./log";
 import { runSmoke } from "./smoke";
 
@@ -69,7 +70,7 @@ const mcp = new McpBootstrap({
 
 const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit,
-  mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(),
+  mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
     modelCache.set(h, m);
@@ -230,6 +231,10 @@ const api: FlashApi = {
   getArtifact: async (id) => db.getArtifact(id),
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
+  instructionSetup: async () => {
+    const a = settings.get().agents;
+    return HARNESS_IDS.map((h) => ({ harness: h, ...prepareInstructions(h, { mode: a.instructionMode, keepProject: a.keepProjectInstructions, dataDir }) }));
+  },
   listModels: async (h, refresh) => (refresh || !modelState(h).fetchedAt ? refreshModels(h) : modelState(h)),
   allModels: async () => HARNESS_IDS.map(modelState),
   mcpStatus: async () => mcp.list(),

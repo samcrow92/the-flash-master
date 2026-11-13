@@ -23,6 +23,9 @@ export interface Settings {
     roleOverrides: Record<string, { harness?: HarnessId; model?: string; maxResultTokens?: number }>;
     delegationDepth: number; // how deep sub-agents may delegate further
     autoTaskFromDelegation: boolean; // create a task per delegation
+    instructionMode: "clean" | "harness"; // clean = TheFlashMaster instructions only (harness AGENTS.md/rules/skills off)
+    keepProjectInstructions: boolean; // in clean mode, still load the project's AGENTS.md / instruction files
+    houseRules: string; // extra rules sent to every agent (your workflow/setup)
   };
   tokens: {
     dailyBudget: number; // 0 = unlimited
@@ -97,7 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
     duo: harness(true),
     mock: harness(true),
   },
-  agents: { maxConcurrent: 4, roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true },
+  agents: { maxConcurrent: 4, roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
   tokens: {
     dailyBudget: 0,
     projectBudget: 0,

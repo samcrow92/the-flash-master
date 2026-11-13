@@ -133,6 +133,7 @@ function Agents(f: F) {
     <Row label="Max concurrent agent turns" hint="Further turns queue until a slot is free."><Num f={f} path="agents.maxConcurrent" min={1} /></Row>
     <Row label="Delegation depth" hint="How many levels of specialists may delegate further (1 = only the coordinator delegates)."><Num f={f} path="agents.delegationDepth" min={0} /></Row>
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
+    <InstructionSettings f={f} />
     <div className="row between">
       <h4>Agents</h4>
       <div className="row gap">
@@ -159,6 +160,35 @@ function Agents(f: F) {
         </td>
       </tr>)}</tbody>
     </table>
+  </>;
+}
+
+function InstructionSettings({ f }: { f: F }) {
+  const [setup, setSetup] = useState<Awaited<ReturnType<ReturnType<typeof api>["instructionSetup"]>>>([]);
+  const a = f.s.agents;
+  useEffect(() => { void api().instructionSetup().then(setSetup); }, [a.instructionMode, a.keepProjectInstructions]);
+  return <>
+    <h4>Harness instructions</h4>
+    <p className="muted small">Agent CLIs preload their own instructions (AGENTS.md, CLAUDE.md, custom rules, skills, extensions). In <b>clean</b> mode TheFlashMaster
+      switches those off where the harness allows it, so agents follow only TheFlashMaster's agent definitions and your team rules. Logins and provider settings are not touched.</p>
+    <Row label="Instruction mode">
+      <Choice f={f} path="agents.instructionMode" options={[["clean", "Clean — TheFlashMaster instructions only"], ["harness", "Harness defaults — keep their own instructions"]]} />
+    </Row>
+    <Row label="Keep project AGENTS.md / instruction files" hint="In clean mode, still load the repository's own agent instructions (useful when a repo documents its build/test conventions).">
+      <Bool f={f} path="agents.keepProjectInstructions" />
+    </Row>
+    <Row label="Team rules" hint="Sent to every agent as part of its stable instructions — your workflow, conventions and setup. Keep it short (it is part of every session).">
+      <Area f={f} path="agents.houseRules" rows={6} />
+    </Row>
+    <table className="table">
+      <thead><tr><th>Harness</th><th>Coverage</th><th>What is applied</th></tr></thead>
+      <tbody>{setup.filter((x) => x.harness !== "mock").map((x) => <tr key={x.harness}>
+        <td>{x.harness}</td>
+        <td><span className={`status ${x.coverage === "full" ? "st-done" : x.coverage === "partial" ? "st-paused" : "st-stopped"}`}>{x.coverage === "none" ? "harness defaults" : x.coverage}</span></td>
+        <td className="small">{x.note}{x.args.length > 0 && <div className="muted"><code>{x.args.join(" ")}</code></div>}{Object.keys(x.env).length > 0 && <div className="muted"><code>{Object.keys(x.env).join(", ")}</code></div>}</td>
+      </tr>)}</tbody>
+    </table>
+    <p className="muted small">Changes apply to new agent sessions (stop running agents to restart them with the new setup).</p>
   </>;
 }
 

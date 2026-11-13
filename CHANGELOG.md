@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Clean instruction mode (default):** harness-preloaded instructions, skills and extensions are switched off per harness: Copilot `--no-custom-instructions`; OpenCode clean global-config copy + `OPENCODE_DISABLE_PROJECT_CONFIG` / `OPENCODE_DISABLE_CLAUDE_CODE`; Pi `--no-context-files --no-skills --no-extensions --no-prompt-templates`; Duo partial. Option to keep project AGENTS.md. **Team rules** are sent to every agent. Settings → Agents shows what is applied per harness.
+- **Animations:** the spinning ring is replaced by a soft pulsing halo and a breathing icon; avatars are round.
+
 ## 0.3.0 — 2026-11-13
 - **Pi:** native `pi --mode rpc` adapter. Pi is now found when only `pi` is installed (no `pi-acp` needed). It streams, supports abort, reports usage, resumes sessions, and read-only mode uses Pi's read-only tool set.
 - **Models:** discovered from each harness (ACP `availableModels` or a model config option; Pi `get_available_models`; `opencode models` as a fallback), cached, and suggested in the chat header, Settings → Harnesses and per-agent overrides. The selected model is applied via `session/set_config_option` or `set_model`.

@@ -58,6 +58,7 @@ export interface FlashApi {
   // harnesses / mcp
   detectHarnesses(): Promise<HarnessStatus[]>;
   listModels(harness: HarnessId, refresh?: boolean): Promise<HarnessModels>;
+  instructionSetup(): Promise<{ harness: HarnessId; args: string[]; env: Record<string, string>; coverage: "full" | "partial" | "none"; note: string }[]>;
   allModels(): Promise<HarnessModels[]>;
   mcpStatus(): Promise<McpServerStatus[]>;
   mcpReinstall(): Promise<McpServerStatus[]>;
@@ -81,7 +82,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "deleteChat", "listMessages", "sendMessage", "toggleReaction", "listAgents", "startAgent",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "listModels", "allModels",
+  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
