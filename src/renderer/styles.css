@@ -1008,3 +1008,33 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .main { animation: view-in .32s cubic-bezier(.2, .8, .3, 1); }
 @keyframes view-in { from { opacity: 0; transform: translateY(6px) scale(.995); filter: blur(2px); } }
 .toast { animation: toast-in .45s cubic-bezier(.2, 1.3, .4, 1); }
+
+/* ---------- slim composer controls: drive-mode capsule + round send ---------- */
+.composer-wrap { gap: 6px; }
+.composer2 .send { width: 30px; height: 30px; padding: 0; border-radius: 50%; display: inline-grid; place-items: center; flex: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 3px 10px -4px color-mix(in srgb, var(--accent2) 85%, transparent);
+  transition: transform .2s cubic-bezier(.3, 1.6, .5, 1), opacity .2s, filter .15s; }
+.composer2 .send:disabled { opacity: .35; box-shadow: none; }
+.composer2 .send:hover:not(:disabled) { transform: scale(1.08); }
+.composer2 .send:hover:not(:disabled) svg { transform: translateY(-1px); }
+.composer2 .send:not(:disabled) svg { animation: send-ready .35s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes send-ready { from { transform: translateY(4px) scale(.6); opacity: 0; } }
+.mode-bar { display: flex; align-items: center; gap: 2px; width: fit-content; max-width: 100%; padding: 2px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--line); box-shadow: var(--hi); }
+.mode-btn { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; border: 1px solid transparent;
+  background: transparent; box-shadow: none; min-width: 0; text-align: left; }
+.mode-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 8%, transparent); border-color: transparent; }
+.mode-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; gap: 4px; color: var(--muted); }
+.mode-model { font-size: 10.5px; max-width: 110px; opacity: .8; }
+.mode-btn.on { box-shadow: 0 1px 3px rgba(0, 0, 0, .2), var(--hi); }
+.mode-btn.on .mode-label { color: var(--fg); }
+.mode-btn.mode-local.on { background: color-mix(in srgb, #8b5cf6 30%, var(--knob)); border-color: color-mix(in srgb, #8b5cf6 50%, transparent); }
+.mode-btn.mode-eco.on { background: color-mix(in srgb, var(--green) 28%, var(--knob)); border-color: color-mix(in srgb, var(--green) 50%, transparent); }
+.mode-btn.mode-comfort.on { background: color-mix(in srgb, var(--blue) 28%, var(--knob)); border-color: color-mix(in srgb, var(--blue) 50%, transparent); }
+.mode-btn.mode-sport.on { background: color-mix(in srgb, var(--red) 28%, var(--knob)); border-color: color-mix(in srgb, var(--red) 50%, transparent); }
+.mode-btn.mode-local .mode-label svg { color: #a78bfa; } .mode-btn.mode-eco .mode-label svg { color: var(--green); }
+.mode-btn.mode-comfort .mode-label svg { color: var(--blue); } .mode-btn.mode-sport .mode-label svg { color: var(--red); }
+.mode-btn:disabled .mode-label svg { color: inherit; }
+.mode-gear { width: 24px; height: 24px; padding: 0; border-radius: 50%; display: inline-grid; place-items: center; background: transparent; border: none; box-shadow: none; color: var(--muted); }
+.mode-gear:hover:not(:disabled) { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.composer-wrap.compact .send { width: 28px; height: 28px; }
