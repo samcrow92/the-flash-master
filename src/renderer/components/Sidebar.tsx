@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { Chat, Project } from "@shared/types";
 import { api, toggleTheme, useStore } from "../store";
 import { AgentImportDialog } from "./AgentImport";
@@ -90,13 +90,14 @@ export function Sidebar() {
     ];
   };
 
-  const ChatRow = ({ c }: { c: Chat }) => (
+  // Plain render function (not a component defined in render): a component created here would get a new identity on
+  // every sidebar re-render (agent status, streaming…) and remount — resetting the rename field to the old title.
+  const chatRow = (c: Chat) => (
     renaming === c.id ? (
-      <input className="chat-rename" autoFocus defaultValue={c.title}
-        onBlur={async (e) => { const t = e.target.value.trim(); setRenaming(null); if (t && t !== c.title) await patchChat(c, { title: t }); }}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenaming(null); }} />
+      <RenameInput key={c.id} initial={c.title} onCancel={() => setRenaming(null)}
+        onDone={async (t) => { setRenaming(null); if (t && t !== c.title) await patchChat(c, { title: t }); }} />
     ) : (
-      <div className={`chat-link ${isChat(c.id) ? "active" : ""} ${c.archived ? "archived" : ""}`} role="button" tabIndex={0}
+      <div key={c.id} className={`chat-link ${isChat(c.id) ? "active" : ""} ${c.archived ? "archived" : ""}`} role="button" tabIndex={0}
         onClick={() => st.openChat(c.id)} onDoubleClick={() => setRenaming(c.id)} onContextMenu={(e) => openMenu(e, chatMenu(c))}
         onKeyDown={(e) => { if (e.key === "F2") setRenaming(c.id); if (e.key === "Enter") void st.openChat(c.id); }}>
         {c.pinned && <Pin size={12} className="chat-pin" />}
@@ -108,11 +109,6 @@ export function Sidebar() {
     )
   );
 
-  const NavBtn = ({ active, onClick, icon, label, extra, working }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; extra?: React.ReactNode; working?: boolean }) => (
-    <button className={`nav-btn ${active ? "active" : ""} ${working ? "nav-working" : ""}`} onClick={onClick}>
-      <span className="nav-icon">{icon}</span><span className="nav-label">{label}</span>{extra}
-    </button>
-  );
   const openTasks = Object.values(st.tasks).filter((t) => t.status !== "done").length;
   const light = st.settings?.general.theme === "light" || document.documentElement.dataset.theme === "light";
 
@@ -151,13 +147,13 @@ export function Sidebar() {
                 <button className="icon-btn" title="New chat" onClick={() => newChat(p.id)}><Plus size={15} /></button>
               </div>
               {open[p.id] && <div className="chat-list">
-                {chats.map((c) => <ChatRow key={c.id} c={c} />)}
+                {chats.map((c) => chatRow(c))}
                 {archived.length > 0 && (
                   <button className="archived-toggle" onClick={() => setShowArchived((o) => ({ ...o, [p.id]: !o[p.id] }))}>
                     <Archive size={12} /> {showArchived[p.id] ? "Hide" : "Show"} archived ({archived.length})
                   </button>
                 )}
-                {showArchived[p.id] && archived.map((c) => <ChatRow key={c.id} c={c} />)}
+                {showArchived[p.id] && archived.map((c) => chatRow(c))}
               </div>}
             </div>
           );
@@ -206,5 +202,26 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+/** Sidebar navigation button (top-level component: stable identity across re-renders). */
+function NavBtn({ active, onClick, icon, label, extra, working }: { active: boolean; onClick: () => void; icon: ReactNode; label: string; extra?: ReactNode; working?: boolean }) {
+  return (
+    <button className={`nav-btn ${active ? "active" : ""} ${working ? "nav-working" : ""}`} onClick={onClick}>
+      <span className="nav-icon">{icon}</span><span className="nav-label">{label}</span>{extra}
+    </button>
+  );
+}
+
+/** Inline rename field with its own state, so sidebar updates while typing cannot reset it. */
+function RenameInput({ initial, onDone, onCancel }: { initial: string; onDone: (title: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState(initial);
+  const done = useRef(false);
+  const finish = (save: boolean) => { if (done.current) return; done.current = true; if (save) onDone(value.trim()); else onCancel(); };
+  return (
+    <input className="chat-rename" autoFocus value={value} onChange={(e) => setValue(e.target.value)} onFocus={(e) => e.target.select()}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); }} />
   );
 }

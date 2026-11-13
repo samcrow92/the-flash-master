@@ -158,6 +158,16 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       // Steering delivery states
       await send("Review the CAN matrix for the BCM and list unused signals");
       await sleep(700);
+      // Rename while the agent streams (the sidebar re-renders constantly)
+      await js(`(()=>{const el=document.querySelector('.chat-link.active');el?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));})()`);
+      await sleep(150);
+      await js(`(()=>{const i=document.querySelector('.chat-rename');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(i,'CAN matrix review');i.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await sleep(1500);
+      const typed = await js<string>(`document.querySelector('.chat-rename')?.value ?? "(gone)"`);
+      await js(`document.querySelector('.chat-rename')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))`);
+      await sleep(400);
+      const saved = await js<string>(`document.querySelector('.chat-link.active .chat-title')?.textContent ?? ""`);
+      log("info", `smoke-rename: typed-after-1.5s="${typed}" saved="${saved}"`);
       await send("focus on BCM_Status only");
       await sleep(250);
       await js(`(()=>{const l=document.querySelector('.chat .messages');l.scrollTop=l.scrollHeight})()`);

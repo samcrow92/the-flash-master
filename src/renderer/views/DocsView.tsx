@@ -62,11 +62,7 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
 
 function StatusCard({ check, checking, onCheck, onGo }: { check: Check; checking: boolean; onCheck: () => void; onGo: (p: PageId) => void }) {
   const projects = useStore((s) => s.projects.length);
-  const Row = ({ ok, label, go }: { ok: boolean | null; label: string; go?: PageId }) => (
-    <button className={`status-row ${ok ? "ok" : ok === false ? "todo" : ""}`} onClick={() => go && onGo(go)}>
-      {ok === null ? <Loader2 size={15} className="spin" /> : ok ? <CircleCheck size={15} /> : <CircleAlert size={15} />} {label}
-    </button>
-  );
+  const Row = ({ ok, label, go }: { ok: boolean | null; label: string; go?: PageId }) => <StatusRow ok={ok} label={label} onClick={() => go && onGo(go)} />;
   return (
     <div className="docs-status">
       <div className="muted small">Your setup</div>
@@ -76,6 +72,20 @@ function StatusCard({ check, checking, onCheck, onGo }: { check: Check; checking
       <button className="ghost small" onClick={onCheck} disabled={checking}>{checking ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />} Check again</button>
     </div>
   );
+}
+
+function StatusRow({ ok, label, onClick }: { ok: boolean | null; label: string; onClick: () => void }) {
+  return (
+    <button className={`status-row ${ok ? "ok" : ok === false ? "todo" : ""}`} onClick={onClick}>
+      {ok === null ? <Loader2 size={15} className="spin" /> : ok ? <CircleCheck size={15} /> : <CircleAlert size={15} />} {label}
+    </button>
+  );
+}
+function UseItem({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return <div className="use-item"><span className="use-icon">{icon}</span><div><b>{title}</b><div>{children}</div></div></div>;
+}
+function Faq({ q, children }: { q: string; children: ReactNode }) {
+  return <details className="faq"><summary>{q}</summary><div>{children}</div></details>;
 }
 
 const Step = ({ n, title, children }: { n: number; title: string; children: ReactNode }) => (
@@ -177,9 +187,7 @@ function Login({ check, checking, onCheck }: { check: Check; checking: boolean; 
 }
 
 function Use() {
-  const Item = ({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) => (
-    <div className="use-item"><span className="use-icon">{icon}</span><div><b>{title}</b><div>{children}</div></div></div>
-  );
+  const Item = UseItem;
   return <>
     <h3>Using TheFlashMaster</h3>
     <div className="use-grid">
@@ -209,7 +217,7 @@ function Use() {
 }
 
 function Trouble() {
-  const Q = ({ q, children }: { q: string; children: ReactNode }) => <details className="faq"><summary>{q}</summary><div>{children}</div></details>;
+  const Q = Faq;
   return <>
     <h3>Troubleshooting</h3>
     <Q q="“Copilot CLI not found”">Use <b>Install Copilot CLI → Choose copilot.exe…</b> and select the program in the folder you extracted. If the file was removed by a cleanup, download it again.</Q>

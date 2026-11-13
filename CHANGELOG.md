@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: renaming a chat** no longer snaps back to the old name while typing. The sidebar row was a component defined inside the render function, so every update (agent status, streaming) remounted the rename field. The rename field now keeps its own state, Enter or clicking away saves, and Esc cancels. The same pattern was fixed in the Documentation page, where open troubleshooting items no longer collapse.
 - **Self-update from your repository's releases:**
   - **Source:** set once in `package.json` (`flashmaster.updates.url`): a github.com or GitHub Enterprise repository, or a web folder. Settings and policy can override it.
   - **Releases** carry `latest.json`, written by `scripts/release-manifest.mjs`, now part of `npm run dist:win` and the release workflow.
