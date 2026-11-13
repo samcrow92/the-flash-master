@@ -25,6 +25,8 @@ export interface Settings {
     autopilotDefault: boolean;
     defaultHarness: HarnessId;
     restoreLastChat: boolean;
+    /** Translucent "liquid glass" window: the desktop shows through, blurred (Windows 11 acrylic / macOS vibrancy). Applied at the next start. */
+    windowGlass: boolean;
   };
   /** How you appear in chats. The picture is a small square image stored as a data URL (≤ ~40 KB). */
   profile: { name: string; avatar: string; hue: number };
@@ -155,7 +157,7 @@ export interface Settings {
 const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ enabled, path: "", args: "", defaultModel });
 
 export const DEFAULT_SETTINGS: Settings = {
-  general: { theme: "dark", notifications: true, confirmStop: true, autopilotDefault: true, defaultHarness: "copilot", restoreLastChat: true },
+  general: { theme: "dark", notifications: true, confirmStop: true, autopilotDefault: true, defaultHarness: "copilot", restoreLastChat: true, windowGlass: true },
   profile: { name: "", avatar: "", hue: 210 },
   harnesses: {
     copilot: harness(true),

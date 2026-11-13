@@ -11,7 +11,8 @@ import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, X, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, Zap } from "../components/icons";
+import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
+import { Dots } from "../components/Dots";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -146,7 +147,7 @@ export function ChatView({ chatId }: { chatId: string }) {
 function EmptyChat({ isMaster }: { isMaster: boolean }) {
   return (
     <div className="empty-chat">
-      <div className="logo-big">⚡</div>
+      <div className="logo-big"><Zap size={44} strokeWidth={1.5} /></div>
       <h3>{isMaster ? "Coordinate your agent team" : "Start the conversation"}</h3>
       <p className="muted">
         {isMaster
@@ -225,18 +226,18 @@ export function MessageItem({ m, inThread }: { m: Message; inThread?: boolean })
             </div>
           )}
           {m.status === "streaming" && (
-            <div className="streaming"><span className="working-dots"><i /><i /><i /></span> <span className="muted small shimmer">{agent?.lastActivity ?? "Working…"}</span></div>
+            <div className="streaming"><Dots cycle /> <span className="muted small shimmer">{agent?.lastActivity ?? "Working…"}</span></div>
           )}
         </div>
         <div className="msg-footer">
           {!inThread && m.replyCount > 0 && <ThreadPill root={m} open={threadOpen} onClick={toggleThread} />}
-          {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title="Toggle reaction">{r}</button>)}
+          {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title={`${REACTIONS[r]?.label ?? r} — click to remove`}><ReactionIcon emoji={r} /></button>)}
           <div className="msg-actions">
             <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={14} /></button>
             {!inThread && <button onClick={reply} title="Reply in thread"><CornerUpLeft size={13} /> Reply</button>}
             <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={13} /></button>
           </div>
-          {picker && <div className="emoji-picker">{EMOJIS.map((e) => <button key={e} onClick={() => react(e)}>{e}</button>)}</div>}
+          {picker && <div className="emoji-picker">{EMOJIS.map((e, i) => <button key={e} style={{ animationDelay: `${i * 22}ms` }} title={REACTIONS[e]?.label} onClick={() => react(e)}><ReactionIcon emoji={e} size={17} /></button>)}</div>}
         </div>
         {!inThread && <InlineThread root={m} open={threadOpen} focusReq={focusReq} />}
       </div>
@@ -323,7 +324,7 @@ function ThreadCard({ root }: { root: Message }) {
           </header>
           <div className="it-list">
             {replies === undefined
-              ? <div className="it-loading"><span className="working-dots"><i /><i /><i /></span></div>
+              ? <div className="it-loading"><Dots /></div>
               : replies.length === 0
                 ? <div className="it-empty">Start the thread — replies stay attached to this message.</div>
                 : replies.map((r, i) => (
@@ -362,7 +363,7 @@ export function ThreadPanel({ chatId, rootId, onClose, standalone }: { chatId: s
         </span>
       </header>
       <div className="messages" ref={ref} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
-        {!list ? <div className="it-loading"><span className="working-dots"><i /><i /><i /></span></div> : <>
+        {!list ? <div className="it-loading"><Dots /></div> : <>
           {root && <MessageItem m={root} inThread />}
           <div className="thread-sep">{replies.length ? plural(replies.length) : "No replies yet"}</div>
           {replies.map((m) => <MessageItem key={m.id} m={m} inThread />)}

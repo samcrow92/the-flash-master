@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState } from "@shared/types";
+import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
 
 export const api = () => window.flash.api;
@@ -23,6 +23,8 @@ export interface Toast {
 
 interface State {
   ready: boolean;
+  /** The app window (custom title bar, glass material). */
+  window: WindowState | null;
   view: View;
   projects: Project[];
   chats: Record<string, Chat[]>; // projectId → chats
@@ -107,6 +109,7 @@ const patchThreads = (threads: Record<string, Message[]>, id: string, fn: (m: Me
 
 export const useStore = create<State>((set, get) => ({
   ready: false,
+  window: null,
   view: { kind: "dashboard" },
   projects: [],
   chats: {},
@@ -323,12 +326,25 @@ export const useStore = create<State>((set, get) => ({
       case "plugins.changed":
         void api().listSkills().then((skills) => set({ skills }));
         break;
+      case "window.state":
+        set({ window: e.state });
+        applyWindow(e.state);
+        break;
       case "notice":
         st.toast(e.level, e.text);
         break;
     }
   },
 }));
+
+/** Root attributes the glass styles key off: platform, native material, focus (dims the chrome like macOS), maximised. */
+export function applyWindow(w: WindowState): void {
+  const d = document.documentElement.dataset;
+  d.platform = w.platform;
+  d.material = w.material;
+  d.focused = String(w.focused);
+  d.maximized = String(w.maximized || w.fullscreen);
+}
 
 let currentTheme: "dark" | "light" | "system" = "dark";
 export function applyTheme(theme: "dark" | "light" | "system"): void {

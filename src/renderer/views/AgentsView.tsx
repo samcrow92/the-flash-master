@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot as BotIcon } from "../components/icons";
+import { ArrowUpRight, Bot as BotIcon, Compass, CornerDownRight, Pause, Play, RoleIcon, Square } from "../components/icons";
 import { api, ago, fmtTokens, roleOf, useStore } from "../store";
 
 export function AgentsView() {
@@ -42,8 +42,8 @@ export function AgentsView() {
             {list.map((a) => (
               <tr key={a.id}>
                 <td>
-                  <div className="row gap-s"><span className={`avatar small ${a.status === "running" ? "avatar-working" : ""}`}><span>{roleOf(a.role)?.icon ?? "🤖"}</span></span> <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
-                  {a.parentAgentId && <div className="muted small">↳ delegated by {roleOf(st.agents[a.parentAgentId]?.role)?.title ?? "agent"}</div>}
+                  <div className="row gap-s"><span className={`avatar small ${a.status === "running" ? "avatar-working" : ""}`}><RoleIcon role={a.role} size={24} /></span> <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
+                  {a.parentAgentId && <div className="muted small row gap-s"><CornerDownRight size={12} /> delegated by {roleOf(st.agents[a.parentAgentId]?.role)?.title ?? "agent"}</div>}
                 </td>
                 <td>{pname(a.projectId)}</td>
                 <td>{a.harness}{a.harness === "duo" && <span className="warn-badge" title="GitLab Duo headless mode auto-approves its own tools">!</span>}</td>
@@ -55,11 +55,11 @@ export function AgentsView() {
                 <td title={a.estimated ? "estimated" : "reported"}>{fmtTokens(a.tokensIn + a.tokensOut)}{a.estimated ? "*" : ""}</td>
                 <td>{ago(a.startedAt)}</td>
                 <td className="actions">
-                  {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause">⏸</button>}
-                  {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume">▶</button>}
-                  {["running", "paused", "idle"].includes(a.status) && <button onClick={() => api().stopAgent(a.id)} title="Stop">■</button>}
-                  <button onClick={() => st.setView({ kind: "flow", agentId: a.id })} title="Progress flow chart">🧭</button>
-                  {a.chatId && <button onClick={() => st.openChat(a.chatId!)} title="Open chat">↗</button>}
+                  {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause" className="icon-only"><Pause size={14} /></button>}
+                  {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume" className="icon-only"><Play size={14} /></button>}
+                  {["running", "paused", "idle"].includes(a.status) && <button onClick={() => api().stopAgent(a.id)} title="Stop" className="icon-only"><Square size={13} /></button>}
+                  <button onClick={() => st.setView({ kind: "flow", agentId: a.id })} title="Progress flow chart" className="icon-only"><Compass size={14} /></button>
+                  {a.chatId && <button onClick={() => st.openChat(a.chatId!)} title="Open chat" className="icon-only"><ArrowUpRight size={14} /></button>}
                 </td>
               </tr>
             ))}

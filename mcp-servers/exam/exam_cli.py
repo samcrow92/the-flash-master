@@ -43,4 +43,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # Windows consoles/pipes default to cp1252, which can't print tool texts with "→" etc.: always write UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))

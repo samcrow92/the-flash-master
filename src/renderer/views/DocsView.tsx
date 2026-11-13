@@ -191,7 +191,7 @@ function Use() {
   return <>
     <h3>Using TheFlashMaster</h3>
     <div className="use-grid">
-      <Item icon={<FolderPlus size={18} />} title="Projects & chats">Add a local folder with <b>＋</b> next to Projects. Each project has chats; agents work inside the project folder. <b>Right-click</b> a chat to rename, pin, reset context, copy as Markdown, archive or delete it (double-click or F2 renames too).</Item>
+      <Item icon={<FolderPlus size={18} />} title="Projects & chats">Add a local folder with the <b>folder +</b> button next to Projects. Each project has chats; agents work inside the project folder. <b>Right-click</b> a chat to rename, pin, reset context, copy as Markdown, archive or delete it (double-click or F2 renames too).</Item>
       <Item icon={<Zap size={18} />} title="Master chat">TheFlashMaster coordinates: describe the goal and it delegates to specialists, collects their short results and reports back.</Item>
       <Item icon={<AtSign size={18} />} title="Specialists">Type <code>@reviewer</code>, <code>@tester</code>, <code>@autosar-vector</code>… to route a message, or click a specialist in the sidebar to open a chat with it.</Item>
       <Item icon={<Leaf size={18} />} title="Drive modes">LOCAL / ECO / COMFORT / SPORT under the chat box switch the model profile for the chat. Configure them in Settings → Modes & chat.</Item>
@@ -210,7 +210,7 @@ function Use() {
       <Item icon={<Gauge size={18} />} title="Usage">The bar under the chat box shows your Copilot premium requests; details in Settings → Usage.</Item>
       <Item icon={<Wrench size={18} />} title="Tools (MCP)">Context7, MarkItDown and other tools are installed automatically and given to the agents that need them (Settings → MCP).</Item>
       <Item icon={<Archive size={18} />} title="Archive">Archived chats are hidden; show them from the project’s right-click menu or the “Show archived” link.</Item>
-      <Item icon={<Settings size={18} />} title="Settings">Everything is configurable; settings marked 🔒 are managed by your organisation.</Item>
+      <Item icon={<Settings size={18} />} title="Settings">Everything is configurable; settings marked with a lock are managed by your organisation.</Item>
     </div>
     <p className="muted small">More about Copilot CLI itself: <Ext href={DL.docsUse}>GitHub Docs — Copilot CLI</Ext></p>
   </>;

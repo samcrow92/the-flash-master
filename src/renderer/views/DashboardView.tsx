@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LayoutDashboard as LayoutDashboardIcon } from "../components/icons";
+import { LayoutDashboard as LayoutDashboardIcon, RoleIcon } from "../components/icons";
 import type { UsageSummary } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
 
@@ -48,7 +48,7 @@ export function DashboardView() {
           <div className="grid2">
             <Bars title="Usage per day" rows={u.byDay} />
             <Bars title="By project" rows={u.byProject} />
-            <Bars title="By agent role" rows={u.byRole.map((r) => ({ ...r, label: `${roleOf(r.key)?.icon ?? ""} ${roleOf(r.key)?.title ?? r.label}` }))} />
+            <Bars title="By agent role" rows={u.byRole.map((r) => ({ ...r, label: roleOf(r.key)?.title ?? r.label }))} />
             <Bars title="By harness" rows={u.byHarness} />
           </div>
           <h3>Active agents</h3>
@@ -56,7 +56,7 @@ export function DashboardView() {
             <div className="active-list">
               {active.map((a) => (
                 <button key={a.id} className="active-item" onClick={() => a.chatId && st.openChat(a.chatId)}>
-                  <span>{roleOf(a.role)?.icon} {roleOf(a.role)?.title ?? a.role}</span>
+                  <span className="row gap-s"><RoleIcon role={a.role} size={18} /> {roleOf(a.role)?.title ?? a.role}</span>
                   <span className={`status st-${a.status}`}>{a.status}</span>
                   <span className="muted small activity">{a.lastActivity}</span>
                 </button>

@@ -1,6 +1,6 @@
 import type {
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message,
-  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
+  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
 
@@ -142,6 +142,9 @@ export interface FlashApi {
   /** Show which proxy the app uses for a URL and try to reach it (blank = the Jazz server). */
   proxyTest(url: string): Promise<{ ok: boolean; detail: string; config: string; resolved: string; source: string }>;
   appInfo(): Promise<{ version: string; dataDir: string; platform: string }>;
+  // window (custom title bar)
+  windowState(): Promise<WindowState>;
+  windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
 }
 
 export interface ExamSetupResult {
@@ -161,6 +164,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",
+  "windowState", "windowControl",
 ];
 
 export interface FlashBridge {
