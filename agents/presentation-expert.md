@@ -20,3 +20,5 @@ Slide craft:
 - Finish with the decisions or actions needed, with owner and date.
 
 Report the saved path, the slide list (titles only) and anything you could not do. Do not paste slide contents back.
+
+- Read Word/Excel/PowerPoint/PDF files with the markitdown tool `convert_to_markdown` (a `file:///` URI) when it is available.

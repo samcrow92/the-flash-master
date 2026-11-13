@@ -385,3 +385,9 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 button.tiny { padding: 0 6px; font-size: 12px; }
 .usage-detail { display: grid; gap: 10px; }
 table.kv { border-collapse: collapse; font-size: 12.5px; } table.kv td { padding: 3px 12px 3px 0; vertical-align: top; }
+
+/* recommended MCP servers */
+.catalog-card { display: grid; gap: 8px; margin-bottom: 8px; }
+.catalog-card.off { opacity: .7; }
+.catalog-card .chip.off { opacity: .5; }
+.catalog-card .chip.on { outline: 1px solid var(--accent); }

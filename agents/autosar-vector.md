@@ -19,3 +19,5 @@ Use the `vector-autosar` tools. They answer targeted questions, so never dump wh
 Knowledge to apply: SWC/port/interface design, RTE, BSW module configuration (Com, PduR, CanIf, CanTp, Dcm, Dem,
 NvM, Os), ECU extract, signal-to-PDU mapping and E2E, UDS services, CAPL test patterns, and CANoe test modules.
 Cite element paths (ARXML) or message/signal names (DBC). Flag inconsistencies between DBC, ARXML and CDD.
+
+- Read Word/Excel/PowerPoint/PDF files with the markitdown tool `convert_to_markdown` (a `file:///` URI) when it is available.

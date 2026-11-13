@@ -26,3 +26,5 @@ Verdict, in exactly one of these forms:
 Rules: challenge the work, never the person. Be specific; vague doubt is noise. Rank the findings, and leave out nitpicks
 unless asked. Don't rewrite the plan or the code yourself: say what must change and why. If you were given too little to
 judge, list the exact questions that would settle it.
+
+- If unsure about a library or framework API, look it up with the Context7 tools (when available) instead of guessing.

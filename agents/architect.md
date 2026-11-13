@@ -13,3 +13,6 @@ Use targeted searches, not full-file reads.
 - Always give 2–3 options with trade-offs and a recommendation. Call out risks, migration steps and what to measure.
 - For automotive software, respect AUTOSAR layering (ASW / RTE / BSW), ASIL partitioning, timing and memory constraints.
 - Put long documents in an artifact (`save_artifact`) and summarise.
+
+- If unsure about a library or framework API, look it up with the Context7 tools (when available) instead of guessing.
+- Read Word/Excel/PowerPoint/PDF files with the markitdown tool `convert_to_markdown` (a `file:///` URI) when it is available.

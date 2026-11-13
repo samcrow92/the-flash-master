@@ -82,3 +82,20 @@ If a request returns HTTP 401, TheFlashMaster reads the server's `WWW-Authentica
 ## Copilot usage meter
 
 `usage.copilotMeter`, `usage.refreshMinutes` and `usage.onlyIfAdvertised` can be preset or locked. With `onlyIfAdvertised: true` (the default), `/usage` is sent only when Copilot CLI lists it as a built-in command, so no premium request is spent.
+
+## Recommended MCP servers
+
+`mcp.catalog` presets or locks the recommended servers, for example:
+
+```json
+"mcp": {
+  "npmRegistry": "https://artifactory.corp.example/api/npm/npm-remote/",
+  "pipIndexUrl": "https://artifactory.corp.example/api/pypi/pypi-remote/simple",
+  "catalog": {
+    "context7": { "enabled": true, "roles": "*", "env": "CONTEXT7_API_KEY=ctx7sk_..." },
+    "playwright": { "enabled": false }
+  }
+}
+```
+
+npm packages are installed into `%APPDATA%/TheFlashMaster/mcp/npm/<id>` and run with Electron-as-Node, so Node.js is only needed once, for the download. Context7 and Fetch call the internet through the configured proxy. Disable them if that is not allowed.

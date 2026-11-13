@@ -68,7 +68,10 @@ export interface Settings {
     pythonPath: string; // empty = auto-detect
     pipIndexUrl: string;
     disabled: string[];
-    external: { id: string; label: string; command: string; args: string; env: string }[];
+    npmRegistry: string; // empty = npm default (or your .npmrc); e.g. an internal Artifactory/Nexus mirror
+    /** Recommended servers (Context7, …): per-id overrides of enabled / roles ("*" = all agents) / env lines. */
+    catalog: Record<string, { enabled?: boolean; roles?: string; env?: string }>;
+    external: { id: string; label: string; command: string; args: string; env: string; roles?: string }[];
   };
   jazz: {
     enabled: boolean;
@@ -147,7 +150,7 @@ export const DEFAULT_SETTINGS: Settings = {
     showTokenCounts: true,
   },
   permissions: { approval: "auto-read", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force" },
-  mcp: { autoInstall: true, pythonPath: "", pipIndexUrl: "", disabled: [], external: [] },
+  mcp: { autoInstall: true, pythonPath: "", pipIndexUrl: "", disabled: [], npmRegistry: "", catalog: {}, external: [] },
   jazz: {
     enabled: false,
     serverUrl: "",

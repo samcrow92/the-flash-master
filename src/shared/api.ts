@@ -72,6 +72,8 @@ export interface FlashApi {
   allModels(): Promise<HarnessModels[]>;
   mcpStatus(): Promise<McpServerStatus[]>;
   mcpReinstall(): Promise<McpServerStatus[]>;
+  /** Install (or reinstall) one recommended server now. */
+  mcpInstall(id: string): Promise<McpServerStatus[]>;
 
   // jazz
   jazzQuery(query: string): Promise<JazzWorkItem[]>;
@@ -99,7 +101,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
 

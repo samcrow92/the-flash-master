@@ -61,7 +61,7 @@ reloadRoles();
 
 let win: BrowserWindow | null = null;
 const emit = (e: AppEvent) => {
-  win?.webContents.send("flash:event", e);
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("flash:event", e);
   if (e.type === "notice" && e.level !== "info" && settings.get().general.notifications && !win?.isFocused() && Notification.isSupported()) {
     new Notification({ title: "TheFlashMaster", body: e.text }).show();
   }
@@ -433,6 +433,7 @@ const api: FlashApi = {
   allModels: async () => HARNESS_IDS.map(modelState),
   mcpStatus: async () => mcp.list(),
   mcpReinstall: async () => mcp.ensure(true),
+  mcpInstall: async (id) => { await mcp.ensureCatalog(true, id); return mcp.list(); },
   jazzQuery: async (q) => needJazz().query(q),
   jazzGet: async (id) => needJazz().get(id),
   jazzSearch: async (q) => needJazz().search(q),

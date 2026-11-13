@@ -21,12 +21,12 @@ export function killTree(child: ChildProcess): void {
   }
 }
 
-export function runCapture(command: string, args: string[], timeoutMs = 8000, cwd?: string): Promise<{ code: number | null; out: string }> {
+export function runCapture(command: string, args: string[], timeoutMs = 8000, cwd?: string, env?: Record<string, string>): Promise<{ code: number | null; out: string }> {
   return new Promise((resolve) => {
     let out = "";
     let child: ChildProcess;
     try {
-      child = spawnTool(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd });
+      child = spawnTool(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd, ...(env ? { env: { ...process.env, ...env } } : {}) });
     } catch (e) {
       resolve({ code: -1, out: String(e) });
       return;

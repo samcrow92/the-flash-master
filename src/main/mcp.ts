@@ -2,10 +2,11 @@
  * McpBootstrap — makes sure the custom tool servers exist at startup and builds the per-session MCP list.
  *  - bundled-node   : flashmaster-core, jazz (shipped JS, run with Electron-as-Node: no Node install needed)
  *  - bundled-python : vector-autosar, winidea (copied to app data; private venv created and requirements installed once)
+ *  - catalog        : recommended servers (Context7, MarkItDown, …) installed once into app data, attached per role
  *  - external       : user-defined servers from Settings → MCP
  * Servers are attached per ACP session (session/new mcpServers), so the user's global harness configs stay untouched.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { McpServerStatus, RoleDef } from "@shared/types";
@@ -13,6 +14,7 @@ import type { Settings } from "@shared/settings";
 import type { McpServerSpec } from "./harness/types";
 import { runCapture, splitArgs, which } from "./harness/process";
 import { networkEnv } from "./orchestrator";
+import { MCP_CATALOG, catalogState, roleMatches, type CatalogServer } from "@shared/mcp-catalog";
 
 interface Paths {
   nodeEntry: (name: string) => string; // path of bundled JS server
@@ -37,6 +39,7 @@ export class McpBootstrap {
     this.set({ id: "flashmaster-core", label: "TheFlashMaster core (delegation, tasks, artifacts)", kind: "bundled-node", state: "ready", detail: null });
     this.set({ id: "jazz", label: "IBM Jazz / EWM work items", kind: "bundled-node", state: "ready", detail: null });
     for (const s of PY_SERVERS) this.set({ id: s.id, label: s.label, kind: "bundled-python", state: "missing", detail: "Not installed yet" });
+    for (const c of MCP_CATALOG) this.set({ id: c.id, label: c.label, kind: "catalog", state: this.catalogReady(c) ? "ready" : "missing", detail: this.catalogReady(c) ? null : "Not installed yet" });
   }
 
   setBridge(url: string, token: string): void {
@@ -45,12 +48,19 @@ export class McpBootstrap {
 
   list(): McpServerStatus[] {
     const disabled = new Set(this.settings().mcp.disabled);
+    for (const c of MCP_CATALOG) if (!catalogState(c, this.settings().mcp.catalog).enabled) disabled.add(c.id);
     const ext: McpServerStatus[] = this.settings().mcp.external.map((e) => ({ id: e.id, label: e.label || e.id, kind: "external", state: "ready", detail: e.command }));
     return [...this.status.values(), ...ext].map((s) => (disabled.has(s.id) && s.id !== "flashmaster-core" ? { ...s, state: "disabled" } : s));
   }
 
   /** Called at app start (non-blocking for the UI). */
   async ensure(force = false): Promise<McpServerStatus[]> {
+    await this.ensureBundled(force);
+    await this.ensureCatalog(force);
+    return this.list();
+  }
+
+  private async ensureBundled(force: boolean): Promise<McpServerStatus[]> {
     const s = this.settings();
     if ((!s.mcp.autoInstall || s.network.offline) && !force) {
       for (const p of PY_SERVERS) if (this.isInstalled(p.id)) this.set({ ...this.status.get(p.id)!, state: "ready", detail: null });
@@ -96,11 +106,106 @@ export class McpBootstrap {
     return this.list();
   }
 
+  /** Install the enabled catalog servers that are not installed yet (npm into app data, pip into the private venv). */
+  async ensureCatalog(force = false, only?: string): Promise<void> {
+    const s = this.settings();
+    const offline = (!s.mcp.autoInstall || s.network.offline) && !force;
+    for (const c of MCP_CATALOG) {
+      if (only && c.id !== only) continue;
+      const st = catalogState(c, s.mcp.catalog);
+      if (!st.enabled) continue;
+      if (this.catalogReady(c) && !(force && (only === c.id || !only))) { this.set({ ...this.status.get(c.id)!, state: "ready", detail: null }); continue; }
+      if (offline) { this.set({ ...this.status.get(c.id)!, state: "missing", detail: "Not installed (automatic install is off)" }); continue; }
+      this.set({ ...this.status.get(c.id)!, state: "installing", detail: `Installing ${c.package}…` });
+      try {
+        if (c.runtime === "npm") await this.npmInstall(c);
+        else await this.pipInstall(c);
+        this.set({ ...this.status.get(c.id)!, state: "ready", detail: null });
+      } catch (e: any) {
+        this.set({ ...this.status.get(c.id)!, state: "error", detail: String(e?.message ?? e).slice(0, 400) });
+      }
+    }
+  }
+
+  private npmDir(c: CatalogServer): string {
+    return join(this.p.dataDir, "mcp", "npm", c.id);
+  }
+
+  private async npmInstall(c: CatalogServer): Promise<void> {
+    const s = this.settings();
+    const npm = await which(process.platform === "win32" ? "npm.cmd" : "npm") ?? await which("npm");
+    if (!npm) throw new Error("npm not found — install Node.js LTS (only needed once, to download this server)");
+    const dir = this.npmDir(c);
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `flash-mcp-${c.id}`, private: true }));
+    const env: Record<string, string> = { ...networkEnv(s) };
+    const proxy = s.network.proxy || process.env.https_proxy || process.env.HTTPS_PROXY || "";
+    if (proxy) Object.assign(env, { npm_config_proxy: proxy, npm_config_https_proxy: proxy });
+    if (s.network.caBundlePath) env.npm_config_cafile = s.network.caBundlePath;
+    if (s.mcp.npmRegistry) env.npm_config_registry = s.mcp.npmRegistry;
+    const r = await runCapture(npm, ["install", "--no-audit", "--no-fund", "--omit=dev", "--loglevel=error", c.package], 600000, dir, env);
+    if (r.code !== 0 || !this.npmBin(c)) throw new Error(`npm install failed: ${r.out.trim().slice(-300) || `exit ${r.code}`}`);
+    writeFileSync(join(dir, ".installed"), c.package);
+  }
+
+  /** Absolute path of the package's bin script (resolved from its package.json). */
+  npmBin(c: CatalogServer): string | null {
+    const pkgDir = join(this.npmDir(c), "node_modules", ...c.package.split("/"));
+    try {
+      const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+      const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[c.bin ?? ""] ?? Object.values(pkg.bin ?? {})[0];
+      const file = bin ? join(pkgDir, String(bin)) : null;
+      return file && existsSync(file) ? file : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async pipInstall(c: CatalogServer): Promise<void> {
+    const s = this.settings();
+    const vpy = venvPython(join(this.p.dataDir, "mcp", ".venv"));
+    if (!existsSync(vpy)) {
+      const py = await this.findPython();
+      if (!py) throw new Error("Python 3.10+ not found — set its path in Settings → MCP");
+      mkdirSync(join(this.p.dataDir, "mcp"), { recursive: true });
+      const v = await runCapture(py.cmd, [...py.args, "-m", "venv", join(this.p.dataDir, "mcp", ".venv")], 180000);
+      if (v.code !== 0) throw new Error(`venv failed: ${v.out.slice(-300)}`);
+    }
+    const args = ["-m", "pip", "install", "--disable-pip-version-check", "--upgrade", c.package];
+    if (s.mcp.pipIndexUrl) args.push("--index-url", s.mcp.pipIndexUrl);
+    if (s.network.proxy) args.push("--proxy", s.network.proxy);
+    if (s.network.caBundlePath) args.push("--cert", s.network.caBundlePath);
+    const r = await runCapture(vpy, args, 900000, undefined, networkEnv(s));
+    if (r.code !== 0) throw new Error(`pip failed: ${r.out.trim().slice(-300)}`);
+    mkdirSync(join(this.p.dataDir, "mcp", "pip"), { recursive: true });
+    writeFileSync(join(this.p.dataDir, "mcp", "pip", `${c.id}.installed`), c.package);
+  }
+
+  private catalogReady(c: CatalogServer): boolean {
+    if (c.runtime === "npm") return existsSync(join(this.npmDir(c), ".installed")) && !!this.npmBin(c);
+    return existsSync(join(this.p.dataDir, "mcp", "pip", `${c.id}.installed`)) && existsSync(venvPython(join(this.p.dataDir, "mcp", ".venv")));
+  }
+
+  private catalogSpec(c: CatalogServer, env: string): McpServerSpec | null {
+    const s = this.settings();
+    const base = { ...networkEnv(s), ...parseEnv(env) };
+    if (c.id === "memory") base.MEMORY_FILE_PATH ??= join(this.p.dataDir, "mcp", "memory.jsonl");
+    if (c.runtime === "npm") {
+      const bin = this.npmBin(c);
+      return bin ? { name: c.id, command: this.p.nodeExec, args: [bin, ...(c.args ?? [])], env: { ...this.p.nodeEnv, ...base } } : null;
+    }
+    const vpy = venvPython(join(this.p.dataDir, "mcp", ".venv"));
+    return { name: c.id, command: vpy, args: ["-m", c.module!, ...(c.args ?? [])], env: { PYTHONUTF8: "1", ...base } };
+  }
+
   /** MCP servers to attach for a role: flashmaster-core always, plus the ready servers the role declares. */
   specsFor(role: RoleDef, agentId: string): McpServerSpec[] {
     const s = this.settings();
     const ready = new Set(this.list().filter((x) => x.state === "ready").map((x) => x.id));
     const wanted = new Set(["flashmaster-core", ...role.tools]);
+    for (const c of MCP_CATALOG) if (roleMatches(catalogState(c, s.mcp.catalog).roles, role.name)) wanted.add(c.id);
+    for (const e of s.mcp.external) if (e.roles && roleMatches(e.roles.split(/[\s,]+/).filter(Boolean), role.name)) wanted.add(e.id);
     const out: McpServerSpec[] = [];
     const bridgeEnv = { FLASH_BRIDGE_URL: this.bridge.url, FLASH_BRIDGE_TOKEN: this.bridge.token, FLASH_AGENT_ID: agentId };
     for (const id of wanted) {
@@ -110,6 +215,10 @@ export class McpBootstrap {
       } else if (PY_SERVERS.some((p) => p.id === id)) {
         const root = join(this.p.dataDir, "mcp");
         out.push({ name: id, command: venvPython(join(root, ".venv")), args: [join(root, id, "server.py")], env: { ...networkEnv(s), ...this.pyEnv(id, root) } });
+      } else if (MCP_CATALOG.some((c) => c.id === id)) {
+        const c = MCP_CATALOG.find((x) => x.id === id)!;
+        const spec = this.catalogSpec(c, catalogState(c, s.mcp.catalog).env);
+        if (spec) out.push(spec);
       } else {
         const e = s.mcp.external.find((x) => x.id === id);
         if (e) out.push({ name: id, command: e.command, args: splitArgs(e.args), env: parseEnv(e.env) });

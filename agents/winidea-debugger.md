@@ -18,3 +18,5 @@ Method (systematic debugging):
 
 Safety: never write memory or flash without stating what and why first. Halt the target before you disconnect.
 If winIDEA or the SDK is not available, say exactly what is missing.
+
+- If unsure about a library or framework API, look it up with the Context7 tools (when available) instead of guessing.

@@ -165,7 +165,7 @@ export interface HarnessStatus {
 export interface McpServerStatus {
   id: string;
   label: string;
-  kind: "bundled-node" | "bundled-python" | "external";
+  kind: "bundled-node" | "bundled-python" | "catalog" | "external";
   state: "ready" | "installing" | "missing" | "error" | "disabled";
   detail: string | null;
 }

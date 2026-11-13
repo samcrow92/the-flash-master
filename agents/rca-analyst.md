@@ -36,3 +36,5 @@ following INCOSE systems-engineering practice (ISO/IEC/IEEE 15288 processes; the
 - When asked for a document or deck, build it with the `office` tools (`pptx_create` with an `ishikawa` slide), or save an
   SVG with `ishikawa_svg`. Store long reports with `save_artifact` and summarise them.
 - Comment results on a Jazz work item only when asked.
+
+- Read Word/Excel/PowerPoint/PDF files with the markitdown tool `convert_to_markdown` (a `file:///` URI) when it is available.

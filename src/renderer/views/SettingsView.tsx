@@ -3,6 +3,7 @@ import type { DriveMode, HarnessId, HarnessStatus } from "@shared/types";
 import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { api, useStore } from "../store";
+import { MCP_CATALOG, catalogState, type CatalogServer } from "@shared/mcp-catalog";
 import { AgentImportDialog, reportImports } from "../components/AgentImport";
 import { ModelInput } from "../components/ModelInput";
 
@@ -279,23 +280,80 @@ function Mcp(f: F) {
     <Row label="Install/update automatically at startup"><Bool f={f} path="mcp.autoInstall" /></Row>
     <Row label="Python executable" hint="Needed for the Vector/AUTOSAR and winIDEA servers. Blank = auto-detect (py -3 / python)."><Text f={f} path="mcp.pythonPath" placeholder="auto" /></Row>
     <Row label="pip index URL" hint="Your company's PyPI mirror, if any."><Text f={f} path="mcp.pipIndexUrl" placeholder="https://pypi.org/simple" /></Row>
+    <Row label="npm registry" hint="Your company's npm mirror (Artifactory/Nexus), if any. Blank = your .npmrc / npmjs.org."><Text f={f} path="mcp.npmRegistry" placeholder="https://registry.npmjs.org" /></Row>
+    <h4>Recommended servers</h4>
+    <p className="muted small">Installed once into the app data folder and attached only to the agents listed — every server adds its tool definitions to an agent's context, so keep the lists short. npm servers need Node.js/npm only for the download; Python servers use the app's private Python environment.</p>
+    {MCP_CATALOG.map((c) => <CatalogCard key={c.id} f={f} c={c} />)}
     <div className="row between"><h4>Servers</h4><button disabled={busy} onClick={async () => { setBusy(true); try { await api().mcpReinstall(); } finally { setBusy(false); } }}>{busy ? "Installing…" : "↻ Reinstall / check"}</button></div>
     <table className="table"><thead><tr><th>Server</th><th>Kind</th><th>State</th><th>Enabled</th></tr></thead><tbody>
-      {st.mcp.map((m) => <tr key={m.id}>
+      {st.mcp.filter((m) => m.kind !== "catalog").map((m) => <tr key={m.id}>
         <td><strong>{m.id}</strong><div className="muted small">{m.label}</div>{m.detail && <div className="muted small">{m.detail}</div>}</td>
         <td>{m.kind}</td><td><span className={`status st-${m.state === "ready" ? "done" : m.state === "error" ? "error" : "paused"}`}>{m.state}</span></td>
         <td>{m.id !== "flashmaster-core" && <input type="checkbox" checked={!f.s.mcp.disabled.includes(m.id)}
           onChange={(e) => f.set("mcp.disabled", e.target.checked ? f.s.mcp.disabled.filter((x) => x !== m.id) : [...f.s.mcp.disabled, m.id])} />}</td>
       </tr>)}
     </tbody></table>
-    <div className="row between"><h4>Your MCP servers</h4><button onClick={() => setExt([...ext, { id: `custom-${ext.length + 1}`, label: "", command: "", args: "", env: "" }])}>＋ Add</button></div>
-    <p className="muted small">Add the server id to a role's <code>tools:</code> list (roles folder) to attach it to that role's sessions.</p>
+    <div className="row between"><h4>Your MCP servers</h4><button onClick={() => setExt([...ext, { id: `custom-${ext.length + 1}`, label: "", command: "", args: "", env: "", roles: "" }])}>＋ Add</button></div>
+    <p className="muted small">Attach a server to agents with <b>roles</b> (comma-separated role names, or <code>*</code> for all), or add its id to a role's <code>tools:</code> list.</p>
     {ext.map((e, i) => <div key={i} className="panel grid3">
-      {(["id", "label", "command", "args", "env"] as const).map((k) => <label key={k} className="field"><span>{k}{k === "env" ? " (KEY=VALUE;…)" : ""}</span>
-        <input defaultValue={e[k]} onBlur={(ev) => setExt(ext.map((x, j) => (j === i ? { ...x, [k]: ev.target.value } : x)))} /></label>)}
+      {(["id", "label", "command", "args", "env", "roles"] as const).map((k) => <label key={k} className="field"><span>{k}{k === "env" ? " (KEY=VALUE;…)" : k === "roles" ? " (e.g. reviewer, tester or *)" : ""}</span>
+        <input defaultValue={e[k] ?? ""} onBlur={(ev) => setExt(ext.map((x, j) => (j === i ? { ...x, [k]: ev.target.value } : x)))} /></label>)}
       <button className="danger ghost" onClick={() => setExt(ext.filter((_, j) => j !== i))}>Remove</button>
     </div>)}
   </>;
+}
+
+function CatalogCard({ f, c }: { f: F; c: CatalogServer }) {
+  const st = useStore();
+  const state = catalogState(c, f.s.mcp.catalog);
+  const status = st.mcp.find((m) => m.id === c.id);
+  const [busy, setBusy] = useState(false);
+  const locked = f.locked("mcp.catalog");
+  const patch = (p: { enabled?: boolean; roles?: string; env?: string }) =>
+    f.set("mcp.catalog", { ...f.s.mcp.catalog, [c.id]: { ...(f.s.mcp.catalog[c.id] ?? {}), ...p } });
+  const install = async () => { setBusy(true); try { await api().mcpInstall(c.id); } finally { setBusy(false); } };
+  const toggleRole = (r: string) => {
+    const next = state.roles.includes(r) ? state.roles.filter((x) => x !== r) : [...state.roles.filter((x) => x !== "*"), r];
+    void patch({ roles: next.join(",") });
+  };
+  const all = state.roles.includes("*");
+  const envMap = Object.fromEntries(state.env.split(/\r?\n|;/).map((l) => [l.split("=")[0]!.trim(), l.slice(l.indexOf("=") + 1).trim()]).filter(([k]) => k));
+  const setEnv = (key: string, value: string) => {
+    const m = { ...envMap, [key]: value };
+    void patch({ env: Object.entries(m).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(";") });
+  };
+  const ready = status?.state === "ready";
+  return (
+    <div className={`panel catalog-card ${state.enabled ? "" : "off"}`}>
+      <div className="row between">
+        <div><strong>{c.label}</strong> <a className="small" href={c.homepage} target="_blank" rel="noreferrer">↗</a>
+          <div className="muted small">{c.description}</div></div>
+        <label className="switch"><input type="checkbox" checked={state.enabled} disabled={locked} onChange={async (e) => {
+          await patch({ enabled: e.target.checked });
+          if (e.target.checked && !ready) await install();
+        }} /><span /></label>
+      </div>
+      {state.enabled && <>
+        <div className="row gap wrap small">
+          <span className={`status st-${ready ? "done" : status?.state === "error" ? "error" : "paused"}`}>{busy ? "installing" : status?.state ?? "missing"}</span>
+          <span className="muted">{c.runtime === "npm" ? "npm" : "pip"}: {c.package}</span>
+          {status?.detail && <span className="muted">{status.detail}</span>}
+          <span className="grow" />
+          <button className="ghost small" disabled={busy || locked} onClick={install}>{ready ? "↻ Update" : "Install"}</button>
+        </div>
+        <div className="row gap wrap small">
+          <span className="muted">Agents:</span>
+          <button className={`chip ${all ? "on" : "off"}`} disabled={locked} onClick={() => patch({ roles: all ? c.roles.join(",") : "*" })}>All agents</button>
+          {!all && st.roles.map((r) => <button key={r.name} className={`chip ${state.roles.includes(r.name) ? "on" : "off"}`} disabled={locked} onClick={() => toggleRole(r.name)}>{r.icon} {r.title}</button>)}
+        </div>
+        {c.env?.map((e) => <div key={e.key} className="row gap small">
+          <span className="muted">{e.label}</span>
+          <input className="grow" type={e.secret ? "password" : "text"} defaultValue={envMap[e.key] ?? ""} placeholder={e.key} disabled={locked}
+            onBlur={(ev) => ev.target.value !== (envMap[e.key] ?? "") && setEnv(e.key, ev.target.value.trim())} />
+        </div>)}
+      </>}
+    </div>
+  );
 }
 
 function MarketplaceSettings(f: F) {

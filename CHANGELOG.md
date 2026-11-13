@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Recommended MCP servers** (Settings → MCP), installed automatically and attached per agent role so tool definitions don't bloat every context:
+  - **Context7** (current library docs), **Sequential Thinking** and **MarkItDown** (read Word/Excel/PowerPoint/PDF) are on by default.
+  - **Fetch**, **Git**, **Memory** and **Playwright** are one click away.
+  - npm servers are downloaded once into the app data folder and run with Electron's built-in Node; Python servers go into the private venv.
+  - Corporate npm/PyPI mirrors and the proxy are respected. Each server has a role picker, an optional API key field and Install/Update.
+  - Custom MCP servers can now be attached by role list (`*` = all agents).
 - **Copilot usage meter:** premium-request usage taken only from Copilot CLI's own `/usage` (a short background ACP session), shown as a progress bar under the chat box (green/amber/red, reset date). The bar links to Settings → Usage, which shows the full detail, every line `/usage` printed and the raw output. Refreshes every 30 min (configurable) or manually. By default `/usage` is sent only when Copilot lists it as a built-in command, so a check never spends a premium request.
 - **IBM Jazz:**
   - **HTTP 401 handling:** expired form sessions log in again automatically. The client falls back to Basic once when the server asks for it. For Kerberos/NTLM ("Negotiate") and Jazz Authorization Server tokens you get a message saying exactly what to change.
