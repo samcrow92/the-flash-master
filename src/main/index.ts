@@ -12,7 +12,7 @@ import { HarnessRegistry } from "./harness/registry";
 import { Orchestrator } from "./orchestrator";
 import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
-import { McpBootstrap } from "./mcp";
+import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { parseCopilotUsage } from "./copilot-usage";
 import { Requirements, parseRmLink } from "./requirements";
@@ -85,6 +85,7 @@ const orch = new Orchestrator({
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   extraRules: () => marketplace.instructions(),
   harnessEnv: (h) => harnessEnv(h),
+  toolsLoaded: (agentId) => bridge.toolsListed.has(agentId),
   attachmentRoots: () => attachmentRoots(),
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
@@ -608,6 +609,11 @@ const api: FlashApi = {
   mcpStatus: async () => mcp.list(),
   mcpReinstall: async () => mcp.ensure(true),
   mcpInstall: async (id) => { await mcp.ensureCatalog(true, id); return mcp.list(); },
+  mcpSelfTest: async () => {
+    const role = roles.find((r) => r.name === "flashmaster") ?? roles[0]!;
+    const specs = mcp.specsFor({ ...role, tools: [...new Set([...role.tools, "flashmaster-core", "jazz"])] }, `selftest-${Date.now()}`);
+    return Promise.all(specs.map((sp) => selfTestServer(sp)));
+  },
   jazzQuery: async (q) => needJazz().query(q),
   jazzGet: async (id) => needJazz().get(id),
   jazzSearch: async (q) => needJazz().search(q),

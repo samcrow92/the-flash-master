@@ -334,6 +334,7 @@ function Mcp(f: F) {
     <h4>Recommended servers</h4>
     <p className="muted small">Installed once into the app data folder and attached only to the agents listed — every server adds its tool definitions to an agent's context, so keep the lists short. npm servers need Node.js/npm only for the download; Python servers use the app's private Python environment.</p>
     {MCP_CATALOG.map((c) => <CatalogCard key={c.id} f={f} c={c} />)}
+    <McpSelfTest />
     <div className="row between"><h4>Servers</h4><button disabled={busy} onClick={async () => { setBusy(true); try { await api().mcpReinstall(); } finally { setBusy(false); } }}>{busy ? "Installing…" : "↻ Reinstall / check"}</button></div>
     <table className="table"><thead><tr><th>Server</th><th>Kind</th><th>State</th><th>Enabled</th></tr></thead><tbody>
       {st.mcp.filter((m) => m.kind !== "catalog").map((m) => <tr key={m.id}>
@@ -351,6 +352,22 @@ function Mcp(f: F) {
       <button className="danger ghost" onClick={() => setExt(ext.filter((_, j) => j !== i))}>Remove</button>
     </div>)}
   </>;
+}
+
+function McpSelfTest() {
+  const [res, setRes] = useState<{ name: string; ok: boolean; tools: number; detail: string }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="panel selftest">
+      <div className="row between">
+        <div><strong>Test tool servers</strong><div className="muted small">Starts the servers exactly as Copilot/OpenCode would and lists their tools — use it when agents say their tools are missing.</div></div>
+        <button className="primary" disabled={busy} onClick={async () => { setBusy(true); try { setRes(await api().mcpSelfTest()); } finally { setBusy(false); } }}>{busy ? "Testing…" : "Run test"}</button>
+      </div>
+      {res && <table className="kv"><tbody>{res.map((r) => (
+        <tr key={r.name}><td>{r.ok ? "✅" : "❌"} <b>{r.name}</b></td><td className={r.ok ? "" : "warn-text"}>{r.ok ? `${r.tools} tools` : r.detail}</td></tr>
+      ))}</tbody></table>}
+    </div>
+  );
 }
 
 function CatalogCard({ f, c }: { f: F; c: CatalogServer }) {

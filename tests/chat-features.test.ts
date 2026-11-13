@@ -225,3 +225,27 @@ describe("steering acknowledgement with native steering", () => {
     await orch.stopAll();
   }, 15000);
 });
+
+describe("resilience", () => {
+  it("retries a turn after a transient network error and continues", async () => {
+    const { db, orch, chat } = setup();
+    db.updateChat(chat.id, { harness: "opencode" });
+    await orch.sendUserMessage(chat.id, "NETFAIL please analyse", null, {});
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done" || agentMsgs(db, chat.id)[0]?.status === "error", 12000);
+    const m = agentMsgs(db, chat.id)[0]!;
+    expect(m.status).toBe("done");
+    expect(m.content).toContain("Hello from fake ACP");
+    expect(m.content).not.toContain("UND_ERR_SOCKET");
+    await orch.stopAll();
+  }, 15000);
+
+  it("warns in the chat when the harness did not load the app's tools", async () => {
+    const { db, orch, chat } = setup();
+    (orch as any).d.toolsLoaded = () => false;
+    db.updateChat(chat.id, { harness: "opencode" });
+    await orch.sendUserMessage(chat.id, "delegate this", null, {});
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    await until(() => db.listMessages(chat.id, null).some((x) => x.author === "system" && x.content.includes("did not load")));
+    await orch.stopAll();
+  });
+});

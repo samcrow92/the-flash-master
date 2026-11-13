@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **Delegation reliability (TheFlashMaster → specialists):**
+  - The app's tool servers now get the essential environment (PATH, SystemRoot, TEMP, proxy…) and the bridge settings as arguments, so they work even when a harness starts them with only the variables we pass. On Windows, without SystemRoot a process cannot open sockets.
+  - The forwarder uses `node:http` without the 5-minute `fetch` timeout, so long specialist runs no longer drop.
+  - Long tool calls send MCP progress notifications.
+  - The local bridge has no request timeouts, and transient socket errors are retried.
+- **Network drops are retried:** "Connection error … other side closed (UND_ERR_SOCKET)" and similar transient errors between a harness and its model API are retried twice; the reply continues where it stopped.
+- **Tools-not-loaded warning:** if an agent's harness never reached the app's tools, the chat says so. **Settings → MCP → Test tool servers** starts the servers exactly like a harness and shows what blocks them.
 - **Copy code:** every code block in agent replies has a header with its language and a **Copy** button (shows ✓ Copied). Inline commands like `npm ci` copy on click. HTML in code stays escaped.
 - **Chat header alignment:** Agent, Harness and Model fields and the Progress, Artifacts, Stop and … buttons sit on one line with equal heights, aligned at the top. Wrapped rows stay left-aligned when a side panel is open.
 - **DOORS Next with global configurations and component streams:**

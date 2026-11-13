@@ -6,6 +6,7 @@ const pending = new Map();
 const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n");
 const request = (method, params) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); send({ id, method, params }); });
 let cancelled = false;
+let netFails = 0;
 let model = "gpt-5";
 let thinking = "medium";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -31,6 +32,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       const sid = msg.params.sessionId;
       const text = msg.params.prompt[0].text;
       const upd = (update) => send({ method: "session/update", params: { sessionId: sid, update } });
+      if (text.includes("NETFAIL") && netFails < 1) { netFails++; return send({ id: msg.id, error: { code: -32603, message: "Connection error.: other side closed (UND_ERR_SOCKET)" } }); }
       if (text === "/usage") {
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Usage\n  Premium requests: 123 / 300 (41%)\n  Resets: Dec 1, 2026\n" } });
         return reply({ stopReason: "end_turn" });

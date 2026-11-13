@@ -4,18 +4,47 @@
  * Env: FLASH_BRIDGE_URL, FLASH_BRIDGE_TOKEN, FLASH_AGENT_ID.
  */
 import { createInterface } from "node:readline";
+import { request } from "node:http";
 
-export function createForwarder(set: string, serverName: string, env: { url: string; token: string; agentId: string }) {
+/**
+ * HTTP to the app with node:http rather than fetch: undici's fetch aborts after 5 minutes without response headers,
+ * but a delegation waits for a whole specialist run. GETs are retried on transient socket errors.
+ */
+function httpJson(url: string, token: string, path: string, body?: unknown): Promise<any> {
+  const u = new URL(url + path);
+  const data = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+  return new Promise((resolve, reject) => {
+    const req = request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: data ? "POST" : "GET", agent: false,
+      headers: { "x-flash-token": token, "Content-Type": "application/json", ...(data ? { "Content-Length": data.length } : {}) } }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () => {
+        if ((res.statusCode ?? 0) >= 400) return reject(new Error(`bridge HTTP ${res.statusCode}`));
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch (e) { reject(e); }
+      });
+      res.on("error", reject);
+    });
+    req.setTimeout(0);
+    req.on("error", reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+export function createForwarder(set: string, serverName: string, env: { url: string; token: string; agentId: string },
+  notify?: (msg: unknown) => void) {
   const { url, token, agentId } = env;
 
   async function bridge(path: string, body?: unknown): Promise<any> {
-    const r = await fetch(url + path, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "x-flash-token": token, "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error(`bridge HTTP ${r.status}`);
-    return r.json();
+    if (!url) throw new Error("FLASH_BRIDGE_URL missing — the harness did not pass the environment to this MCP server");
+    for (let attempt = 0; ; attempt++) {
+      try { return await httpJson(url, token, path, body); }
+      catch (e: any) {
+        const transient = /ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|other side closed/i.test(String(e?.code ?? "") + String(e?.message ?? ""));
+        if (!transient || body !== undefined || attempt >= 3) throw new Error(`cannot reach TheFlashMaster (${e?.code ?? e?.message ?? e})`, { cause: e });
+        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+      }
+    }
   }
 
   async function handle(msg: any): Promise<unknown> {
@@ -26,9 +55,17 @@ export function createForwarder(set: string, serverName: string, env: { url: str
       case "ping":
         return {};
       case "tools/list":
-        return { tools: (await bridge(`/tools?set=${set}`)).tools };
+        return { tools: (await bridge(`/tools?set=${set}&agent=${encodeURIComponent(agentId)}`)).tools };
       case "tools/call": {
-        const r = await bridge("/call", { name: msg.params?.name, args: msg.params?.arguments ?? {}, agentId, set });
+        // Long calls (delegations) send MCP progress notifications so the client does not time out.
+        const token = msg.params?._meta?.progressToken;
+        let n = 0;
+        const keepAlive = token !== undefined && notify
+          ? setInterval(() => notify({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: token, progress: ++n, message: "working…" } }), 15000)
+          : null;
+        let r: any;
+        try { r = await bridge("/call", { name: msg.params?.name, args: msg.params?.arguments ?? {}, agentId, set }); }
+        finally { if (keepAlive) clearInterval(keepAlive); }
         if (r.error) return { content: [{ type: "text", text: `Error: ${r.error}` }], isError: true };
         const text = typeof r.result === "string" ? r.result : JSON.stringify(r.result);
         return { content: [{ type: "text", text }] };
@@ -41,10 +78,12 @@ export function createForwarder(set: string, serverName: string, env: { url: str
 }
 
 export function runForwarder(set: string, serverName: string): void {
-  const handle = createForwarder(set, serverName, {
-    url: process.env.FLASH_BRIDGE_URL ?? "", token: process.env.FLASH_BRIDGE_TOKEN ?? "", agentId: process.env.FLASH_AGENT_ID ?? "",
-  });
+  // Bridge settings come from the environment, or from --bridge/--token/--agent arguments (harnesses that drop env).
+  const arg = (k: string) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] ?? "" : ""; };
   const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");
+  const handle = createForwarder(set, serverName, {
+    url: process.env.FLASH_BRIDGE_URL || arg("bridge"), token: process.env.FLASH_BRIDGE_TOKEN || arg("token"), agentId: process.env.FLASH_AGENT_ID || arg("agent"),
+  }, send);
 
   const rl = createInterface({ input: process.stdin });
   rl.on("line", (line) => {

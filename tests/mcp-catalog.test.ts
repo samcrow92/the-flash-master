@@ -65,3 +65,27 @@ describe("recommended MCP servers", () => {
     expect(boot.specsFor(role("tester"), "a").map((s) => s.name)).not.toContain("drawio");
   });
 });
+
+describe("tool server self-test", () => {
+  it("starts a server with only the given environment and lists its tools; reports crashes", async () => {
+    const { selfTestServer, baseEnv } = await import("../src/main/mcp");
+    const fixture = join(__dirname, "fixtures", "fake-mcp.mjs");
+    expect(Object.keys(baseEnv())).toContain(process.platform === "win32" ? "SystemRoot" : "PATH");
+    expect(await selfTestServer({ name: "fake", command: process.execPath, args: [fixture], env: baseEnv() })).toEqual({ name: "fake", ok: true, tools: 2, detail: "ok" });
+    const bad = await selfTestServer({ name: "crash", command: process.execPath, args: [fixture, "--crash"], env: {} });
+    expect(bad.ok).toBe(false);
+    expect(bad.detail).toMatch(/exited \(3\).*missing SystemRoot/);
+  });
+
+  it("app tool servers get the essential environment and bridge settings as arguments", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "flash-env-"));
+    const boot = new McpBootstrap({ nodeEntry: (n) => `/app/${n}.mjs`, nodeExec: "/electron", nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, pythonSrc: "/none", dataDir },
+      () => DEFAULT_SETTINGS, () => {});
+    boot.setBridge("http://127.0.0.1:9", "tok");
+    const core = boot.specsFor(role("flashmaster"), "agent-1").find((x) => x.name === "flashmaster-core")!;
+    expect(core.args).toEqual(["/app/flashmaster-core.mjs", "--bridge", "http://127.0.0.1:9", "--token", "tok", "--agent", "agent-1"]);
+    expect(core.env.PATH ?? core.env.Path).toBeTruthy();
+    expect(core.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    expect(core.env.NO_PROXY).toContain("127.0.0.1");
+  });
+});

@@ -193,10 +193,10 @@ export class McpBootstrap {
     if (c.id === "memory") base.MEMORY_FILE_PATH ??= join(this.p.dataDir, "mcp", "memory.jsonl");
     if (c.runtime === "npm") {
       const bin = this.npmBin(c);
-      return bin ? { name: c.id, command: this.p.nodeExec, args: [bin, ...(c.args ?? [])], env: { ...this.p.nodeEnv, ...base } } : null;
+      return bin ? { name: c.id, command: this.p.nodeExec, args: [bin, ...(c.args ?? [])], env: { ...baseEnv(), ...this.p.nodeEnv, ...base } } : null;
     }
     const vpy = venvPython(join(this.p.dataDir, "mcp", ".venv"));
-    return { name: c.id, command: vpy, args: ["-m", c.module!, ...(c.args ?? [])], env: { PYTHONUTF8: "1", ...base } };
+    return { name: c.id, command: vpy, args: ["-m", c.module!, ...(c.args ?? [])], env: { ...baseEnv(), PYTHONUTF8: "1", ...base } };
   }
 
   /** MCP servers to attach for a role: flashmaster-core always, plus the ready servers the role declares. */
@@ -211,17 +211,19 @@ export class McpBootstrap {
     for (const id of wanted) {
       if (!ready.has(id)) continue;
       if (id === "flashmaster-core" || id === "jazz") {
-        out.push({ name: id, command: this.p.nodeExec, args: [this.p.nodeEntry(id)], env: { ...this.p.nodeEnv, ...bridgeEnv } });
+        out.push({ name: id, command: this.p.nodeExec,
+          args: [this.p.nodeEntry(id), "--bridge", this.bridge.url, "--token", this.bridge.token, "--agent", agentId],
+          env: { ...baseEnv(), ...networkEnv(s), ...this.p.nodeEnv, ...bridgeEnv } });
       } else if (PY_SERVERS.some((p) => p.id === id)) {
         const root = join(this.p.dataDir, "mcp");
-        out.push({ name: id, command: venvPython(join(root, ".venv")), args: [join(root, id, "server.py")], env: { ...networkEnv(s), ...this.pyEnv(id, root) } });
+        out.push({ name: id, command: venvPython(join(root, ".venv")), args: [join(root, id, "server.py")], env: { ...baseEnv(), ...networkEnv(s), ...this.pyEnv(id, root) } });
       } else if (MCP_CATALOG.some((c) => c.id === id)) {
         const c = MCP_CATALOG.find((x) => x.id === id)!;
         const spec = this.catalogSpec(c, catalogState(c, s.mcp.catalog).env);
         if (spec) out.push(spec);
       } else {
         const e = s.mcp.external.find((x) => x.id === id);
-        if (e) out.push({ name: id, command: e.command, args: splitArgs(e.args), env: parseEnv(e.env) });
+        if (e) out.push({ name: id, command: e.command, args: splitArgs(e.args), env: { ...baseEnv(), ...parseEnv(e.env) } });
       }
     }
     return out;
@@ -267,6 +269,48 @@ export class McpBootstrap {
     this.status.set(s.id, s);
     this.onStatus(this.list());
   }
+}
+
+/**
+ * Variables a child process needs to work at all. Some harnesses start MCP servers with exactly the env we give
+ * (not merged with their own); on Windows a process without SystemRoot/PATH cannot even open sockets.
+ */
+/**
+ * Start an MCP server exactly as a harness would (only the env we pass, not merged) and run initialize + tools/list.
+ * Proves the server, its environment and the connection to the app work outside the harness.
+ */
+export async function selfTestServer(spec: McpServerSpec, timeoutMs = 20000): Promise<{ name: string; ok: boolean; tools: number; detail: string }> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve) => {
+    let out = "", err = "", done = false;
+    const child = spawn(spec.command, spec.args, { env: spec.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const finish = (r: { ok: boolean; tools: number; detail: string }) => { if (done) return; done = true; clearTimeout(t); try { child.kill(); } catch { /* gone */ } resolve({ name: spec.name, ...r }); };
+    const t = setTimeout(() => finish({ ok: false, tools: 0, detail: `no answer within ${timeoutMs / 1000}s${err ? ` — ${err.trim().slice(-300)}` : ""}` }), timeoutMs);
+    child.on("error", (e) => finish({ ok: false, tools: 0, detail: `cannot start: ${e.message}` }));
+    child.on("exit", (code) => finish({ ok: false, tools: 0, detail: `exited (${code})${err ? `: ${err.trim().slice(-300)}` : ""}` }));
+    child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+    child.stdout.on("data", (d) => {
+      out += d;
+      for (const line of out.split("\n").slice(0, -1)) {
+        let m: any;
+        try { m = JSON.parse(line); } catch { continue; }
+        if (m.id === 1) child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n" + JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) + "\n");
+        if (m.id === 2) finish(m.error ? { ok: false, tools: 0, detail: m.error.message } : { ok: true, tools: m.result?.tools?.length ?? 0, detail: "ok" });
+      }
+      out = out.slice(out.lastIndexOf("\n") + 1);
+    });
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "selftest", version: "1" } } }) + "\n");
+  });
+}
+
+export function baseEnv(): Record<string, string> {
+  const keep = ["PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "SystemDrive", "COMSPEC", "ComSpec", "TEMP", "TMP", "TMPDIR",
+    "USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles",
+    "USERNAME", "USER", "USERDOMAIN", "COMPUTERNAME", "LANG", "LC_ALL", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+    "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"];
+  const out: Record<string, string> = {};
+  for (const k of keep) { const v = process.env[k]; if (v) out[k] = v; }
+  return out;
 }
 
 export const venvPython = (venv: string) => (process.platform === "win32" ? join(venv, "Scripts", "python.exe") : join(venv, "bin", "python"));

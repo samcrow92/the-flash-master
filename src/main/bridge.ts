@@ -28,6 +28,9 @@ export class Bridge {
     return [...this.tools.values()].filter((t) => t.set === set).map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
   }
 
+  /** Agents whose MCP server reached the app (tools/list) — used to detect tools that failed to load. */
+  readonly toolsListed = new Set<string>();
+
   async call(name: string, args: unknown, agentId: string, set?: string): Promise<unknown> {
     const t = this.tools.get(name);
     // A server may only call tools of its own set (the core server cannot reach Jazz tools, and so on).
@@ -45,6 +48,8 @@ export class Bridge {
           try {
             const url = new URL(req.url ?? "/", "http://127.0.0.1");
             if (req.method === "GET" && url.pathname === "/tools") {
+              const agent = url.searchParams.get("agent");
+              if (agent) this.toolsListed.add(agent);
               return json(res, 200, { tools: this.list(url.searchParams.get("set") ?? "core") });
             }
             if (req.method === "POST" && url.pathname === "/call") {
@@ -58,6 +63,11 @@ export class Bridge {
           }
         });
       });
+      // Delegations can wait minutes for a specialist: no request/headers timeouts on this local server.
+      this.server.requestTimeout = 0;
+      this.server.headersTimeout = 0;
+      this.server.timeout = 0;
+      this.server.keepAliveTimeout = 60000;
       this.server.on("error", reject);
       this.server.listen(0, "127.0.0.1", () => {
         const a = this.server!.address();

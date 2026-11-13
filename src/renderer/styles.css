@@ -703,3 +703,4 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .rm-group { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); padding: 8px 8px 2px; }
 .chat-title-block { min-width: 0; flex: 1 1 220px; padding-top: 1px; }
 .chat-title-block h2 { line-height: 1.3; }
+.selftest { display: grid; gap: 8px; margin-bottom: 12px; } .warn-text { color: var(--amber); }

@@ -20,6 +20,8 @@ import {
 export interface OrchestratorDeps {
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
   harnessEnv?: (harness: HarnessId) => Record<string, string>;
+  /** Did this agent's MCP server reach the app (tools/list)? */
+  toolsLoaded?: (agentId: string) => boolean;
   onModels?: (harness: HarnessId, models: import("@shared/types").ModelInfo[]) => void;
   log?: (level: "error" | "warn" | "info" | "debug", msg: string) => void;
   db: Db;
@@ -53,6 +55,7 @@ interface Live {
   awaiting: { id: string; native: boolean }[];
   redirect: { input: string; attachments: Attachment[]; msgIds: string[] } | null; // steering by interrupt: next turn input
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
+  warnedTools?: boolean;
   depth: number;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
@@ -380,8 +383,24 @@ export class Orchestrator {
       if (chatNow.autopilot) promptText += "\n\n(Autopilot: work autonomously. Do not stop to ask for confirmation or feedback — make reasonable assumptions, state them briefly, and finish the task.)";
       const atts = (t.attachments ?? []).map((a) => ({ kind: a.kind, name: a.name, mime: a.mime, path: a.path }));
       if (t.deliver && t.msgIds?.length) this.markDelivered(live, t.msgIds, false);
-      const res = await live.session!.prompt(promptText, atts);
+      let res = await live.session!.prompt(promptText, atts);
+      // Transient network drops between the harness and its model API (proxy resets, "other side closed"):
+      // retry twice, continuing where the reply stopped instead of failing the turn.
+      for (let attempt = 1; attempt <= 2 && res.stopReason === "error" && isTransientNetworkError(res.error) && !live.stopped && live.session?.alive; attempt++) {
+        this.flow(live.agentId, { kind: "status", label: `network error — retrying (${attempt}/2)`, status: "retry" });
+        this.setStatus(live, "running", `Connection dropped — retrying (${attempt}/2)…`);
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        res = await live.session!.prompt(text.trim()
+          ? "Your previous response was cut off by a network error. Continue exactly where you stopped; do not repeat what you already wrote."
+          : promptText, text.trim() ? [] : atts);
+      }
       this.d.db.updateMessage(reply.id, { content: text });
+      // The harness was given our MCP servers but none of them reached the app: tools did not load.
+      if (firstTurn && this.d.toolsLoaded && live.harness !== "pi" && live.harness !== "mock" && !this.d.toolsLoaded(live.agentId) && !live.warnedTools) {
+        live.warnedTools = true;
+        this.system(t.chat.id, t.threadRoot, `⚠️ TheFlashMaster's tools (delegation, tasks, artifacts) did not load in **${live.harness}** for ${t.role.title}, so it cannot hand work to specialists. `
+          + "Check **Settings → MCP → Test tool servers**; the error there tells what blocks them.", "warn");
+      }
       const usage = res.usage && (res.usage.tokensIn || res.usage.tokensOut)
         ? { ...res.usage, estimated: false }
         : { tokensIn: estimateTokens(promptText), tokensOut: estimateTokens(text), estimated: true };
@@ -649,6 +668,10 @@ const FALLBACK_ROLE: RoleDef = {
   name: "flashmaster", title: "TheFlashMaster", icon: "⚡", description: "Coordinator", tools: ["flashmaster-core"], maxResultTokens: 400,
   skills: [], prompt: "You are TheFlashMaster, the coordinating agent.", source: "builtin",
 };
+
+export function isTransientNetworkError(e: string | undefined): boolean {
+  return !!e && /connection error|UND_ERR_SOCKET|other side closed|ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|\b50[234]\b|stream (closed|ended)|network/i.test(e);
+}
 
 export function networkEnv(s: Settings): Record<string, string> {
   const env: Record<string, string> = {};

@@ -96,6 +96,8 @@ export interface FlashApi {
   mcpReinstall(): Promise<McpServerStatus[]>;
   /** Install (or reinstall) one recommended server now. */
   mcpInstall(id: string): Promise<McpServerStatus[]>;
+  /** Start TheFlashMaster's tool servers like a harness does and list their tools. */
+  mcpSelfTest(): Promise<{ name: string; ok: boolean; tools: number; detail: string }[]>;
 
   // jazz
   jazzQuery(query: string): Promise<JazzWorkItem[]>;
@@ -135,7 +137,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
 
