@@ -1038,3 +1038,8 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .mode-gear { width: 24px; height: 24px; padding: 0; border-radius: 50%; display: inline-grid; place-items: center; background: transparent; border: none; box-shadow: none; color: var(--muted); }
 .mode-gear:hover:not(:disabled) { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .composer-wrap.compact .send { width: 28px; height: 28px; }
+/* drive modes hang centred under the chat box, joined to it like a tab */
+.composer-wrap { gap: 0; }
+.composer-wrap > .mode-bar { justify-self: center; margin-top: -1px; position: relative; z-index: 1; padding: 3px 6px 4px;
+  border-radius: 0 0 14px 14px; border-top: none; background: var(--bg2); backdrop-filter: blur(10px);
+  box-shadow: var(--hi), 0 8px 18px -14px rgba(0, 0, 0, .55); }
