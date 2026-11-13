@@ -13,7 +13,7 @@ const s = (description: string) => ({ type: "string", description });
 /** Tools exposed to agents through the flashmaster-core and jazz MCP servers. Results are kept compact on purpose. */
 export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void;
-  requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void;
+  requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -150,6 +150,21 @@ export function buildTools(d: {
         const d = await jazz().detail(a.id);
         return { ...d.item, comments: d.comments.slice(-10).map((c) => ({ ...c, text: c.text.slice(0, 1500) })) };
       },
+    },
+    {
+      set: "jazz", name: "jazz_links",
+      description: "Links of a work item: parent, children, related, blocks/depends on, duplicates, tracks, implemented/affected requirements, test cases, change sets. Linked work items come with title and state; fetch one with jazz_get.",
+      inputSchema: obj({ id: s("work item id"), kind: s("only this kind, e.g. child, parent, related, requirement (optional)") }, ["id"]),
+      handler: async (a) => {
+        const all = await jazz().links(a.id, true);
+        const k = String(a.kind ?? "").toLowerCase().trim();
+        return k ? all.filter((l) => l.kind.includes(k.replace(/ren$/, ""))) : all;
+      },
+    },
+    {
+      set: "jazz", name: "jazz_project_areas", description: "List the Jazz/EWM project areas you can access, and the ones configured for searches.",
+      inputSchema: obj({}),
+      handler: async () => ({ configured: d.jazzAreas?.() ?? [], available: await jazz().listProjectAreas() }),
     },
     {
       set: "jazz", name: "jazz_update",

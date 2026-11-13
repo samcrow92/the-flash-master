@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { JazzClient, explain401, parseComments, parseWorkItems, type FetchLike } from "../src/main/jazz";
+import { JazzClient, explain401, parseComments, parseWorkItemLinks, parseWorkItems, type FetchLike } from "../src/main/jazz";
 
 const AUTH = "x-com-ibm-team-repository-web-auth-msg";
 const ITEM = `<workitem><workItem><id>7</id><summary>CAN timeout</summary><description>&lt;p&gt;Bus off&lt;/p&gt;</description>
@@ -192,5 +192,39 @@ describe("Jazz keyword search (EWM full-text)", () => {
 
     const { f: f2 } = fake((url) => (url.includes("/oslc/") ? { status: 404, body: "not found" } : {}));
     expect((await new JazzClient({ ...base, authType: "basic" }, f2).search({ text: "flash nvm", state: "all" })).map((w) => w.id)).toEqual(["8"]);
+  });
+});
+
+const LINKS_RDF = `<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rtc_cm="http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/" xmlns:oslc_cm="http://open-services.net/ns/cm#">
+ <oslc_cm:ChangeRequest rdf:about="https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/7">
+  <rtc_cm:state rdf:resource="https://j/ccm/oslc/workflows/_x/states/s1"/>
+  <rtc_cm:com.ibm.team.workitem.linktype.parentworkitem.parent rdf:resource="https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/3"/>
+  <rtc_cm:com.ibm.team.workitem.linktype.parentworkitem.children rdf:resource="https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/8"/>
+  <rtc_cm:com.ibm.team.workitem.linktype.parentworkitem.children rdf:resource="https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/8"/>
+  <oslc_cm:relatedChangeRequest rdf:resource="https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/9"/>
+  <oslc_cm:implementsRequirement rdf:resource="https://j/rm/resources/_req1"/>
+  <rtc_cm:com.ibm.team.workitem.linktype.blocksworkitem.dependsOn rdf:resource="https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/7"/>
+ </oslc_cm:ChangeRequest></rdf:RDF>`;
+
+describe("Jazz work item links", () => {
+  it("parses link predicates, skips attributes, duplicates and self-links", () => {
+    expect(parseWorkItemLinks(LINKS_RDF, "7")).toEqual([
+      { kind: "parent", url: "https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/3", id: "3" },
+      { kind: "child", url: "https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/8", id: "8" },
+      { kind: "related", url: "https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/9", id: "9" },
+      { kind: "implements requirement", url: "https://j/rm/resources/_req1" },
+    ]);
+  });
+  it("reads links with the signed-in session and adds titles of linked items", async () => {
+    const { f, calls } = fake((url) => {
+      if (url.endsWith("/authenticated/identity")) return {};
+      if (url.includes("/resource/itemName/com.ibm.team.workitem.WorkItem/7")) return { body: LINKS_RDF, headers: { "content-type": "application/rdf+xml" } };
+      return {}; // reportable API: ITEM (ids 7, 8)
+    });
+    const links = await new JazzClient({ ...base, authType: "basic" }, f).links("7");
+    expect(links.find((l) => l.id === "8")).toMatchObject({ kind: "child", title: expect.any(String) });
+    const rdfCall = calls.find((c) => c.url.includes("/resource/itemName/"))!;
+    expect(rdfCall.init.headers["OSLC-Core-Version"]).toBe("2.0");
+    expect(rdfCall.init.headers.Authorization).toBe("Basic " + Buffer.from("u:p").toString("base64"));
   });
 });

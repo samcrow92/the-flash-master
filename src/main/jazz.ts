@@ -153,6 +153,24 @@ export class JazzClient {
     return { item, comments: parseComments(xml) };
   }
 
+  /**
+   * Links of a work item (parent, children, related, blocks/depends on, duplicates, tracks, requirements, test cases…),
+   * read from its OSLC resource. Linked work items get their title and state when resolve is true.
+   */
+  async links(id: string, resolve = true): Promise<JazzLink[]> {
+    const rdf = await this.getText(`/resource/itemName/com.ibm.team.workitem.WorkItem/${Number(id)}`, "application/rdf+xml", true);
+    const links = parseWorkItemLinks(rdf, id);
+    if (resolve) {
+      const ids = [...new Set(links.map((l) => l.id).filter((x): x is string => !!x))];
+      if (ids.length) {
+        const found = await this.query(ids.join(","), Math.min(ids.length, 100)).catch(() => [] as JazzWorkItem[]);
+        const byId = new Map(found.map((w) => [w.id, w]));
+        for (const l of links) { const w = l.id ? byId.get(l.id) : undefined; if (w) Object.assign(l, { title: w.title, state: w.state, type: w.type }); }
+      }
+    }
+    return links;
+  }
+
   /** Structured search across the configured project areas. */
   async search(s: JazzSearch): Promise<JazzWorkItem[]> {
     const max = Math.min(Math.max(s.max ?? 50, 1), 500);
@@ -372,6 +390,39 @@ export function explain401(status: number, scheme: string, authType: string): st
 }
 
 /** The useful line of a Jazz error page / XML (exception message), short. */
+export interface JazzLink { kind: string; url: string; id?: string; title?: string; state?: string; type?: string }
+
+/** Link predicates of an EWM work item (rtc_cm link types and OSLC CM relationships) → readable kind. */
+const LINK_KINDS: [RegExp, string][] = [
+  [/parentworkitem\.parent$/i, "parent"], [/parentworkitem\.children$/i, "child"],
+  [/blocksworkitem\.blocks$/i, "blocks"], [/blocksworkitem\.dependsOn$/i, "depends on"],
+  [/duplicateworkitem\.duplicateOf$/i, "duplicate of"], [/duplicateworkitem\.duplicates$/i, "duplicated by"],
+  [/copiedworkitem\.copiedFrom$/i, "copied from"], [/copiedworkitem\.copies$/i, "copied to"],
+  [/tracksworkitem\.tracks$/i, "tracks"], [/tracksworkitem\.contributesTo$/i, "contributes to"],
+  [/resolvesworkitem\.resolves$/i, "resolves"], [/resolvesworkitem\.resolvedBy$/i, "resolved by"],
+  [/relatedworkitem\.related$|relatedChangeRequest$/i, "related"],
+  [/implementsRequirement$|implementsRequirements?$/i, "implements requirement"], [/affectsRequirement$/i, "affects requirement"],
+  [/tracksRequirement$/i, "tracks requirement"], [/elaboratedBy$|elaborates$/i, "elaborated by"],
+  [/testedByTestCase$/i, "tested by test case"], [/relatedTestCase$|relatedTestPlan$|relatedTestScript$/i, "related test"],
+  [/affectedByDefect$|affectsPlanItem$/i, "affected by"], [/tracksChangeSet$|change_?set/i, "change set"],
+  [/relatedArtifact$|relatedArtifacts$/i, "related artifact"],
+];
+
+/** Links in a work item's OSLC RDF/XML (predicates with rdf:resource), deduplicated, without self-references. */
+export function parseWorkItemLinks(rdf: string, selfId?: string): JazzLink[] {
+  const out = new Map<string, JazzLink>();
+  for (const m of rdf.matchAll(/<([\w.-]+):([\w.-]+)\b[^>]*\brdf:resource="([^"]+)"/g)) {
+    const pred = m[2]!;
+    const kind = LINK_KINDS.find(([re]) => re.test(pred))?.[1];
+    if (!kind) continue;
+    const url = decode(m[3]!);
+    const id = /(?:WorkItem\/|workitems\/|itemName\/com\.ibm\.team\.workitem\.WorkItem\/)(\d+)(?:[/?#]|$)/i.exec(url)?.[1];
+    if (id && id === String(selfId)) continue;
+    out.set(`${kind}|${url}`, { kind, url, ...(id ? { id } : {}) });
+  }
+  return [...out.values()];
+}
+
 export function serverMessage(body: string): string {
   const m = /<(?:\w+:)?(?:message|errorMessage|detail)[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:message|errorMessage|detail)>/i.exec(body)?.[1]
     ?? /"(?:errorMessage|message)"\s*:\s*"([^"]+)"/.exec(body)?.[1] ?? body;

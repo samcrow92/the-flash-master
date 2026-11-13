@@ -205,6 +205,8 @@ export class McpBootstrap {
     const s = this.settings();
     const ready = new Set(this.list().filter((x) => x.state === "ready").map((x) => x.id));
     const wanted = new Set(["flashmaster-core", ...role.tools]);
+    // Every agent can read Jazz work items (and DOORS Next requirements) once Jazz is set up — not only the roles that list it.
+    if (s.jazz.enabled) wanted.add("jazz");
     for (const c of MCP_CATALOG) if (roleMatches(catalogState(c, s.mcp.catalog).roles, role.name)) wanted.add(c.id);
     for (const e of s.mcp.external) if (e.roles && roleMatches(e.roles.split(/[\s,]+/).filter(Boolean), role.name)) wanted.add(e.id);
     const out: McpServerSpec[] = [];

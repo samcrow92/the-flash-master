@@ -88,4 +88,11 @@ describe("tool server self-test", () => {
     expect(core.env.ELECTRON_RUN_AS_NODE).toBe("1");
     expect(core.env.NO_PROXY).toContain("127.0.0.1");
   });
+  it("gives every agent the Jazz tools once Jazz is enabled", () => {
+    const { boot, set } = setup();
+    expect(boot.specsFor(role("software-expert"), "a1").map((x) => x.name)).not.toContain("jazz");
+    set({ jazz: { enabled: true } });
+    expect(boot.specsFor(role("software-expert"), "a1").map((x) => x.name)).toContain("jazz");
+    expect(boot.specsFor(role("my-custom-agent"), "a1").map((x) => x.name)).toContain("jazz");
+  });
 });

@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Agents read IBM Jazz work items with your sign-in.**
+  - **Every agent:** all agents get the Jazz tools once Jazz is enabled, including custom agents and specialists whose role doesn't list Jazz.
+  - **Your credentials:** the tools use the app's own Jazz connection, so your saved credentials (Basic/Form/Windows) or the browser sign-in session.
+  - **New tools:** `jazz_links` returns a work item's parent, children, related, blocks/depends-on, duplicates, tracks, requirements, test cases and change sets, with titles and states of linked work items. `jazz_project_areas` lists available and configured project areas.
+  - **Existing tools:** `jazz_query` (ids, filters, full-text words), `jazz_get` (with comments), `jazz_update` and `jazz_comment`.
+  - **Without MCP:** the same tools work in text mode on Pi or when MCP is blocked.
 - **Fix: agent icons off-centre in the chat.** The "working" animation forced the role badge to `inline-block`, which dropped its centring, so TheFlashMaster's and the specialists' icons sat top-left while they worked. Badges now keep their centred layout, and icons render as blocks so they don't sit on the text baseline.
 - **Fix: app icon.** The window and taskbar show the lightning-bolt icon again: the app sets its Windows app ID (without it, running from source showed Electron's icon), uses the multi-size `.ico` on Windows, and the sign-in windows get the icon too. The `.ico` is now shipped with the app.
 - **Fix: text-mode delegation didn't start when the CLI hid the tools.** Copilot can fetch TheFlashMaster's tool list and still not give the tools to the model (for example an organisation policy filtering MCP tools), so the app thought `delegate` had loaded. When the coordinator's reply says `delegate` is missing, the app now switches to text mode and has it re-plan with `DELEGATE` lines. The chat explains what happened. The coordinator is also told its tools may appear with a server prefix (`flashmaster-core-delegate`).

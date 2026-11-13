@@ -731,7 +731,7 @@ export class Orchestrator {
   /** The app's own tools this agent's role may use (sets: core, plus jazz when the role has it). */
   private toolSetFor(live: Live): (ToolInfo & { set: string })[] {
     if (!this.d.listTools) return [];
-    const sets = ["core", ...(live.role.tools.includes("jazz") ? ["jazz"] : [])];
+    const sets = ["core", ...(live.role.tools.includes("jazz") || this.d.settings().jazz.enabled ? ["jazz"] : [])];
     return sets.flatMap((set) => this.d.listTools!(set).map((x) => ({ ...x, set })));
   }
   private textToolsFor(live: Live): string {
