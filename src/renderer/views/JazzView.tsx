@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList as ClipboardListIcon, ListTree } from "../components/icons";
+import { ArrowUpRight, BookOpen, Bug, ClipboardList as ClipboardListIcon, FileText, Link, ListTree, Mountain, OctagonX, Pencil, Plus, RefreshCw, ScanSearch, Settings, Sparkles, SquareCheck, X, type LucideIcon } from "../components/icons";
 import { RequirementsView } from "./RequirementsView";
 import type { JazzComment, JazzSearch, JazzWorkItem } from "@shared/types";
 import { api, useStore } from "../store";
 
 const TYPES = ["", "Defect", "Task", "Story", "Epic", "Enhancement", "Impediment", "Retrospective"];
-const TYPE_ICON: Record<string, string> = { defect: "🐞", task: "☑️", story: "📖", epic: "🏔️", enhancement: "✨", impediment: "⛔" };
-const icon = (t: string) => TYPE_ICON[t.toLowerCase()] ?? "📄";
+const TYPE_ICON: Record<string, LucideIcon> = { defect: Bug, task: SquareCheck, story: BookOpen, epic: Mountain, enhancement: Sparkles, impediment: OctagonX };
+const icon = (t: string, size = 14) => { const I = TYPE_ICON[t.toLowerCase()] ?? FileText; return <I size={size} className={`wi-icon wi-${t.toLowerCase()}`} />; };
 type SortKey = "id" | "modified" | "priority" | "state";
 const PRIO: Record<string, number> = { high: 0, medium: 1, low: 2, unassigned: 3 };
 
@@ -104,7 +104,7 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
         <h2><ClipboardListIcon size={20} className="h-icon" /> IBM Jazz</h2>
         {tabs}
         <span className="grow" />
-        <button className="ghost" onClick={() => st.setView({ kind: "settings", tab: "integrations" })} title="Jazz settings">⚙</button>
+        <button className="ghost icon-only" onClick={() => st.setView({ kind: "settings", tab: "integrations" })} title="Jazz settings"><Settings size={16} /></button>
       </header>
 
       <div className="jazz-filters panel">
@@ -121,7 +121,7 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
             {([["", "anyone"], ["me", "mine"], ["unassigned", "unassigned"]] as const).map(([v, l]) => <button key={v} className={owner === v ? "on" : ""} onClick={() => setOwner(v)}>{l}</button>)}
           </div>
           <select value={type} onChange={(e) => setType(e.target.value)} title="Type">
-            {TYPES.map((t) => <option key={t} value={t}>{t ? `${icon(t)} ${t}` : "All types"}</option>)}
+            {TYPES.map((t) => <option key={t} value={t}>{t || "All types"}</option>)}
           </select>
           <button className={`ghost small ${advanced ? "on" : ""}`} onClick={() => setAdvanced(!advanced)} title="Reportable-API filter">ƒ filter</button>
         </div>
@@ -129,9 +129,9 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
           <span className="muted small">Project area:</span>
           {areas.length === 0 && <span className="chip on" title={configuredAreas.length ? configuredAreas.join(", ") : "every area you can see"}>
             {configuredAreas.length ? `all configured (${configuredAreas.length})` : "all areas"}</span>}
-          {areas.map((a) => <span key={a} className="chip on">{a} <button className="link" title="Remove" onClick={() => toggleArea(a)}>✕</button></span>)}
+          {areas.map((a) => <span key={a} className="chip on">{a} <button className="link" title="Remove" onClick={() => toggleArea(a)}><X size={12} /></button></span>)}
           <select value="" onChange={(e) => { if (e.target.value) { toggleArea(e.target.value); } }} title="Pick a project area for searching and new actions">
-            <option value="">＋ pick area…</option>
+            <option value="">Pick area…</option>
             {configuredAreas.length > 0 && <optgroup label="Configured">{configuredAreas.filter((a) => !areas.includes(a)).map((a) => <option key={a} value={a}>{a}</option>)}</optgroup>}
             {serverAreas.length > 0 && <optgroup label="On the server">{serverAreas.filter((a) => !areas.includes(a) && !configuredAreas.includes(a)).map((a) => <option key={a} value={a}>{a}</option>)}</optgroup>}
           </select>
@@ -226,9 +226,9 @@ function JazzDetail({ id, areas, data, busy, onUpdated, onReload }: {
             <button onClick={() => setEditing(false)}>Cancel</button>
           </div>
         ) : (
-          <h3 className="grow">{icon(w.type)} {w.id} — {w.title} <button className="link small" title="Edit summary" onClick={() => { setTitle(w.title); setEditing(true); }}>✎</button></h3>
+          <h3 className="grow">{icon(w.type, 18)} {w.id} — {w.title} <button className="link small" title="Edit summary" onClick={() => { setTitle(w.title); setEditing(true); }}><Pencil size={13} /></button></h3>
         )}
-        <button className="ghost small" onClick={onReload} title="Reload" disabled={busy}>↻</button>
+        <button className="ghost small" onClick={onReload} title="Reload" disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /></button>
       </div>
 
       <div className="jazz-fields">
@@ -240,12 +240,12 @@ function JazzDetail({ id, areas, data, busy, onUpdated, onReload }: {
           <option value="">No project</option>{st.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <select value={role} onChange={(e) => setRole(e.target.value)} title="Agent used for analysis">
-          {st.roles.map((r) => <option key={r.name} value={r.name}>{r.icon} {r.title}</option>)}
+          {st.roles.map((r) => <option key={r.name} value={r.name}>{r.title}</option>)}
         </select>
-        <button className="primary" onClick={analyse}>🔎 Analyse with agent</button>
-        <button onClick={toTask} disabled={saving}>＋ Task</button>
-        {w.url && <a href={w.url} target="_blank" rel="noreferrer">Open in Jazz ↗</a>}
-        {w.url && <button className="ghost small" onClick={() => copy(w.url!, "Link")}>🔗 Copy link</button>}
+        <button className="primary" onClick={analyse}><ScanSearch size={15} /> Analyse with agent</button>
+        <button onClick={toTask} disabled={saving}><Plus size={15} /> Task</button>
+        {w.url && <a href={w.url} target="_blank" rel="noreferrer">Open in Jazz <ArrowUpRight size={13} /></a>}
+        {w.url && <button className="ghost small" onClick={() => copy(w.url!, "Link")}><Link size={13} /> Copy link</button>}
       </div>
 
       <h4>Description</h4>

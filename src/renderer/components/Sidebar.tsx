@@ -4,6 +4,7 @@ import { api, toggleTheme, useStore } from "../store";
 import { AgentImportDialog } from "./AgentImport";
 import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
+import { Dots } from "./Dots";
 import {
   Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
   Download, Moon, MoreHorizontal, Pause, Pencil, Pin, PinOff, Plus, Puzzle, RoleIcon, RotateCcw, Settings, SquareKanban, Sun, Trash2, Zap,
@@ -184,7 +185,7 @@ export function Sidebar() {
             }}>
             <span className="palette-icon"><RoleIcon role={r.name} emoji={r.icon} size={24} className="icon-glyph" />{(working > 0 || paused > 0) && <span className="activity-ring" />}</span>
             <span className="palette-title">{r.title}</span>
-            {working > 0 && <span className="working-dots" title={`${working} working${busyAgent?.lastActivity ? ` — ${busyAgent.lastActivity}` : ""}`}><i /><i /><i />{working > 1 && <b>{working}</b>}</span>}
+            {working > 0 && <Dots size={5} count={working} title={`${working} working${busyAgent?.lastActivity ? ` — ${busyAgent.lastActivity}` : ""}`} />}
             {!working && paused > 0 && <span className="paused-tag" title={`${paused} paused`}><Pause size={12} /></span>}
             {r.source === "user" && <span className="custom-tag">custom</span>}
           </button>

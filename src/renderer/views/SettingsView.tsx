@@ -7,7 +7,7 @@ import type { ExamSetupResult } from "@shared/api";
 import { api, useStore } from "../store";
 import { MCP_CATALOG, catalogState, type CatalogServer } from "@shared/mcp-catalog";
 import { UserAvatar, toAvatarDataUrl } from "../components/UserAvatar";
-import { Camera, ImagePlus, Loader2, Trash2 } from "../components/icons";
+import { ArrowUpRight, Camera, CornerDownRight, Download, FolderInput, ImagePlus, Loader2, Lock, MarkText, Plus, RefreshCw, StatusMark, Trash2, X, Zap } from "../components/icons";
 import { AgentImportDialog, reportImports } from "../components/AgentImport";
 import { ModelInput } from "../components/ModelInput";
 import { configUri, isGcWebLink } from "@shared/rm-config";
@@ -36,7 +36,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
 
   return (
     <div className="page settings">
-      <header className="page-header"><h2><SettingsIcon size={20} className="h-icon" /> Settings</h2>{st.locked.length > 0 && <span className="pill">🔒 Some settings are managed by your organisation</span>}</header>
+      <header className="page-header"><h2><SettingsIcon size={20} className="h-icon" /> Settings</h2>{st.locked.length > 0 && <span className="pill row gap-s"><Lock size={12} /> Some settings are managed by your organisation</span>}</header>
       <div className="settings-layout">
         <nav className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</nav>
         <div className="tab-body">
@@ -140,6 +140,7 @@ function General(f: F) {
     <ProfileEditor f={f} />
     <h4>App</h4>
     <Row label="Theme"><Choice f={f} path="general.theme" options={[["dark", "Dark"], ["light", "Light"], ["system", "System"]]} /></Row>
+    <Row label="Translucent window (liquid glass)" hint="Let the desktop show through the window, blurred (Windows 11 acrylic). Turn off if the window feels slow on this PC. Applied the next time TheFlashMaster starts."><Bool f={f} path="general.windowGlass" /></Row>
     <Row label="Default harness" hint="Used when a chat or role does not pick one; falls back to the first available."><Choice f={f} path="general.defaultHarness" options={harnessOptions} /></Row>
     <Row label="Autopilot for new chats" hint="Agents and specialists work on their own: tool calls are approved automatically and they don't stop to ask for feedback. Blocked commands and read-only mode still apply. Toggle per chat next to the chat box."><Bool f={f} path="general.autopilotDefault" /></Row>
     <Row label="Desktop notifications" hint="Approval requests, budget warnings and errors when the window is in the background."><Bool f={f} path="general.notifications" /></Row>
@@ -155,7 +156,7 @@ function Harnesses(f: F) {
   useEffect(() => { void detect(); }, []);
   return <>
     <p className="muted">TheFlashMaster uses the agent CLIs already installed and signed in on this machine. No credentials are stored by this app.</p>
-    <button onClick={detect} disabled={busy}>{busy ? "Detecting…" : "↻ Detect again"}</button>
+    <button onClick={detect} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> {busy ? "Detecting…" : "Detect again"}</button>
     {HARNESS_IDS.map((h: HarnessId) => {
       const st = status.find((x) => x.id === h);
       return <div key={h} className="panel">
@@ -196,9 +197,9 @@ function Agents(f: F) {
     <div className="row between">
       <h4>Agents</h4>
       <div className="row gap">
-        <button className="primary" onClick={() => setEditor(true)}>➕ New agent from template</button>
-        <button onClick={async () => reportImports(await api().importAgentFiles(), st.toast)}>📂 Import .md…</button>
-        <button onClick={async () => { const p = await api().saveAgentTemplate(); if (p) st.toast("info", `Template saved to ${p}`); }}>⬇ Template</button>
+        <button className="primary" onClick={() => setEditor(true)}><Plus size={15} /> New agent from template</button>
+        <button onClick={async () => reportImports(await api().importAgentFiles(), st.toast)}><FolderInput size={14} /> Import .md…</button>
+        <button onClick={async () => { const p = await api().saveAgentTemplate(); if (p) st.toast("info", `Template saved to ${p}`); }}><Download size={14} /> Template</button>
         <button onClick={() => api().openRolesFolder()}>Open folder</button>
       </div>
     </div>
@@ -214,8 +215,8 @@ function Agents(f: F) {
           placeholder={r.model ?? undefined} onChange={(v) => setOverride(r.name, "model", v)} /></td>
         <td><input type="number" defaultValue={overrides[r.name]?.maxResultTokens ?? r.maxResultTokens} onBlur={(e) => setOverride(r.name, "maxResultTokens", Number(e.target.value))} /></td>
         <td className="actions">
-          <button title="Export as .md" onClick={async () => { const p = await api().exportAgent(r.name); if (p) st.toast("info", `Exported to ${p}`); }}>⬇</button>
-          {r.source === "user" && <button className="danger" title="Remove custom agent" onClick={async () => { if (confirm(`Remove agent "${r.title}"?`)) await api().removeAgent(r.name); }}>🗑</button>}
+          <button title="Export as .md" onClick={async () => { const p = await api().exportAgent(r.name); if (p) st.toast("info", `Exported to ${p}`); }} className="icon-only"><Download size={14} /></button>
+          {r.source === "user" && <button className="danger" title="Remove custom agent" onClick={async () => { if (confirm(`Remove agent "${r.title}"?`)) await api().removeAgent(r.name); }}><Trash2 size={14} /></button>}
         </td>
       </tr>)}</tbody>
     </table>
@@ -223,10 +224,10 @@ function Agents(f: F) {
 }
 
 const MODE_TEXT: Record<DriveMode, string> = {
-  local: "🏠 LOCAL — your on-prem / local model (e.g. an Ollama or company-hosted model configured in OpenCode or Pi)",
-  eco: "🍃 ECO — cheapest capable model",
-  comfort: "🛋️ COMFORT — balanced quality and cost",
-  sport: "🏁 SPORT — most capable model",
+  local: "LOCAL — your on-prem / local model (e.g. an Ollama or company-hosted model configured in OpenCode or Pi)",
+  eco: "ECO — cheapest capable model",
+  comfort: "COMFORT — balanced quality and cost",
+  sport: "SPORT — most capable model",
 };
 
 function Modes(f: F) {
@@ -317,7 +318,7 @@ function Tokens(f: F) {
 
 function Permissions(f: F) {
   return <>
-    <Row label="Tool approval" hint="'Ask' posts an approval message in the chat: react ✅ to allow or ❌ to deny.">
+    <Row label="Tool approval" hint="'Ask' posts an approval message in the chat: react with Approve (check) to allow or Deny (cross) to deny.">
       <Choice f={f} path="permissions.approval" options={[["ask", "Ask for every action"], ["auto-read", "Auto-approve reads, ask for changes"], ["auto-all", "Auto-approve everything (default)"]]} />
     </Row>
     <Row label="Read-only mode" hint="Agents cannot edit, delete, move files or run commands."><Bool f={f} path="permissions.readOnly" /></Row>
@@ -340,7 +341,7 @@ function Mcp(f: F) {
     <p className="muted small">Installed once into the app data folder and attached only to the agents listed — every server adds its tool definitions to an agent's context, so keep the lists short. npm servers need Node.js/npm only for the download; Python servers use the app's private Python environment.</p>
     {MCP_CATALOG.map((c) => <CatalogCard key={c.id} f={f} c={c} />)}
     <McpSelfTest />
-    <div className="row between"><h4>Servers</h4><button disabled={busy} onClick={async () => { setBusy(true); try { await api().mcpReinstall(); } finally { setBusy(false); } }}>{busy ? "Installing…" : "↻ Reinstall / check"}</button></div>
+    <div className="row between"><h4>Servers</h4><button disabled={busy} onClick={async () => { setBusy(true); try { await api().mcpReinstall(); } finally { setBusy(false); } }}><RefreshCw size={14} className={busy ? "spin" : ""} /> {busy ? "Installing…" : "Reinstall / check"}</button></div>
     <table className="table"><thead><tr><th>Server</th><th>Kind</th><th>State</th><th>Enabled</th></tr></thead><tbody>
       {st.mcp.filter((m) => m.kind !== "catalog").map((m) => <tr key={m.id}>
         <td><strong>{m.id}</strong><div className="muted small">{m.label}</div>{m.detail && <div className="muted small">{m.detail}</div>}</td>
@@ -349,7 +350,7 @@ function Mcp(f: F) {
           onChange={(e) => f.set("mcp.disabled", e.target.checked ? f.s.mcp.disabled.filter((x) => x !== m.id) : [...f.s.mcp.disabled, m.id])} />}</td>
       </tr>)}
     </tbody></table>
-    <div className="row between"><h4>Your MCP servers</h4><button onClick={() => setExt([...ext, { id: `custom-${ext.length + 1}`, label: "", command: "", args: "", env: "", roles: "" }])}>＋ Add</button></div>
+    <div className="row between"><h4>Your MCP servers</h4><button onClick={() => setExt([...ext, { id: `custom-${ext.length + 1}`, label: "", command: "", args: "", env: "", roles: "" }])}><Plus size={14} /> Add</button></div>
     <p className="muted small">Attach a server to agents with <b>roles</b> (comma-separated role names, or <code>*</code> for all), or add its id to a role's <code>tools:</code> list.</p>
     {ext.map((e, i) => <div key={i} className="panel grid3">
       {(["id", "label", "command", "args", "env", "roles"] as const).map((k) => <label key={k} className="field"><span>{k}{k === "env" ? " (KEY=VALUE;…)" : k === "roles" ? " (e.g. reviewer, tester or *)" : ""}</span>
@@ -369,7 +370,7 @@ function McpSelfTest() {
         <button className="primary" disabled={busy} onClick={async () => { setBusy(true); try { setRes(await api().mcpSelfTest()); } finally { setBusy(false); } }}>{busy ? "Testing…" : "Run test"}</button>
       </div>
       {res && <table className="kv"><tbody>{res.map((r) => (
-        <tr key={r.name}><td>{r.ok ? "✅" : "❌"} <b>{r.name}</b></td><td className={r.ok ? "" : "warn-text"}>{r.ok ? `${r.tools} tools` : r.detail}</td></tr>
+        <tr key={r.name}><td><StatusMark state={r.ok ? "ok" : "fail"} /> <b>{r.name}</b></td><td className={r.ok ? "" : "warn-text"}>{r.ok ? `${r.tools} tools` : r.detail}</td></tr>
       ))}</tbody></table>}
     </div>
   );
@@ -398,7 +399,7 @@ function CatalogCard({ f, c }: { f: F; c: CatalogServer }) {
   return (
     <div className={`panel catalog-card ${state.enabled ? "" : "off"}`}>
       <div className="row between">
-        <div><strong>{c.label}</strong> <a className="small" href={c.homepage} target="_blank" rel="noreferrer">↗</a>
+        <div><strong>{c.label}</strong> <a className="small" href={c.homepage} target="_blank" rel="noreferrer"><ArrowUpRight size={13} /></a>
           <div className="muted small">{c.description}</div></div>
         <label className="switch"><input type="checkbox" checked={state.enabled} disabled={locked} onChange={async (e) => {
           await patch({ enabled: e.target.checked });
@@ -411,7 +412,7 @@ function CatalogCard({ f, c }: { f: F; c: CatalogServer }) {
           <span className="muted">{c.runtime === "npm" ? "npm" : "pip"}: {c.package}</span>
           {status?.detail && <span className="muted">{status.detail}</span>}
           <span className="grow" />
-          <button className="ghost small" disabled={busy || locked} onClick={install}>{ready ? "↻ Update" : "Install"}</button>
+          <button className="ghost small" disabled={busy || locked} onClick={install}>{ready ? <><RefreshCw size={13} /> Update</> : "Install"}</button>
         </div>
         <div className="row gap wrap small">
           <span className="muted">Agents:</span>
@@ -441,8 +442,8 @@ function MarketplaceSettings(f: F) {
   return <>
     <p className="muted">A marketplace is a catalogue of plugins (custom agents, workflows, instructions, optionally tools) that a team or department hosts on a
       local server — any static web server at an IP works, e.g. <code>python -m http.server 8080</code> in the published folder. Add one per department.</p>
-    <div className="row between"><h4>Marketplaces</h4><button className="primary" disabled={lockedSources} onClick={add}>＋ Add marketplace</button></div>
-    {lockedSources && <div className="muted small">🔒 The marketplace list is managed by your organisation.</div>}
+    <div className="row between"><h4>Marketplaces</h4><button className="primary" disabled={lockedSources} onClick={add}><Plus size={15} /> Add marketplace</button></div>
+    {lockedSources && <div className="muted small row gap-s"><Lock size={12} /> The marketplace list is managed by your organisation.</div>}
     {list.length === 0 && <div className="muted">None yet.</div>}
     {list.map((m) => (
       <div key={m.id} className="panel mp-source">
@@ -454,7 +455,7 @@ function MarketplaceSettings(f: F) {
         <div className="row gap wrap">
           <label className="row gap-s small"><input type="checkbox" checked={m.enabled} disabled={lockedSources} onChange={(e) => patch(m.id, { enabled: e.target.checked })} /> Enabled</label>
           <button onClick={async () => { setTests({ ...tests, [m.id]: "Testing…" }); const r = await api().marketplaceTest(m.id); setTests({ ...tests, [m.id]: (r.ok ? "✅ " : "❌ ") + r.detail }); }}>Test</button>
-          <span className="small">{tests[m.id]}</span>
+          <span className="small"><MarkText text={tests[m.id]} /></span>
           <button className="ghost danger" disabled={lockedSources} onClick={() => confirm(`Remove marketplace "${m.name}"? Installed plugins stay installed.`) && setList(list.filter((x) => x.id !== m.id))}>Remove</button>
         </div>
       </div>
@@ -492,7 +493,7 @@ function UsageSettings(f: F) {
         </table>}
         {u.raw && <details><summary>Raw /usage output</summary><pre className="pre small">{u.raw}</pre></details>}
       </>}
-      <div><button className="primary" disabled={u?.loading} onClick={() => api().copilotUsage(true)}>{u?.loading ? "Refreshing…" : "↻ Refresh now"}</button></div>
+      <div><button className="primary" disabled={u?.loading} onClick={() => api().copilotUsage(true)}><RefreshCw size={14} className={u?.loading ? "spin" : ""} /> {u?.loading ? "Refreshing…" : "Refresh now"}</button></div>
     </div>
     <h4>Options</h4>
     <Row label="Show usage bar under the chat box"><Bool f={f} path="usage.copilotMeter" /></Row>
@@ -521,17 +522,17 @@ function JazzAreas({ f }: { f: F }) {
   return <div className="col gap-s">
     <div className="row gap wrap">
       {areas.length === 0 && <span className="muted small">All areas</span>}
-      {areas.map((a) => <span key={a} className="chip">{a}{!locked && <button className="link" title="Remove" onClick={() => save(areas.filter((x) => x !== a))}> ✕</button>}</span>)}
+      {areas.map((a) => <span key={a} className="chip">{a}{!locked && <button className="link" title="Remove" onClick={() => save(areas.filter((x) => x !== a))}><X size={12} /></button>}</span>)}
     </div>
     {!locked && <div className="row gap">
       <input className="grow" value={add} placeholder="Project area name" list="jazz-known-areas" onChange={(e) => setAdd(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && add.trim()) { void save([...areas, add]); setAdd(""); } }} />
       <datalist id="jazz-known-areas">{(known ?? []).map((a) => <option key={a} value={a} />)}</datalist>
       <button disabled={!add.trim()} onClick={() => { void save([...areas, add]); setAdd(""); }}>Add</button>
-      <button onClick={load} disabled={loading} title="Load the project areas you can see from the server">{loading ? "Loading…" : "↻ From server"}</button>
+      <button onClick={load} disabled={loading} title="Load the project areas you can see from the server"><RefreshCw size={14} className={loading ? "spin" : ""} /> {loading ? "Loading…" : "From server"}</button>
     </div>}
     {known && known.length > 0 && !locked && <div className="row gap wrap">
-      {known.filter((a) => !areas.includes(a)).slice(0, 40).map((a) => <button key={a} className="chip" onClick={() => save([...areas, a])}>＋ {a}</button>)}
+      {known.filter((a) => !areas.includes(a)).slice(0, 40).map((a) => <button key={a} className="chip" onClick={() => save([...areas, a])}><Plus size={12} /> {a}</button>)}
     </div>}
   </div>;
 }
@@ -579,11 +580,11 @@ function RmSettings({ f }: { f: F }) {
         <div className="col gap-s">
           <div className="row gap wrap">
             {rm.projects.length === 0 && <span className="muted small">All projects</span>}
-            {rm.projects.map((p) => <span key={p} className="chip">{p} <button className="link" onClick={() => f.set("jazz.rm.projects", rm.projects.filter((x) => x !== p))}>✕</button></span>)}
+            {rm.projects.map((p) => <span key={p} className="chip">{p} <button className="link" onClick={() => f.set("jazz.rm.projects", rm.projects.filter((x) => x !== p))}><X size={12} /></button></span>)}
           </div>
           <div className="row gap wrap">
-            <button onClick={async () => { try { setProjects(await api().rmProjects()); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } }}>↻ Load from server</button>
-            {projects?.filter((p) => !rm.projects.includes(p.title)).slice(0, 40).map((p) => <button key={p.id} className="chip" onClick={() => f.set("jazz.rm.projects", [...rm.projects, p.title])}>＋ {p.title}</button>)}
+            <button onClick={async () => { try { setProjects(await api().rmProjects()); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } }}><RefreshCw size={14} /> Load from server</button>
+            {projects?.filter((p) => !rm.projects.includes(p.title)).slice(0, 40).map((p) => <button key={p.id} className="chip" onClick={() => f.set("jazz.rm.projects", [...rm.projects, p.title])}><Plus size={12} /> {p.title}</button>)}
           </div>
         </div>
       </Row>
@@ -591,7 +592,7 @@ function RmSettings({ f }: { f: F }) {
         <input key={rm.config} defaultValue={rm.config} placeholder="https://alm.company.com/gc/configuration/… or …/rm/cm/stream/_… (or paste the configuration's web link)" disabled={f.locked("jazz.rm")}
           onBlur={async (e) => { const c = configUri(e.target.value); if (c !== rm.config) await f.set("jazz.rm.config", c); if (c !== e.target.value.trim()) { e.target.value = c; st.toast("info", `Configuration recognised: ${c}`); } }} /></Row>
       <Row label="Cache modules for (hours)" hint="Agents and searches use the cached copy; Refresh in the Requirements tab fetches again."><Num f={f} path="jazz.rm.cacheHours" /></Row>
-      <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().rmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
+      <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().rmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span><MarkText text={test} /></span></div></Row>
     </>}
   </>;
 }
@@ -619,7 +620,7 @@ function Integrations(f: F) {
         <button disabled={!pw} onClick={async () => { await api().jazzSetPassword(pw); setPw(""); st.setSettings((await api().getSettings()).settings); st.toast("info", "Password saved"); }}>Save</button></div>
     </Row>}
     <Row label="Default query"><Text f={f} path="jazz.defaultQuery" placeholder="words or ids shown when the Jazz page opens (optional)" /></Row>
-    <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().jazzTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
+    <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().jazzTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span><MarkText text={test} /></span></div></Row>
     <RmSettings f={f} />
 
     <h4>winIDEA (iSYSTEM / TASKING)</h4>
@@ -665,16 +666,15 @@ function ExamSetup() {
       st.setSettings((await api().getSettings()).settings); // the install folder may have been filled in
     } finally { setBusy(false); }
   };
-  const mark = { ok: "✅", warn: "⚠️", fail: "❌" } as const;
   return <Row label="Setup" hint="Check finds what's missing; Set up also installs the plugin from the package above. A plugin installed without admin rights is used when the agent starts EXAM.">
     <div className="col gap">
       <div className="row gap">
         <button disabled={busy} onClick={() => void go(false)}>Check</button>
         <button className="primary" disabled={busy} onClick={() => void go(true)}>{busy ? "Working…" : "Set up EXAM"}</button>
       </div>
-      {r?.error && <span>❌ {r.error}</span>}
-      {r && r.actions.map((a, i) => <span key={`a${i}`}>↪ {a}</span>)}
-      {r && r.checks.map((c) => <span key={c.name}>{mark[c.state]} <b>{c.name}</b>: {c.detail}</span>)}
+      {r?.error && <span><StatusMark state="fail" /> {r.error}</span>}
+      {r && r.actions.map((a, i) => <span key={`a${i}`}><CornerDownRight size={13} /> {a}</span>)}
+      {r && r.checks.map((c) => <span key={c.name}><StatusMark state={c.state} /> <b>{c.name}</b>: {c.detail}</span>)}
     </div>
   </Row>;
 }
@@ -703,7 +703,7 @@ function ProxyTest() {
       </div>
       <input value={url} placeholder="https://alm.company.com/ccm" onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void run(); }} />
       {res && <table className="kv"><tbody>
-        <tr><td>{res.ok ? "✅" : "❌"} <b>Result</b></td><td className={res.ok ? "" : "warn-text"}>{res.detail}</td></tr>
+        <tr><td><StatusMark state={res.ok ? "ok" : "fail"} /> <b>Result</b></td><td className={res.ok ? "" : "warn-text"}>{res.detail}</td></tr>
         <tr><td><b>Proxy in use</b></td><td>{res.config} <span className="muted small">({res.source})</span></td></tr>
         <tr><td><b>Resolved for this address</b></td><td><code>{res.resolved || "—"}</code></td></tr>
       </tbody></table>}
@@ -748,7 +748,7 @@ function Updates({ f }: { f: F }) {
             {u?.checkedAt ? ` · checked ${new Date(u.checkedAt).toLocaleString()}` : ""}</div>
         </div>
         <div className="row gap">
-          <button disabled={busy || u?.status === "checking" || u?.status === "downloading"} onClick={() => run(() => api().updateCheck())}>↻ Check now</button>
+          <button disabled={busy || u?.status === "checking" || u?.status === "downloading"} onClick={() => run(() => api().updateCheck())}><RefreshCw size={14} /> Check now</button>
           {u?.status === "available" && <button className="primary" disabled={busy} onClick={() => run(() => api().updateDownload())}>Download</button>}
           {u?.status === "ready" && <button className="primary" onClick={() => api().updateInstall()}>Restart & install</button>}
         </div>
@@ -776,7 +776,7 @@ function About({ f }: { f: F }) {
   const [info, setInfo] = useState<{ version: string; dataDir: string; platform: string } | null>(null);
   useEffect(() => { void api().appInfo().then(setInfo); }, []);
   return <div>
-    <h3>⚡ TheFlashMaster {info?.version}</h3>
+    <h3 className="row gap-s"><span className="brand-mark"><Zap size={17} strokeWidth={2.2} /></span> TheFlashMaster {info?.version}</h3>
     <Updates f={f} />
     <p className="muted">Desktop orchestrator for AI coding agents on locally authenticated harnesses (GitHub Copilot CLI, OpenCode, Pi, GitLab Duo).</p>
     <p className="small">Data folder: <code>{info?.dataDir}</code><br />Platform: {info?.platform}</p>

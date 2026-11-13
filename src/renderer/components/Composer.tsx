@@ -3,7 +3,7 @@ import type { Attachment, Chat, DriveMode } from "@shared/types";
 import { DRIVE_MODES } from "@shared/types";
 import type { ReactNode } from "react";
 import { api, useStore } from "../store";
-import { AtSign, Flag, Home, Hourglass, Leaf, Paperclip, Plane, RotateCcw, Send, Settings, Slash, Sofa, Sparkles, CornerDownRight, X } from "./icons";
+import { RoleIcon, AtSign, File, Flag, Home, Hourglass, Leaf, Paperclip, Plane, RotateCcw, Send, Settings, Slash, Sofa, Sparkles, CornerDownRight, X } from "./icons";
 
 const MODE_META: Record<DriveMode, { label: string; icon: ReactNode; hint: string }> = {
   local: { label: "LOCAL", icon: <Home size={13} />, hint: "On-prem / local model" },
@@ -38,14 +38,14 @@ export function Composer({ chat, parentId, placeholder, busy, compact }: { chat:
 
   const suggestions = useMemo(() => {
     const at = /^@([\w-]*)$/.exec(text);
-    if (at) return roles.filter((r) => r.name.startsWith(at[1]!.toLowerCase())).map((r) => ({ insert: `@${r.name} `, label: `${r.icon} @${r.name}`, hint: r.title }));
+    if (at) return roles.filter((r) => r.name.startsWith(at[1]!.toLowerCase())).map((r) => ({ insert: `@${r.name} `, label: <span className="row gap-s"><RoleIcon role={r.name} size={18} /> @{r.name}</span>, hint: r.title }));
     const sl = /^\/([\w-]*)$/.exec(text);
     if (sl) {
       const cmds = [
         { c: "superpowers", d: "toggle the superpowers workflow for this chat" }, { c: "stop", d: "stop agents in this chat" }, { c: "help", d: "list commands and specialists" },
         ...skills.filter((s) => s.command !== "superpowers-index").map((s) => ({ c: s.command, d: s.description })),
       ];
-      return cmds.filter((x) => x.c.startsWith(sl[1]!.toLowerCase())).map((x) => ({ insert: `/${x.c} `, label: `/${x.c}`, hint: x.d }));
+      return cmds.filter((x) => x.c.startsWith(sl[1]!.toLowerCase())).map((x) => ({ insert: `/${x.c} `, label: <span>/{x.c}</span>, hint: x.d }));
     }
     return [];
   }, [text, roles, skills]);
@@ -96,7 +96,7 @@ export function Composer({ chat, parentId, placeholder, busy, compact }: { chat:
           <div className="att-row">
             {atts.map((a) => (
               <span key={a.id} className="att-chip" title={`${a.name} · ${(a.size / 1024).toFixed(0)} KB`}>
-                {a.thumb ? <img src={a.thumb} alt="" /> : <span className="att-icon">📄</span>}
+                {a.thumb ? <img src={a.thumb} alt="" /> : <span className="att-icon"><File size={18} /></span>}
                 <span className="att-name">{a.name}</span>
                 <button onClick={() => setAtts((x) => x.filter((y) => y.id !== a.id))} title="Remove"><X size={12} /></button>
               </span>

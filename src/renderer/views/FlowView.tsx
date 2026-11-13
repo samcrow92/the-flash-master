@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Compass as CompassIcon } from "../components/icons";
+import { ArrowLeft, ArrowUpRight, Check, Circle, CircleAlert, CircleCheck, Compass as CompassIcon, CornerLeftUp, Expand, KeyRound, MessageSquare, Pause, RoleIcon, Wrench, X, type LucideIcon } from "../components/icons";
+import { Dots } from "../components/Dots";
 import type { AgentEvent, AgentFlow, AgentRun, PlanStep } from "@shared/types";
 import { ago, api, fmtTokens, roleOf, useStore } from "../store";
 
 /**
  * Live flow chart of where an agent is in its task:
  * Request → plan steps (✓ done / ● current / ○ pending) → delegations (branches to specialists) → outcome.
- * Shown as a side panel in chats (🧭 Progress) and as a full page from the Agents overview.
+ * Shown as a side panel in chats (Progress) and as a full page from the Agents overview.
  */
 export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onSelect?: (id: string) => void; compact?: boolean }) {
   const [flow, setFlow] = useState<AgentFlow | null>(null);
@@ -40,11 +41,11 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
   return (
     <div className={`flow ${compact ? "compact" : ""}`}>
       <div className="flow-head">
-        <div className="row gap-s"><span className="flow-icon">{role?.icon ?? "🤖"}</span><strong>{role?.title ?? agent.role}</strong>
+        <div className="row gap-s"><RoleIcon role={agent.role} size={24} className="flow-icon" /><strong>{role?.title ?? agent.role}</strong>
           <span className={`status st-${agent.status}`}>{agent.status}</span></div>
         <div className="muted small">{agent.harness} · {fmtTokens(agent.tokensIn + agent.tokensOut)} tokens · started {ago(agent.startedAt)} ago</div>
         {plan.length > 0 && <div className="progress"><div style={{ width: `${(done / plan.length) * 100}%` }} /><span>{done}/{plan.length} steps</span></div>}
-        {flow.parent && <button className="link" onClick={() => onSelect?.(flow.parent!.id)}>↖ delegated by {roleOf(flow.parent.role)?.title ?? flow.parent.role}</button>}
+        {flow.parent && <button className="link" onClick={() => onSelect?.(flow.parent!.id)}><CornerLeftUp size={13} /> delegated by {roleOf(flow.parent.role)?.title ?? flow.parent.role}</button>}
       </div>
 
       <div className="flow-chart">
@@ -65,7 +66,7 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
                 const cs = useStore.getState().agents[d.ref ?? ""] ?? child;
                 return (
                   <button key={d.id} className={`branch-node st-${cs?.status ?? "idle"}`} onClick={() => d.ref && onSelect?.(d.ref)} title="Open this specialist's flow">
-                    <div>{roleOf(cs?.role)?.icon} <strong>{roleOf(cs?.role)?.title ?? cs?.role ?? "agent"}</strong></div>
+                    <div className="row gap-s"><RoleIcon role={cs?.role} size={18} /> <strong>{roleOf(cs?.role)?.title ?? cs?.role ?? "agent"}</strong></div>
                     <div className="small muted">{d.label.split(": ").slice(1).join(": ")}</div>
                     <div className="small">{cs?.status ?? "…"}{cs?.plan?.length ? ` · ${cs.plan.filter((p) => p.status === "completed").length}/${cs.plan.length}` : ""}</div>
                   </button>
@@ -74,7 +75,7 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
             </div>
           </div>
         )}
-        {pendingApproval && <Node kind="gate" title="Waiting for your approval" detail={approvals[approvals.length - 1]!.label + " — react ✅ or ❌ in the chat"} state="in_progress" />}
+        {pendingApproval && <Node kind="gate" title="Waiting for your approval" detail={approvals[approvals.length - 1]!.label + " — approve or deny it in the chat"} state="in_progress" />}
         <Node kind="end" title={outcome.title} detail={outcome.detail} state={outcome.state} last />
       </div>
 
@@ -92,7 +93,8 @@ function outcomeOf(a: AgentRun, last: AgentEvent | undefined): { title: string; 
 }
 
 function Node({ kind, title, detail, state, last }: { kind: string; title: string; detail?: string; state: string; last?: boolean }) {
-  const icon = state === "completed" ? "✓" : state === "in_progress" ? "●" : state === "failed" ? "✕" : state === "paused" ? "⏸" : "○";
+  const icon = state === "completed" ? <Check size={13} strokeWidth={2.6} /> : state === "in_progress" ? <Dots pattern="hop" size={3} />
+    : state === "failed" ? <X size={13} strokeWidth={2.6} /> : state === "paused" ? <Pause size={11} strokeWidth={2.6} /> : <Circle size={8} strokeWidth={2.4} />;
   return (
     <div className={`flow-node n-${kind} s-${state}`}>
       <div className="node-box">
@@ -106,14 +108,14 @@ function Node({ kind, title, detail, state, last }: { kind: string; title: strin
 
 function Timeline({ events }: { events: AgentEvent[] }) {
   const shown = events.filter((e) => e.kind !== "plan").slice(-40).reverse();
-  const icon: Record<string, string> = { turn: "💬", tool: "🔧", delegate: "↗", approval: "🔐", result: "✅", error: "⚠️", status: "•" };
+  const icon: Record<string, LucideIcon> = { turn: MessageSquare, tool: Wrench, delegate: ArrowUpRight, approval: KeyRound, result: CircleCheck, error: CircleAlert, status: Circle };
   return (
     <div className="timeline">
       <h4>Activity</h4>
       {shown.length === 0 && <div className="muted small">No activity yet.</div>}
       {shown.map((e) => (
         <div key={e.id} className="tl-row">
-          <span className="tl-icon">{icon[e.kind] ?? "•"}</span>
+          <span className={`tl-icon tl-${e.kind}`}>{(() => { const I = icon[e.kind] ?? Circle; return <I size={13} />; })()}</span>
           <span className="tl-label" title={e.label}>{e.label}</span>
           {e.status && <span className="muted small">{e.status}</span>}
           <span className="muted small tl-time">{new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
@@ -132,15 +134,15 @@ export function FlowPanel({ chatId, agentId, onClose }: { chatId: string; agentI
   return (
     <aside className="thread flow-panel">
       <header className="thread-header">
-        <strong>🧭 Progress</strong>
+        <strong className="row gap-s"><CompassIcon size={15} className="h-icon" /> Progress</strong>
         <div className="row gap-s">
           {agents.length > 0 && (
             <select value={current ?? ""} onChange={(e) => setSel(e.target.value)}>
-              {agents.map((a) => <option key={a.id} value={a.id}>{roleOf(a.role)?.icon} {roleOf(a.role)?.title ?? a.role} · {a.status}</option>)}
+              {agents.map((a) => <option key={a.id} value={a.id}>{roleOf(a.role)?.title ?? a.role} · {a.status}</option>)}
             </select>
           )}
-          {current && <button className="ghost" title="Open full page" onClick={() => useStore.getState().setView({ kind: "flow", agentId: current })}>⤢</button>}
-          <button className="ghost" onClick={onClose}>✕</button>
+          {current && <button className="ghost icon-only" title="Open full page" onClick={() => useStore.getState().setView({ kind: "flow", agentId: current })}><Expand size={15} /></button>}
+          <button className="ghost icon-only" title="Close" onClick={onClose}><X size={15} /></button>
         </div>
       </header>
       <div className="flow-scroll">
@@ -159,8 +161,8 @@ export function FlowPage({ agentId }: { agentId: string }) {
       <header className="page-header">
         <h2><CompassIcon size={20} className="h-icon" /> Agent progress</h2>
         <div className="row gap">
-          {a?.chatId && <button onClick={() => st.openChat(a.chatId!)}>Open chat ↗</button>}
-          <button onClick={() => st.setView({ kind: "agents" })}>← Agents</button>
+          {a?.chatId && <button onClick={() => st.openChat(a.chatId!)}><ArrowUpRight size={14} /> Open chat</button>}
+          <button onClick={() => st.setView({ kind: "agents" })}><ArrowLeft size={14} /> Agents</button>
         </div>
       </header>
       <FlowChart agentId={id} onSelect={setId} />

@@ -11,7 +11,8 @@ import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap } from "../components/icons";
+import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
+import { Dots } from "../components/Dots";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -146,7 +147,7 @@ export function ChatView({ chatId }: { chatId: string }) {
 function EmptyChat({ isMaster }: { isMaster: boolean }) {
   return (
     <div className="empty-chat">
-      <div className="logo-big">⚡</div>
+      <div className="logo-big"><Zap size={44} strokeWidth={1.5} /></div>
       <h3>{isMaster ? "Coordinate your agent team" : "Start the conversation"}</h3>
       <p className="muted">
         {isMaster
@@ -220,17 +221,17 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
             </div>
           )}
           {m.status === "streaming" && (
-            <div className="streaming"><span className="working-dots"><i /><i /><i /></span> <span className="muted small shimmer">{agent?.lastActivity ?? "Working…"}</span></div>
+            <div className="streaming"><Dots cycle /> <span className="muted small shimmer">{agent?.lastActivity ?? "Working…"}</span></div>
           )}
         </div>
         <div className="msg-footer">
-          {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title="Toggle reaction">{r}</button>)}
+          {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title={`${REACTIONS[r]?.label ?? r} — click to remove`}><ReactionIcon emoji={r} /></button>)}
           <div className="msg-actions">
             <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={14} /></button>
             {!inThread && onReply && <button onClick={onReply} title="Reply in thread"><CornerUpLeft size={13} /> Reply</button>}
             <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={13} /></button>
           </div>
-          {picker && <div className="emoji-picker">{EMOJIS.map((e) => <button key={e} onClick={() => react(e)}>{e}</button>)}</div>}
+          {picker && <div className="emoji-picker">{EMOJIS.map((e, i) => <button key={e} style={{ animationDelay: `${i * 22}ms` }} title={REACTIONS[e]?.label} onClick={() => react(e)}><ReactionIcon emoji={e} size={17} /></button>)}</div>}
           {!inThread && m.replyCount > 0 && onReply && (
             <button className="reply-count" onClick={onReply}><MessageCircle size={13} /> {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}</button>
           )}

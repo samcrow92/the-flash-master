@@ -1,6 +1,7 @@
 import { useEffect, useId } from "react";
 import type { HarnessId } from "@shared/types";
 import { api, useStore } from "../store";
+import { RefreshCw } from "./icons";
 
 /**
  * Model field with suggestions discovered from the harness (Copilot/OpenCode via ACP, Pi via RPC).
@@ -27,7 +28,7 @@ export function ModelInput({ harness, value, onChange, placeholder, className, d
       {harness && (
         <button type="button" className={`icon-btn refresh ${state?.loading ? "spinning" : ""}`} disabled={disabled || state?.loading}
           title={state?.loading ? "Asking the harness for its models…" : `Refresh models from ${harness}`}
-          onClick={() => void api().listModels(harness, true).then((m) => useStore.getState().setModels(m))}>↻</button>
+          onClick={() => void api().listModels(harness, true).then((m) => useStore.getState().setModels(m))}><RefreshCw size={13} /></button>
       )}
     </span>
   );
