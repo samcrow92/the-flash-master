@@ -163,6 +163,15 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`(()=>{const l=document.querySelector('.chat .messages');const b=[...document.querySelectorAll('.steer-badge')].pop();b?.scrollIntoView({block:'center'});})()`);
       await sleep(300);
       await shot(join(demo, "29-steer-seen.png"));
+      // Chats open at the latest message (switch away and back)
+      await click("Master chat", ".sidebar button");
+      await sleep(600);
+      await js(`(()=>{const el=[...document.querySelectorAll('.chat-link')].find(e=>e.textContent.includes('General'));el?.click();})()`);
+      await sleep(900);
+      const gap = await js<number>(`(()=>{const l=document.querySelector('.chat .messages');return Math.round(l.scrollHeight-l.scrollTop-l.clientHeight)})()`);
+      const tall = await js<number>(`document.querySelector('.chat .messages').scrollHeight`);
+      log("info", `smoke-scroll: distance-to-bottom=${gap} contentHeight=${tall}`);
+      await shot(join(demo, "30-chat-opened-at-latest.png"));
       // Profile: initials first, then a generated picture
       await click("Settings", ".sidebar button");
       await sleep(400);

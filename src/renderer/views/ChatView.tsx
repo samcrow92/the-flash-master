@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
@@ -24,11 +24,23 @@ export function ChatView({ chatId }: { chatId: string }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
 
+  // Stick to the latest message: on open / chat switch, while content grows (streaming, images, diagrams)
+  // and for new messages — until the user scrolls up to read; scrolling back down re-attaches.
+  const innerRef = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const toBottom = () => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; };
+  useLayoutEffect(() => { pinned.current = true; toBottom(); }, [chatId]);
+  useLayoutEffect(() => { if (pinned.current) toBottom(); }, [messages]);
   useEffect(() => {
-    const el = listRef.current;
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 240) el.scrollTop = el.scrollHeight;
-  }, [messages]);
-  useEffect(() => { listRef.current?.scrollTo({ top: 1e9 }); }, [chatId]);
+    const el = listRef.current, inner = innerRef.current;
+    if (!el || !inner) return;
+    const onScroll = () => { pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
+    const ro = new ResizeObserver(() => { if (pinned.current) toBottom(); });
+    ro.observe(inner);
+    ro.observe(el);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener("scroll", onScroll); };
+  }, [chatId, !!chat]);
 
   if (!chat) return <div className="empty">Chat not found.</div>;
 
@@ -115,8 +127,10 @@ export function ChatView({ chatId }: { chatId: string }) {
         )}
 
         <div className="messages" ref={listRef}>
-          {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
-          {messages.map((m) => <MessageItem key={m.id} m={m} onReply={() => st.openThread(chatId, m.id)} />)}
+          <div className="messages-inner" ref={innerRef}>
+            {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
+            {messages.map((m) => <MessageItem key={m.id} m={m} onReply={() => st.openThread(chatId, m.id)} />)}
+          </div>
         </div>
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
         <UsageMeter />

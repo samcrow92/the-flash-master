@@ -129,6 +129,45 @@ export function pickStream(rdf: string): string {
   return all[0] ?? "";
 }
 
+// ------------------------------------------------------------------ OSLC RM (fallback when the Reportable REST API is missing)
+
+const RDF_PREFIXES = "dcterms=<http://purl.org/dc/terms/>,oslc_rm=<http://open-services.net/ns/rm#>,rdf=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>,jazz_rm=<http://jazz.net/ns/rm#>";
+/** Resources described in an OSLC query result / RDF document: about + title + identifier. */
+export function parseOslcResources(rdf: string): { uri: string; title: string; identifier: string }[] {
+  const out = new Map<string, { uri: string; title: string; identifier: string }>();
+  for (const m of rdf.matchAll(/<([\w.-]+:[\w.-]+)\b[^>]*?about="([^"]+)"[^>]*?(\/?)>/g)) {
+    const end = m[3] ? -1 : rdf.indexOf(`</${m[1]}>`, m.index! + m[0].length);
+    m[3] = end < 0 ? "" : rdf.slice(m.index! + m[0].length, end); // element body (nested resources are matched on their own)
+    const uri = decode(m[2]!);
+    if (!/\/resources\//.test(uri)) continue;
+    const body = m[3] ?? "";
+    const prev = out.get(uri);
+    const title = htmlToText(el(body, "title")) || prev?.title || "";
+    const identifier = decode(el(body, "identifier")).trim() || prev?.identifier || "";
+    out.set(uri, { uri, title, identifier });
+  }
+  return [...out.values()];
+}
+export const nextPage = (rdf: string) => decode(/<(?:[\w.-]+:)?nextPage\b[^>]*resource="([^"]+)"/.exec(rdf)?.[1] ?? "");
+export const usesOf = (rdf: string) => [...new Set([...rdf.matchAll(/<(?:[\w.-]+:)?uses\b[^>]*resource="([^"]+)"/g)].map((m) => decode(m[1]!)))];
+/** One artifact fetched with OSLC (GET artifact, RDF/XML). */
+export function parseOslcArtifact(rdf: string, uri: string): Omit<Requirement, "type" | "heading"> & { shape: string } {
+  const primary = el(rdf, "primaryText");
+  const title = htmlToText(el(rdf, "title"));
+  return {
+    id: decode(el(rdf, "identifier")).trim(), uri, title, text: (htmlToText(primary) || htmlToText(el(rdf, "description")) || title).slice(0, 8000),
+    section: "", depth: 0, attrs: {}, links: [],
+    shape: decode(/<(?:[\w.-]+:)?instanceShape\b[^>]*resource="([^"]+)"/.exec(rdf)?.[1] ?? ""),
+  };
+}
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]!); } }));
+  return out;
+}
+const missingApi = (e: unknown) => /HTTP (400|404|405|406|500|501)/.test(String((e as Error)?.message ?? e));
+
 // ------------------------------------------------------------------ search
 
 const STOP = new Set("a an and are as at be by can do for from has have if in into is it its not of on or shall should that the then this to was when which will with within without must may".split(" "));
@@ -176,6 +215,56 @@ export class Requirements {
   private mem = new Map<string, RmModuleData>();
 
   private scope: { key: string; title: string; projectId: string; stream: string } | null = null;
+  private noReportable = false;
+  private shapes = new Map<string, Promise<string>>();
+
+  /** OSLC Query for modules of a project (configuration-aware). */
+  private async oslcModules(projectId: string): Promise<{ uri: string; title: string; identifier: string }[]> {
+    const api = this.need();
+    const base = await this.queryBase(projectId);
+    const q = (where: string) => `${base}${base.includes("?") ? "&" : "?"}oslc.prefix=${encodeURIComponent(RDF_PREFIXES)}`
+      + `&oslc.select=${encodeURIComponent("dcterms:title,dcterms:identifier")}&oslc.where=${encodeURIComponent(where)}&oslc.pageSize=200${this.cfgParam()}`;
+    for (const where of ["rdf:type=jazz_rm:Module", "rdf:type=<http://jazz.net/ns/rm#Module>", "rdf:type=oslc_rm:RequirementCollection"]) {
+      try {
+        const all: { uri: string; title: string; identifier: string }[] = [];
+        let url: string = q(where);
+        for (let page = 0; url && page < 25; page++) {
+          const rdf = await api.getText(url, "application/rdf+xml", true);
+          all.push(...parseOslcResources(rdf));
+          url = nextPage(rdf);
+        }
+        if (all.length) return [...new Map(all.map((x) => [x.uri, x])).values()];
+      } catch (e) { if (!missingApi(e)) throw e; }
+    }
+    return [];
+  }
+  /** Query capability of a project (from its services document, else the well-known DOORS Next /views URL). */
+  private async queryBase(projectId: string): Promise<string> {
+    const api = this.need();
+    const svc = await api.getText(`/oslc_rm/${projectId}/services.xml`, "application/rdf+xml", true).catch(() => "");
+    const qb = /<(?:[\w.-]+:)?queryBase\b[^>]*resource="([^"]+)"/.exec(svc)?.[1];
+    if (qb) return decode(qb);
+    const root = (/^(https?:\/\/[^"]+?)\/oslc_rm\//.exec(svc)?.[1]) ?? "";
+    return `${root || ""}/views?oslc.query=true&projectURL=${encodeURIComponent(`${root}/process/project-areas/${projectId}`)}`;
+  }
+  /** Module contents via OSLC: the module's oslc_rm:uses list, then each artifact (unordered: sorted by id). */
+  private async oslcModuleContent(mod: RmModule): Promise<Requirement[]> {
+    const api = this.need();
+    const cfg = this.config() ? `${mod.uri.includes("?") ? "&" : "?"}oslc_config.context=${encodeURIComponent(this.config())}` : "";
+    const uses = usesOf(await api.getText(mod.uri + cfg, "application/rdf+xml", true)).slice(0, 3000);
+    const reqs = await mapLimit(uses, 6, async (u) => {
+      const rdf = await api.getText(u + (this.config() ? `${u.includes("?") ? "&" : "?"}oslc_config.context=${encodeURIComponent(this.config())}` : ""), "application/rdf+xml", true).catch(() => "");
+      if (!rdf) return null;
+      const a = parseOslcArtifact(rdf, u);
+      if (a.shape && !this.shapes.has(a.shape)) {
+        this.shapes.set(a.shape, api.getText(a.shape, "application/rdf+xml", true).then((x) => htmlToText(el(x, "title")) || "Requirement", () => "Requirement"));
+      }
+      const type = a.shape ? await this.shapes.get(a.shape)! : "Requirement";
+      const { shape: _s, ...r } = a;
+      return { ...r, type: type || "Requirement", heading: /heading/i.test(type ?? "") } as Requirement;
+    });
+    return reqs.filter((r): r is Requirement => !!r).sort((a, b) => Number(a.id) - Number(b.id) || a.id.localeCompare(b.id));
+  }
 
   constructor(private api: () => RmFetcher | null, private cacheDir: string, private userConfig: () => string,
     private component: () => string = () => "") {
@@ -237,9 +326,17 @@ export class Requirements {
   async modules(projectId: string, refresh = false): Promise<RmModule[]> {
     if (!refresh && this.modulesByProject.has(projectId)) return this.modulesByProject.get(projectId)!;
     await this.resolveComponent().catch(() => null);
-    const xml = await this.need().getText(`/publish/modules?projectURI=${encodeURIComponent(projectId)}${this.cfgParam()}`, "application/xml");
-    const mods = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && (/module/i.test(a.format) || /module/i.test(a.type) || a.format === ""))
-      .map((a) => ({ uri: a.uri, uuid: uuidOf(a.uri), identifier: a.id, title: a.title || a.text.slice(0, 80), projectId, modified: undefined }));
+    let mods: RmModule[];
+    try {
+      if (this.noReportable) throw new Error("HTTP 404 (cached)");
+      const xml = await this.need().getText(`/publish/modules?projectURI=${encodeURIComponent(projectId)}${this.cfgParam()}`, "application/xml");
+      mods = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && (/module/i.test(a.format) || /module/i.test(a.type) || a.format === ""))
+        .map((a) => ({ uri: a.uri, uuid: uuidOf(a.uri), identifier: a.id, title: a.title || a.text.slice(0, 80), projectId, modified: undefined }));
+    } catch (e) {
+      if (!missingApi(e)) throw e;
+      this.noReportable = true; // this server has no Reportable REST API for modules: use OSLC Query
+      mods = (await this.oslcModules(projectId)).map((r) => ({ uri: r.uri, uuid: uuidOf(r.uri), identifier: r.identifier, title: r.title || r.identifier || uuidOf(r.uri), projectId }));
+    }
     const uniq = [...new Map(mods.map((m) => [m.uri, m])).values()].sort((a, b) => a.title.localeCompare(b.title));
     this.modulesByProject.set(projectId, uniq);
     return uniq;
@@ -255,12 +352,19 @@ export class Requirements {
     if (!mod) throw new Error(`Unknown module "${ref}" — list modules first (rm_modules) or use its URL`);
     const reqs = new Map<string, Requirement>();
     const size = 500;
-    for (let pos = 0; pos < 20000; pos += size) {
-      const xml = await this.need().getText(`/publish/resources?moduleURI=${encodeURIComponent(mod.uri)}${this.cfgParam()}&size=${size}&pos=${pos}`, "application/xml");
-      const arts = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && a.uri !== mod.uri && !/^module$/i.test(a.format));
-      const before = reqs.size;
-      for (const a of arts) { const { format: _f, ...r } = a; if (!reqs.has(r.uri)) reqs.set(r.uri, r); }
-      if (arts.length < size || reqs.size === before) break;
+    try {
+      if (this.noReportable) throw new Error("HTTP 404 (cached)");
+      for (let pos = 0; pos < 20000; pos += size) {
+        const xml = await this.need().getText(`/publish/resources?moduleURI=${encodeURIComponent(mod.uri)}${this.cfgParam()}&size=${size}&pos=${pos}`, "application/xml");
+        const arts = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && a.uri !== mod.uri && !/^module$/i.test(a.format));
+        const before = reqs.size;
+        for (const a of arts) { const { format: _f, ...r } = a; if (!reqs.has(r.uri)) reqs.set(r.uri, r); }
+        if (arts.length < size || reqs.size === before) break;
+      }
+    } catch (e) {
+      if (!missingApi(e)) throw e;
+      this.noReportable = true;
+      for (const r of await this.oslcModuleContent(mod)) reqs.set(r.uri, r);
     }
     const data: RmModuleData = { module: mod, fetchedAt: Date.now(), requirements: [...reqs.values()], config: this.config() };
     this.mem.set(mod.uuid, data);

@@ -123,3 +123,38 @@ describe("DOORS Next links and scope", () => {
     expect(r.detail).toMatch(/web page/);
   });
 });
+
+describe("OSLC fallback when the Reportable REST API is missing", () => {
+  it("lists modules with OSLC Query and reads module content via oslc_rm:uses", async () => {
+    const calls: string[] = [];
+    const SVC = `<rdf:RDF><oslc:QueryCapability><oslc:queryBase rdf:resource="https://alm.x/rmA1/views?oslc.query=true&amp;projectURL=https%3A%2F%2Falm.x%2FrmA1%2Fprocess%2Fproject-areas%2F_PA"/></oslc:QueryCapability></rdf:RDF>`;
+    const QUERY = `<rdf:RDF><rdf:Description rdf:about="q"><rdfs:member><jazz_rm:Module rdf:about="https://alm.x/rmA1/resources/MD_1"><dcterms:title>Lighting SRS</dcterms:title><dcterms:identifier>4711</dcterms:identifier></jazz_rm:Module></rdfs:member></rdf:Description></rdf:RDF>`;
+    const MOD = `<rdf:RDF><jazz_rm:Module rdf:about="https://alm.x/rmA1/resources/MD_1"><oslc_rm:uses rdf:resource="https://alm.x/rmA1/resources/TX_2"/><oslc_rm:uses rdf:resource="https://alm.x/rmA1/resources/TX_1"/></jazz_rm:Module></rdf:RDF>`;
+    const ART = (id: string, text: string, shape: string) => `<rdf:RDF><oslc_rm:Requirement rdf:about="x"><dcterms:identifier>${id}</dcterms:identifier><dcterms:title>${text.slice(0, 20)}</dcterms:title>
+      <jazz_rm:primaryText rdf:parseType="Literal"><div xmlns="http://www.w3.org/1999/xhtml"><p>${text}</p></div></jazz_rm:primaryText><oslc:instanceShape rdf:resource="https://alm.x/rmA1/types/${shape}"/></oslc_rm:Requirement></rdf:RDF>`;
+    const fetcher: RmFetcher = { getText: async (path) => {
+      calls.push(path);
+      if (path.startsWith("/publish/")) throw new Error(`HTTP 404 for ${path.split("?")[0]}`);
+      if (path.includes("/services.xml")) return SVC;
+      if (path.includes("/views?")) return QUERY;
+      if (path.includes("/resources/MD_1")) return MOD;
+      if (path.includes("/resources/TX_1")) return ART("1001", "The lamp shall switch on within 50 ms.", "SR");
+      if (path.includes("/resources/TX_2")) return ART("1002", "The input shall be debounced for 10 ms.", "SR");
+      if (path.includes("/types/SR")) return `<rdf:RDF><oslc:ResourceShape><dcterms:title>System Requirement</dcterms:title></oslc:ResourceShape></rdf:RDF>`;
+      return "";
+    } };
+    const rm = new Requirements(() => fetcher, mkdtempSync(join(tmpdir(), "rm4-")), () => "https://alm.x/rmA1/cm/stream/_S");
+    const mods = await rm.modules("_PA");
+    expect(mods).toEqual([{ uri: "https://alm.x/rmA1/resources/MD_1", uuid: "MD_1", identifier: "4711", title: "Lighting SRS", projectId: "_PA" }]);
+    const q = calls.find((c) => c.includes("/views?"))!;
+    expect(decodeURIComponent(q)).toContain("oslc.where=rdf:type=jazz_rm:Module");
+    expect(decodeURIComponent(q)).toContain("oslc_config.context=https://alm.x/rmA1/cm/stream/_S");
+    const data = await rm.module("4711");
+    expect(data.requirements.map((r) => [r.id, r.type, r.text])).toEqual([
+      ["1001", "System Requirement", "The lamp shall switch on within 50 ms."],
+      ["1002", "System Requirement", "The input shall be debounced for 10 ms."],
+    ]);
+    expect(calls.filter((c) => c.includes("/types/SR"))).toHaveLength(1); // shape title cached
+    expect((await rm.search("debounce"))[0]!.id).toBe("1002");
+  });
+});

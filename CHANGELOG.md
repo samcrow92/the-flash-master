@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Chats open at the latest message:** when the app starts and when you switch chats. The view stays pinned to the bottom while content grows (streaming, images, diagrams) unless you scroll up to read; scrolling back down re-attaches.
+- **DOORS Next without the Reportable REST API:** when `/publish/modules` or `/publish/resources` returns 404, modules are listed with OSLC Query (`rdf:type=jazz_rm:Module`, configuration-aware, paged). Module contents are read through the module's `oslc_rm:uses` and each artifact's primary text and type. The choice is remembered per server.
 - **DOORS Next setup accepts browser links:** paste the root or any DOORS Next link (e.g. a component dashboard).
   - The app keeps only the context root (`…/rmA1`) and takes the component and configuration from the link.
   - The component's project and default stream are resolved automatically.
