@@ -15,6 +15,7 @@ TheFlashMaster is a desktop app for Windows x64 and macOS (Apple silicon and Int
 | Mock | Built-in offline demo, so you can try everything without a CLI |
 
 The app calls no model API itself and stores no model credentials. There's no login: it's a single-user local app.
+The principles behind it, and what changes fit, are in [VISION.md](VISION.md).
 
 ![Chat with streaming, a thread and reactions](docs/screenshots/2-chat-thread-reactions.png)
 
@@ -50,6 +51,10 @@ The app calls no model API itself and stores no model credentials. There's no lo
 - **Bring your own agents:** start from the editable template (yourself or with your LLM), check it with live validation, and import it in the app, from `.md` files, or by dragging files onto the window. Imported agents appear in the specialist list right away; you can export or remove them.
 - **🧭 Progress flowchart** for every agent: request → plan steps (done / current / pending) → specialists it delegated to → approvals → result, plus an activity timeline. Open it with the 🧭 Progress button in any chat, by clicking an agent chip, or from the Agents overview as a full page.
 - **Agents overview:** every running agent, with **pause / resume / stop** and Stop all.
+- **Nothing lost on restart:** agents that were working when the app closed are marked *interrupted*; **Resume** restarts them with their brief.
+- **Questions reach you at once:** a specialist that needs a decision or is blocked says so in its result, and its question appears in the thread and as a notice right away.
+- **Stuck-agent warning:** a working agent that sends nothing for 10 minutes (Settings → Agents) gets a warning in its chat. It keeps running, so you can wait, steer or stop it.
+- **Separate copies for parallel coding:** in a git project, delegated specialists that change code work in their own worktree and branch, so parallel agents don't overwrite each other. Merge or discard each branch from the Agents page; unmerged work is never deleted without your confirmation.
 - **Dashboard:** token usage across agents, projects, roles, harnesses and days, plus budgets.
 - **Task board** in SQLite: kanban with priorities, an assignee agent and Jazz links. **Run with agent** starts the assigned specialist with the task as its brief.
 - **IBM Jazz (EWM/RTC):** search work items across several project areas (pick the area right in the Jazz page), view details and discussion, comment, edit and run workflow actions, analyse an item with an agent, create tasks from items, and let agents query, update or comment through MCP tools. Form, Basic or Windows (integrated) sign-in, with clear HTTP 401 guidance.
