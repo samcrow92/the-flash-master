@@ -19,7 +19,7 @@ import { prepareInstructions } from "./harness/instructions";
 import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
-  parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
+  parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
 export interface OrchestratorDeps {
@@ -114,6 +114,8 @@ function copilotMcpBlocked(homeDir: string): boolean {
     });
   } catch { return false; }
 }
+
+const SAID_LABEL: Record<Exclude<ResultStatus, "done">, string> = { needs_decision: "Needs your decision", blocked: "Blocked", failed: "Reported a failure" };
 
 export class Orchestrator {
   private live = new Map<string, Live>();
@@ -597,12 +599,17 @@ export class Orchestrator {
       const compact = resultForParent(text, t.role.maxResultTokens);
       live.lastResult = compact;
       const resultLine = /summary:\s*(.+)/.exec(compact)?.[1] ?? compact.replace(/\s+/g, " ");
+      // What the agent itself says about how it ended (status line of its <result> block).
+      const said = status === "done" ? (parseResult(text).status ?? "done") : "done";
+      const asks = said !== "done" ? (parseResult(text).question ?? resultLine) : null;
       this.flow(live.agentId, status === "error" ? { kind: "error", label: (res.error ?? "error").slice(0, 160) }
+        : said !== "done" ? { kind: "status", label: `${SAID_LABEL[said]}: ${asks!.slice(0, 150)}`, status: said }
         : { kind: status === "done" ? "result" : "status", label: status === "done" ? resultLine.slice(0, 160) : status, status });
       this.emitAgent(this.d.db.updateAgent(live.agentId, { status: status === "done" ? "idle" : status, resultSummary: compact.slice(0, 4000),
-        lastActivity: status === "done" ? "Waiting for input" : status, ended: status === "stopped" }));
+        lastActivity: status === "done" ? (said !== "done" ? `${SAID_LABEL[said]}: ${asks}` : "Waiting for input") : status, ended: status === "stopped" }));
+      if (said !== "done") this.surfaceSaid(live, t.chat.id, t.threadRoot, said, asks!);
       if (t.taskId) {
-        const task = this.d.db.updateTask(t.taskId, { status: status === "error" ? "blocked" : "review" });
+        const task = this.d.db.updateTask(t.taskId, { status: status === "error" || said !== "done" ? "blocked" : "review" });
         this.d.emit({ type: "task.updated", task });
       }
       this.finishWaiters(live, compact);
@@ -934,6 +941,17 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
 
   private finishWaiters(l: Live, result: string): void {
     for (const w of l.waiters.splice(0)) w(result);
+  }
+
+  /**
+   * A specialist reported that it needs a decision, is blocked, or failed. Its delegating agent gets this in the
+   * result as usual; the user also sees it right away in the thread and as a notice, without waiting for the coordinator.
+   */
+  private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string): void {
+    const icon = said === "needs_decision" ? "❓" : said === "blocked" ? "⛔" : "⚠️";
+    const who = `${l.role.icon} ${l.role.title}`;
+    if (l.depth > 0) this.system(chatId, threadRoot, `${icon} **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}`);
+    this.d.emit({ type: "notice", level: said === "failed" ? "error" : "warn", text: `${who} ${SAID_LABEL[said].toLowerCase()}: ${asks}`.replace(/[*`]/g, "").slice(0, 140) });
   }
 
   private setStatus(l: Live, status: AgentRun["status"], activity: string): void {

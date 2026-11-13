@@ -44,6 +44,8 @@ export class MockSession implements HarnessSession {
         "Proposed change (mock) — also shown in **Artifacts → Changes**:", "",
         "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
       "<result>",
+      // "[needs-decision]" in a request makes the mock ask back, to try (and test) decision routing.
+      ...(request.includes("[needs-decision]") ? ["status: needs_decision", "question: Use calibration set A or B? I recommend A (mock)."] : []),
       `summary: Mock run for "${request.trim().slice(0, 60)}" completed.`,
       "findings:",
       "- No real analysis was performed (mock harness).",

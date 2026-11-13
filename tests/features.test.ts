@@ -149,3 +149,16 @@ describe("resume after restart", () => {
     expect(() => orch.resumeInterrupted(kid.id)).toThrow(/isn't waiting/);
   });
 });
+
+describe("result status routing", () => {
+  it("shows a specialist's question to the user and marks its task blocked", async () => {
+    const { db, orch, events } = setup();
+    const task = db.createTask({ title: "Calibrate", projectId: null });
+    const a = await orch.startAgent(null, "tester", "Calibrate the brake model [needs-decision]", task.id);
+    await until(() => db.getAgent(a.id)!.status === "idle" && !!db.getAgent(a.id)!.resultSummary);
+    expect(db.getAgent(a.id)!.lastActivity).toMatch(/^Needs your decision: Use calibration set A or B/);
+    expect(db.getAgent(a.id)!.resultSummary).toMatch(/^status: needs_decision\nquestion: /);
+    expect(events.some((e) => e.type === "notice" && e.level === "warn" && /needs your decision/.test(e.text))).toBe(true);
+    expect(db.listTasks({}).find((t) => t.id === task.id)!.status).toBe("blocked");
+  });
+});
