@@ -67,6 +67,7 @@ export function AgentsView() {
                   {["running", "paused", "idle", "interrupted"].includes(a.status) && <button onClick={() => api().stopAgent(a.id)} title="Stop" className="icon-only"><Square size={13} /></button>}
                   <button onClick={() => st.setView({ kind: "flow", agentId: a.id })} title="Progress flow chart" className="icon-only"><Compass size={14} /></button>
                   {a.chatId && <button onClick={() => st.openChat(a.chatId!)} title="Open chat" className="icon-only"><ArrowUpRight size={14} /></button>}
+                  {a.branch && a.status !== "running" && <WorkActions id={a.id} branch={a.branch} />}
                 </td>
               </tr>
             ))}
@@ -75,5 +76,27 @@ export function AgentsView() {
       )}
       <p className="muted small">* estimated tokens (harness did not report usage). Pause interrupts the current turn at a safe point and queues new input; Resume continues. Interrupted agents were working when the app closed: Resume starts them again with their brief.</p>
     </div>
+  );
+}
+
+/** Merge or discard a code-writing specialist's own copy of the project (its worktree and branch). */
+function WorkActions({ id, branch }: { id: string; branch: string }) {
+  const st = useStore();
+  const [busy, setBusy] = useState(false);
+  const report = (r: { ok: boolean; message: string }) => st.toast(r.ok ? "info" : "warn", r.message);
+  const run = async (fn: () => Promise<void>) => { setBusy(true); try { await fn(); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } finally { setBusy(false); } };
+  const merge = () => run(async () => report(await api().mergeAgentWork(id)));
+  const discard = () => run(async () => {
+    const w = await api().agentWorkState(id);
+    const lose = [w.unmerged ? `${w.unmerged} unmerged commit(s)` : "", w.dirty.length ? `${w.dirty.length} uncommitted change(s)` : ""].filter(Boolean).join(" and ");
+    if (lose && !confirm(`Discard ${branch}? It has ${lose}; they will be lost.`)) return;
+    report(await api().discardAgentWork(id, !!lose));
+  });
+  return (
+    <span className="work-actions" title={`Works in its own copy of the project on branch ${branch}`}>
+      <code className="small">{branch}</code>
+      <button disabled={busy} onClick={() => void merge()} title={`Merge ${branch} into your current branch`}>Merge</button>
+      <button disabled={busy} className="ghost danger" onClick={() => void discard()} title="Remove the copy and its branch">Discard</button>
+    </span>
   );
 }

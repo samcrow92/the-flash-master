@@ -46,6 +46,9 @@ export const MIGRATIONS: string[] = [
    CREATE INDEX file_changes_chat ON file_changes(chat_id, created_at);`,
   // v6: Autopilot becomes the default — existing chats switch to it too
   `UPDATE chats SET autopilot=1;`,
+  // v7: code-writing specialists work in their own git worktree and branch
+  `ALTER TABLE agents ADD COLUMN worktree TEXT;
+   ALTER TABLE agents ADD COLUMN branch TEXT;`,
 ];
 
 type Row = Record<string, any>;
@@ -279,6 +282,10 @@ export class Db {
     if (sets.length) this.run(`UPDATE agents SET ${sets.join(",")} WHERE id=?`, ...p, id);
     return this.getAgent(id)!;
   }
+  setAgentWorktree(id: string, worktree: string | null, branch: string | null): AgentRun {
+    this.run("UPDATE agents SET worktree=?, branch=? WHERE id=?", worktree, branch, id);
+    return this.getAgent(id)!;
+  }
   getAgentSession(id: string): string | null {
     return (this.get("SELECT session_id FROM agents WHERE id=?", id)?.session_id as string) ?? null;
   }
@@ -464,6 +471,7 @@ const toAgent = (r: Row): AgentRun => ({
   status: r.status, parentAgentId: r.parent_agent_id ?? null, brief: r.brief, resultSummary: r.result_summary ?? null,
   tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), estimated: !!r.estimated, startedAt: Number(r.started_at),
   endedAt: r.ended_at == null ? null : Number(r.ended_at), lastActivity: r.last_activity ?? null, plan: parsePlan(r.plan),
+  worktree: r.worktree ?? null, branch: r.branch ?? null,
 });
 function parsePlan(s: unknown): PlanStep[] {
   try { const v = JSON.parse(String(s ?? "[]")); return Array.isArray(v) ? v : []; } catch { return []; }

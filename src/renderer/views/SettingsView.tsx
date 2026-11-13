@@ -192,6 +192,7 @@ function Agents(f: F) {
     <Row label="Agent tools" hint="Text mode: agents delegate, create agents and use TheFlashMaster's tools (tasks, artifacts, Jazz, DOORS Next) by writing DELEGATE / AGENT / TOOL lines that the app carries out. It works everywhere, also where company policy blocks MCP. Automatic: those tools are offered as MCP tools, with text mode as the fallback when they don't load.">
       <Choice f={f} path="agents.toolMode" options={[["text", "Text mode (default)"], ["auto", "MCP tools, text fallback"]]} /></Row>
     <Row label="Delegation depth" hint="How many levels of specialists may delegate further (1 = only the coordinator delegates)."><Num f={f} path="agents.delegationDepth" min={0} /></Row>
+    <Row label="Separate copy for code-writing specialists" hint="In a git project, specialists that change code (Software Expert, Test Engineer, agents with isolate: true) each work in their own worktree and branch, so parallel agents don't overwrite each other. You merge or discard each branch from the Agents page."><Bool f={f} path="agents.isolateWriters" /></Row>
     <Row label="Warn when an agent is silent for (minutes)" hint="A working agent that sends nothing for this long gets a warning in its chat. It keeps running. 0 = off."><Num f={f} path="agents.stuckAfterMinutes" min={0} /></Row>
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
     <InstructionSettings f={f} />

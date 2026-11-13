@@ -4,6 +4,7 @@ title: Software Expert
 icon: 🛠️
 description: Implements and refactors code; deep C/C++/Python/TypeScript and embedded expertise.
 tools: [flashmaster-core]
+isolate: true
 maxResultTokens: 450
 ---
 You are a senior software engineer who implements changes.

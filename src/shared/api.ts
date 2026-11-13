@@ -42,6 +42,12 @@ export interface FlashApi {
   resumeInterrupted(id: string): Promise<AgentRun>;
   /** Resume every interrupted agent; returns how many started. */
   resumeAllInterrupted(): Promise<number>;
+  /** A code-writing specialist's own worktree: uncommitted changes and commits not yet merged. */
+  agentWorkState(id: string): Promise<{ exists: boolean; dirty: string[]; unmerged: number; branch: string; dir: string }>;
+  /** Merge the agent's branch into the project's current branch. */
+  mergeAgentWork(id: string): Promise<{ ok: boolean; message: string }>;
+  /** Remove the agent's worktree and branch; refused while it holds unmerged work unless force. */
+  discardAgentWork(id: string, force?: boolean): Promise<{ ok: boolean; message: string }>;
   pauseAgent(id: string): Promise<void>;
   resumeAgent(id: string): Promise<void>;
   stopAgent(id: string): Promise<void>;
@@ -161,7 +167,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "toggleReaction", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "toggleReaction", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

@@ -125,6 +125,9 @@ export interface AgentRun {
   endedAt: number | null;
   lastActivity: string | null;
   plan: PlanStep[];
+  /** Isolated git worktree this agent works in (code-writing specialists), and its branch. */
+  worktree: string | null;
+  branch: string | null;
 }
 
 export interface Task {
@@ -164,6 +167,8 @@ export interface RoleDef {
   skills: string[];
   prompt: string;
   source: "builtin" | "user";
+  /** Changes code: when delegated in a git project, works in its own worktree and branch (Settings → Agents). */
+  isolate?: boolean;
 }
 
 export interface SkillDef {
