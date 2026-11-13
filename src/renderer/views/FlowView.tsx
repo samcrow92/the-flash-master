@@ -87,6 +87,7 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
 function outcomeOf(a: AgentRun, last: AgentEvent | undefined): { title: string; detail?: string; state: string } {
   if (a.status === "running") return { title: "Result", detail: "pending", state: "pending" };
   if (a.status === "paused") return { title: "Paused", detail: "Resume to continue", state: "paused" };
+  if (a.status === "interrupted") return { title: "Interrupted", detail: "The app closed while it was working. Resume to continue", state: "paused" };
   if (a.status === "stopped") return { title: "Stopped", state: "failed" };
   if (a.status === "error") return { title: "Error", detail: last?.label, state: "failed" };
   return { title: "Result delivered", detail: last?.kind === "result" ? last.label : a.resultSummary?.slice(0, 160) ?? undefined, state: last ? "completed" : "pending" };

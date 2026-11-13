@@ -40,8 +40,12 @@ describe("Db", () => {
     expect(db.updateTask(t.id, { status: "done" }).status).toBe("done");
     expect(db.listTasks({ projectId: p.id, status: "done" })).toHaveLength(1);
     expect(db.getOrCreateMasterChat().id).toBe(db.getOrCreateMasterChat().id);
-    db.reapOrphans();
-    expect(db.getAgent(a.id)!.status).toBe("stopped");
+    const working = db.createAgent({ projectId: p.id, chatId: c.id, role: "tester", harness: "mock", model: null, brief: "run the suite" });
+    db.updateAgent(working.id, { status: "running" });
+    expect(db.interruptOrphans().map((x) => x.id)).toEqual([working.id]);
+    expect(db.getAgent(a.id)!.status).toBe("stopped"); // idle: only waiting for input
+    expect(db.getAgent(working.id)).toMatchObject({ status: "interrupted", brief: "run the suite" });
+    expect(db.listInterrupted().map((x) => x.id)).toEqual([working.id]);
   });
 
   it("migrates a file database idempotently", () => {

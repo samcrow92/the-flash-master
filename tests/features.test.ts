@@ -126,3 +126,26 @@ describe("progress flow", () => {
     }
   });
 });
+
+describe("resume after restart", () => {
+  it("resumes an interrupted specialist with its brief, specialists before the coordinator", async () => {
+    const { db, orch, events, chat } = setup();
+    const lead = db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: "flashmaster", harness: "mock", model: null, brief: "Chat: c" });
+    const kid = db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: "tester", harness: "mock", model: null, parentAgentId: lead.id,
+      brief: "Goal: run the brake suite" });
+    db.updateAgent(lead.id, { status: "running" });
+    db.updateAgent(kid.id, { status: "paused" });
+    const interrupted = db.interruptOrphans(); // what the app does at start
+    orch.announceInterrupted(interrupted);
+    expect(db.listMessages(chat.id, null).some((m) => m.author === "system" && /app closed while/.test(m.content))).toBe(true);
+
+    expect(orch.resumeAllInterrupted()).toBe(2);
+    expect(db.listInterrupted()).toEqual([]);
+    const resumed = events.filter((e) => e.type === "agent.updated" && e.agent.lastActivity?.startsWith("Resuming")).map((e) => (e as any).agent.id);
+    expect(resumed).toEqual([kid.id, lead.id]); // deepest first
+    // Both ran a fresh turn (back to idle, waiting for input) and the specialist kept its result for get_result.
+    await until(() => [kid.id, lead.id].every((id) => db.getAgent(id)!.status === "idle" && !!db.getAgent(id)!.resultSummary));
+    expect(db.getAgent(kid.id)!.endedAt).toBeNull();
+    expect(() => orch.resumeInterrupted(kid.id)).toThrow(/isn't waiting/);
+  });
+});

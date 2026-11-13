@@ -3,7 +3,8 @@
 export type HarnessId = "copilot" | "opencode" | "pi" | "duo" | "mock";
 export const HARNESS_IDS: HarnessId[] = ["copilot", "opencode", "pi", "duo", "mock"];
 
-export type AgentStatus = "idle" | "running" | "paused" | "stopped" | "error" | "done";
+/** interrupted = the app closed while the agent was working; it can be resumed. */
+export type AgentStatus = "idle" | "running" | "paused" | "interrupted" | "stopped" | "error" | "done";
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "review" | "done";
 export const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "blocked", "review", "done"];
 export type MessageAuthor = "user" | "agent" | "system";

@@ -274,7 +274,7 @@ export class Orchestrator {
     const l = this.byAgent.get(agentId);
     if (!l) {
       const a = this.d.db.getAgent(agentId);
-      if (a && ["idle", "running", "paused"].includes(a.status)) this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true }));
+      if (a && ["idle", "running", "paused", "interrupted"].includes(a.status)) this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true }));
       return;
     }
     l.queue = [];
@@ -287,6 +287,65 @@ export class Orchestrator {
     this.byAgent.delete(agentId);
     this.finishWaiters(l, "stopped by user");
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true, lastActivity: "Stopped" }));
+  }
+
+  /** After a restart: tell each affected chat which agents were interrupted and that they can be resumed. */
+  announceInterrupted(agents: AgentRun[]): void {
+    const byChat = new Map<string, AgentRun[]>();
+    for (const a of agents) if (a.chatId) byChat.set(a.chatId, [...(byChat.get(a.chatId) ?? []), a]);
+    for (const [chatId, list] of byChat) {
+      if (!this.d.db.getChat(chatId)) continue;
+      const names = list.map((a) => { const r = this.d.roles().find((x) => x.name === a.role); return r ? `${r.icon} ${r.title}` : a.role; });
+      this.system(chatId, null, `⏸ The app closed while ${names.join(", ")} ${list.length === 1 ? "was" : "were"} working. `
+        + "Resume from the agent chip above the composer or from the Agents page; nothing was lost.", "warn");
+    }
+  }
+
+  /**
+   * Resume an agent the app interrupted by closing. Its harness session is gone, so it starts a fresh one with its
+   * original brief and a note to check what is already done before continuing.
+   */
+  resumeInterrupted(agentId: string): AgentRun {
+    const a = this.d.db.getAgent(agentId);
+    if (!a || a.status !== "interrupted") throw new Error("this agent isn't waiting to be resumed");
+    const chat = a.chatId ? this.d.db.getChat(a.chatId) : null;
+    if (!chat) { this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped" })); throw new Error("its chat was deleted"); }
+    const role = this.role(a.role);
+    let depth = 0;
+    for (let p = a.parentAgentId; p && depth < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) depth++;
+    const threadRoot = this.d.db.lastThreadOf(agentId);
+    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
+    if (this.live.has(key)) {
+      this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", lastActivity: "Superseded: the same agent is already running again" }));
+      throw new Error(`${role.title} is already running again in this chat`);
+    }
+    const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
+    const l: Live = { key, agentId, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [] };
+    this.live.set(key, l);
+    this.byAgent.set(agentId, l);
+    this.emitAgent(this.d.db.updateAgent(agentId, { status: "idle", ended: false, lastActivity: "Resuming after the app restarted" }));
+    this.flow(agentId, { kind: "status", label: "resumed after restart", status: "running" });
+    const kids = this.d.db.childAgents(agentId).filter((c) => c.status !== "stopped");
+    const input = [
+      "The app was closed while you were working on this, and it has just been reopened. Your earlier session is gone.",
+      "Check what is already done (files, the task board, your specialists' results) and continue where you left off. Don't redo finished work.",
+      kids.length ? `Specialists you started earlier (use get_result with these ids instead of delegating again): ${kids.map((c) => `${c.role} ${c.id} (${c.status})`).join("; ")}.` : "",
+    ].filter(Boolean).join("\n");
+    void this.turn({ chat, threadRoot, role, input, skills: [], depth, brief: a.parentAgentId ? a.brief : null, liveKey: key })
+      .catch((e) => this.system(chat.id, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
+    return this.d.db.getAgent(agentId)!;
+  }
+
+  /** Resume every interrupted agent, specialists before the agents that delegated to them. */
+  resumeAllInterrupted(): number {
+    const list = this.d.db.listInterrupted();
+    const depthOf = (a: AgentRun) => { let d = 0; for (let p = a.parentAgentId; p && d < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) d++; return d; };
+    let n = 0;
+    for (const a of list.sort((x, y) => depthOf(y) - depthOf(x))) {
+      try { this.resumeInterrupted(a.id); n++; } catch { /* superseded or chat deleted: already marked stopped */ }
+    }
+    return n;
   }
 
   async stopChat(chatId: string): Promise<void> {

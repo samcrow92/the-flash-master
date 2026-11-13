@@ -21,7 +21,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const chat = st.chatById[chatId];
   const messages = st.messages[chatId] ?? [];
   const project = st.projects.find((p) => p.id === chat?.projectId);
-  const chatAgents = Object.values(st.agents).filter((a) => a.chatId === chatId && ["running", "paused", "idle"].includes(a.status));
+  const chatAgents = Object.values(st.agents).filter((a) => a.chatId === chatId && ["running", "paused", "idle", "interrupted"].includes(a.status));
   const busy = chatAgents.some((a) => a.status === "running");
   const listRef = useRef<HTMLDivElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -122,6 +122,7 @@ export function ChatView({ chatId }: { chatId: string }) {
                 </button>
                 {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
                 {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume"><Play size={12} /></button>}
+                {a.status === "interrupted" && <button onClick={() => void api().resumeInterrupted(a.id).catch((e) => st.toast("error", String(e?.message ?? e)))} title="Resume (the app closed while it was working)"><Play size={12} /></button>}
                 <button onClick={() => api().stopAgent(a.id)} title="Stop"><Square size={11} fill="currentColor" /></button>
               </span>
             ))}

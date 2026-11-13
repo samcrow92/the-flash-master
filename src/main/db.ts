@@ -262,12 +262,12 @@ export class Db {
       if (f.projectId === null) where.push("project_id IS NULL");
       else { where.push("project_id=?"); p.push(f.projectId); }
     }
-    if (f.activeOnly) where.push("status IN ('idle','running','paused')");
+    if (f.activeOnly) where.push("status IN ('idle','running','paused','interrupted')");
     const sql = `SELECT * FROM agents ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY started_at DESC LIMIT 500`;
     return this.all(sql, ...p).map(toAgent);
   }
   updateAgent(id: string, patch: { status?: AgentStatus; sessionId?: string | null; resultSummary?: string; lastActivity?: string;
-    ended?: boolean }): AgentRun {
+    ended?: boolean /* false = running again (clears the end time) */ }): AgentRun {
     const sets: string[] = [];
     const p: any[] = [];
     if (patch.status) { sets.push("status=?"); p.push(patch.status); }
@@ -275,6 +275,7 @@ export class Db {
     if (patch.resultSummary !== undefined) { sets.push("result_summary=?"); p.push(patch.resultSummary); }
     if (patch.lastActivity !== undefined) { sets.push("last_activity=?"); p.push(patch.lastActivity.slice(0, 200)); }
     if (patch.ended) { sets.push("ended_at=?"); p.push(now()); }
+    if (patch.ended === false) sets.push("ended_at=NULL");
     if (sets.length) this.run(`UPDATE agents SET ${sets.join(",")} WHERE id=?`, ...p, id);
     return this.getAgent(id)!;
   }
@@ -302,10 +303,25 @@ export class Db {
     return this.all("SELECT * FROM agents WHERE parent_agent_id=? ORDER BY started_at", agentId).map(toAgent);
   }
 
-  /** Mark agents left running by a previous app session as stopped. */
-  reapOrphans(): void {
-    this.run("UPDATE agents SET status='stopped', ended_at=? WHERE status IN ('idle','running','paused')", now());
+  /**
+   * Agents left behind by a previous app session. Working or paused ones become "interrupted" so they can be resumed
+   * (their brief, chat and partial reply are kept); idle ones were only waiting for input and simply stop.
+   * Returns the interrupted agents.
+   */
+  interruptOrphans(): AgentRun[] {
+    const ids = this.all("SELECT id FROM agents WHERE status IN ('running','paused')").map((r) => String(r.id));
+    this.run("UPDATE agents SET status='interrupted', ended_at=?, last_activity='Interrupted: the app closed while it was working' WHERE status IN ('running','paused')", now());
+    this.run("UPDATE agents SET status='stopped', ended_at=? WHERE status='idle'", now());
     this.run("UPDATE messages SET status='error' WHERE status='streaming'");
+    return ids.map((id) => this.getAgent(id)!);
+  }
+  listInterrupted(): AgentRun[] {
+    return this.all("SELECT * FROM agents WHERE status='interrupted' ORDER BY started_at").map(toAgent);
+  }
+  /** Thread an agent last replied in (null = the chat's main timeline). */
+  lastThreadOf(agentId: string): string | null {
+    const r = this.get("SELECT parent_id FROM messages WHERE agent_id=? ORDER BY seq DESC LIMIT 1", agentId);
+    return r ? ((r.parent_id as string | null) ?? null) : null;
   }
 
   // ---------- usage ----------
