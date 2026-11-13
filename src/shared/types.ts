@@ -217,7 +217,8 @@ export interface ChatArtifacts {
 
 /** IBM DOORS Next (Jazz Requirements Management) */
 export interface RmProject { id: string; title: string }
-export interface RmModule { uri: string; uuid: string; identifier: string; title: string; projectId: string; modified?: string }
+export interface RmModule { uri: string; uuid: string; identifier: string; title: string; projectId: string; modified?: string;
+  config?: string; component?: string } // configuration (stream) the module was found in, and its component title
 export interface Requirement {
   id: string; // DOORS Next identifier (number shown in the UI)
   uri: string;

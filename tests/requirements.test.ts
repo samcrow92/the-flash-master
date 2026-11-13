@@ -145,7 +145,7 @@ describe("OSLC fallback when the Reportable REST API is missing", () => {
     } };
     const rm = new Requirements(() => fetcher, mkdtempSync(join(tmpdir(), "rm4-")), () => "https://alm.x/rmA1/cm/stream/_S");
     const mods = await rm.modules("_PA");
-    expect(mods).toEqual([{ uri: "https://alm.x/rmA1/resources/MD_1", uuid: "MD_1", identifier: "4711", title: "Lighting SRS", projectId: "_PA" }]);
+    expect(mods).toEqual([expect.objectContaining({ uri: "https://alm.x/rmA1/resources/MD_1", uuid: "MD_1", identifier: "4711", title: "Lighting SRS", projectId: "_PA", config: "https://alm.x/rmA1/cm/stream/_S" })]);
     const q = calls.find((c) => c.includes("/views?"))!;
     expect(decodeURIComponent(q)).toContain("oslc.where=rdf:type=jazz_rm:Module");
     expect(decodeURIComponent(q)).toContain("oslc_config.context=https://alm.x/rmA1/cm/stream/_S");
@@ -156,5 +156,58 @@ describe("OSLC fallback when the Reportable REST API is missing", () => {
     ]);
     expect(calls.filter((c) => c.includes("/types/SR"))).toHaveLength(1); // shape title cached
     expect((await rm.search("debounce"))[0]!.id).toBe("1002");
+  });
+});
+
+describe("configurations: global configuration and component streams", () => {
+  const SVC = `<rdf:RDF><oslc:ServiceProvider rdf:about="https://alm.x/rmA1/oslc_rm/_PA/services.xml"></oslc:ServiceProvider></rdf:RDF>`;
+  const comp = (id: string, title: string) => `<rdf:RDF><oslc_config:Component rdf:about="https://alm.x/rmA1/cm/component/${id}"><dcterms:title>${title}</dcterms:title>
+    <oslc_config:configurations rdf:resource="https://alm.x/rmA1/cm/component/${id}/configurations"/></oslc_config:Component></rdf:RDF>`;
+  const mods = (id: string, title: string) => `<ds:dataSource ${NS}><ds:artifact><rrm:title>${title}</rrm:title><rrm:identifier>${id}</rrm:identifier><rrm:format>Module</rrm:format><rrm:about>https://alm.x/rmA1/resources/MD_${id}</rrm:about></ds:artifact></ds:dataSource>`;
+  const empty = `<ds:dataSource ${NS}></ds:dataSource>`;
+  const server = (calls: string[], gcModules: boolean): RmFetcher => ({ getText: async (path) => {
+    calls.push(path);
+    const u = decodeURIComponent(path);
+    if (u.includes("/services.xml")) return SVC;
+    if (u.includes("/cm/component/ldpc")) return `<rdf:RDF><ldp:Container><ldp:contains rdf:resource="https://alm.x/rmA1/cm/component/_C1"/><ldp:contains rdf:resource="https://alm.x/rmA1/cm/component/_C2"/></ldp:Container></rdf:RDF>`;
+    if (u.endsWith("/_C1/configurations")) return `<rdf:RDF><rdfs:member rdf:resource="https://alm.x/rmA1/cm/stream/_S1"/></rdf:RDF>`;
+    if (u.endsWith("/_C2/configurations")) return `<rdf:RDF><rdfs:member rdf:resource="https://alm.x/rmA1/cm/stream/_S2"/></rdf:RDF>`;
+    if (u.endsWith("/cm/component/_C1")) return comp("_C1", "Headlamp SW");
+    if (u.endsWith("/cm/component/_C2")) return comp("_C2", "LED Driver HW");
+    if (u.startsWith("/publish/modules")) {
+      if (u.includes("/gc/configuration/")) return gcModules ? mods("9", "System Requirements (GC)") : empty;
+      if (u.includes("stream/_S1")) return mods("1", "SW Requirements");
+      if (u.includes("stream/_S2")) return mods("2", "HW Requirements");
+      return empty;
+    }
+    if (u.includes("/views?")) return "<rdf:RDF></rdf:RDF>";
+    if (u.startsWith("/publish/resources")) return u.includes("stream/_S2") ? MODULE_XML : empty;
+    return "";
+  } });
+
+  it("without a configuration: discovers every component's stream and reads each module from its own stream", async () => {
+    const calls: string[] = [];
+    const rm = new Requirements(() => server(calls, false), mkdtempSync(join(tmpdir(), "rm5-")), () => "");
+    const list = await rm.modules("_PA");
+    expect(list.map((m) => [m.title, m.component, m.config])).toEqual([
+      ["HW Requirements", "LED Driver HW", "https://alm.x/rmA1/cm/stream/_S2"],
+      ["SW Requirements", "Headlamp SW", "https://alm.x/rmA1/cm/stream/_S1"],
+    ]);
+    const data = await rm.module("2");
+    expect(data.requirements.length).toBeGreaterThan(0);
+    expect(decodeURIComponent(calls.find((c) => c.startsWith("/publish/resources"))!)).toContain("oslc_config.context=https://alm.x/rmA1/cm/stream/_S2");
+  });
+
+  it("with a global configuration: uses it across components; falls back to component streams if it has nothing for the project", async () => {
+    const calls: string[] = [];
+    const gc = "https://alm.x/gc/configuration/42";
+    const rm = new Requirements(() => server(calls, true), mkdtempSync(join(tmpdir(), "rm6-")), () => gc);
+    expect((await rm.modules("_PA")).map((m) => [m.title, m.config])).toEqual([["System Requirements (GC)", gc]]);
+    expect(calls.some((c) => c.includes("/cm/component/ldpc"))).toBe(false);
+
+    const calls2: string[] = [];
+    const rm2 = new Requirements(() => server(calls2, false), mkdtempSync(join(tmpdir(), "rm7-")), () => gc);
+    expect((await rm2.modules("_PA")).map((m) => m.title).sort()).toEqual(["HW Requirements", "SW Requirements"]);
+    expect(rm2.lastLog.join("\n")).toContain("Global configuration");
   });
 });

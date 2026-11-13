@@ -562,7 +562,8 @@ function RmSettings({ f }: { f: F }) {
           </div>
         </div>
       </Row>
-      <Row label="Configuration (optional)" hint="For configuration-managed projects: the stream, baseline or global configuration URL to read from (oslc_config.context). Blank = default."><Text f={f} path="jazz.rm.config" placeholder="https://jazz.company.com/rm/cm/stream/_…" /></Row>
+      <Row label="Configuration (optional)" hint="A global configuration (…/gc/configuration/…) reads all contributing components; a local stream or baseline reads one component. Blank = every component of the project with its default stream (discovered automatically). If a global configuration has nothing for a project, its component streams are used.">
+        <Text f={f} path="jazz.rm.config" placeholder="https://alm.company.com/gc/configuration/… or …/rm/cm/stream/_…" /></Row>
       <Row label="Cache modules for (hours)" hint="Agents and searches use the cached copy; Refresh in the Requirements tab fetches again."><Num f={f} path="jazz.rm.cacheHours" /></Row>
       <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().rmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
     </>}

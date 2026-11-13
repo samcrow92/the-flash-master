@@ -114,8 +114,10 @@ export interface FlashApi {
   rmTest(): Promise<{ ok: boolean; detail: string }>;
   rmProjects(): Promise<RmProject[]>;
   rmModules(projectId: string, refresh?: boolean): Promise<RmModule[]>;
-  rmModule(moduleRef: string, refresh?: boolean): Promise<RmModuleData>;
+  rmModule(moduleRef: string, refresh?: boolean, config?: string): Promise<RmModuleData>;
   rmSearch(query: string, modules?: string[], top?: number): Promise<RmHit[]>;
+  /** Steps and server answers of the last module listing (for troubleshooting). */
+  rmDiagnostics(): Promise<string[]>;
   rmCached(): Promise<{ module: RmModule; fetchedAt: number; count: number }[]>;
 
   // settings
@@ -133,7 +135,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
 

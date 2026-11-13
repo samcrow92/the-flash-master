@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **DOORS Next with global configurations and component streams:**
+  - A global configuration (…/gc/configuration/…) reads modules across all contributing components.
+  - Without a configuration, or when the global configuration has nothing for a project, every component of the project is discovered (`/cm/component/ldpc?project=…`) and read from its default stream.
+  - Each module keeps its own configuration for reading and caching. The module list is grouped by component.
+  - The OSLC fallback is also used when the Reportable REST API returns an empty list.
+  - When nothing is found, the Requirements tab shows step-by-step diagnostics with Copy and Retry.
 - **Jazz keyword search finds items across the whole project area:**
   - Words are searched with EWM's full-text search (OSLC `oslc.searchTerms`) in each configured project area, with an open/closed filter where the server supports it. Before, they were only matched against the first batch of items.
   - It falls back to local matching on servers without full-text search.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Requirement, RmHit, RmModule, RmModuleData, RmProject } from "@shared/types";
 import { api, useStore } from "../store";
 import { ClipboardList, Copy, ExternalLink, ListTree, Loader2, RotateCcw, Search, Sparkles, SquareKanban, X } from "../components/icons";
@@ -26,6 +26,7 @@ export function RequirementsView({ tabs }: { tabs: ReactNode }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<Requirement | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [diag, setDiag] = useState<string[] | null>(null);
 
   const guard = async <T,>(label: string, fn: () => Promise<T>): Promise<T | undefined> => {
     setLoading(label); setError(null);
@@ -45,16 +46,22 @@ export function RequirementsView({ tabs }: { tabs: ReactNode }) {
   }, [enabled]);
   useEffect(() => {
     if (!project) return;
-    void guard("Loading modules…", async () => setModules(await api().rmModules(project)));
+    void guard("Loading modules…", async () => {
+      const m = await api().rmModules(project);
+      setModules(m);
+      setDiag(m.length ? null : await api().rmDiagnostics());
+    });
   }, [project]);
 
-  const openModule = async (ref: string, refresh = false) => {
-    const d = await guard(refresh ? "Refreshing module from DOORS Next…" : "Loading module…", () => api().rmModule(ref, refresh));
+  const openModule = async (ref: string, refresh = false, config?: string) => {
+    const d = await guard(refresh ? "Refreshing module from DOORS Next…" : "Loading module…", () => api().rmModule(ref, refresh, config));
     if (d) {
       setData(d); setHits(null); setSelected(new Set()); setCollapsed(new Set());
       void api().rmCached().then(setCached);
     }
   };
+  /** Open a module from the list (uses its own configuration). */
+  const openModuleObj = (m: RmModule) => openModule(m.identifier || m.uuid, false, m.config);
   const search = async () => {
     if (!query.trim()) { setHits(null); return; }
     const r = await guard("Searching…", () => api().rmSearch(query, data ? [data.module.uri] : undefined, 40));
@@ -90,7 +97,8 @@ export function RequirementsView({ tabs }: { tabs: ReactNode }) {
     );
   }
 
-  const mods = modules.filter((m) => !filter || `${m.identifier} ${m.title}`.toLowerCase().includes(filter.toLowerCase()));
+  const mods = modules.filter((m) => !filter || `${m.identifier} ${m.title} ${m.component ?? ""}`.toLowerCase().includes(filter.toLowerCase()))
+    .sort((a, b) => (a.component ?? "").localeCompare(b.component ?? "") || a.title.localeCompare(b.title));
   const isCached = (m: RmModule) => cached.find((c) => c.module.uri === m.uri);
 
   return (
@@ -111,17 +119,34 @@ export function RequirementsView({ tabs }: { tabs: ReactNode }) {
           </select>
           <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter ${modules.length} modules…`} />
           <div className="rm-module-list">
-            {mods.map((m) => {
+            {mods.map((m, i) => {
               const c = isCached(m);
+              const group = m.component ?? "";
+              const showGroup = group && (i === 0 || mods[i - 1]!.component !== group);
               return (
-                <button key={m.uri} className={`rm-module ${data?.module.uri === m.uri ? "sel" : ""}`} onClick={() => openModule(m.uri)} title={m.uri}>
+                <Fragment key={`${m.uri}|${m.config ?? ""}`}>
+                {showGroup && <div className="rm-group" title={m.config}>{group}</div>}
+                <button className={`rm-module ${data?.module.uri === m.uri && data?.module.config === m.config ? "sel" : ""}`} onClick={() => openModuleObj(m)} title={`${m.uri}${m.config ? `\nconfiguration: ${m.config}` : ""}`}>
                   <ListTree size={14} />
                   <span className="grow">{m.title}<span className="muted small"> {m.identifier}</span></span>
                   {c && <span className="chip" title={`Cached ${ago(c.fetchedAt)}`}>{c.count}</span>}
                 </button>
+                </Fragment>
               );
             })}
             {!mods.length && !loading && <div className="muted small">No modules.</div>}
+            {!modules.length && diag && !loading && (
+              <div className="rm-diag">
+                <div className="small"><b>Nothing found — what was tried:</b></div>
+                <pre>{diag.join("\n")}</pre>
+                <div className="row gap wrap">
+                  <button className="ghost small" onClick={() => { void navigator.clipboard.writeText(diag.join("\n")); st.toast("info", "Diagnostics copied"); }}><Copy size={13} /> Copy</button>
+                  <button className="ghost small" onClick={() => void guard("Loading modules…", async () => { const m = await api().rmModules(project, true); setModules(m); setDiag(m.length ? null : await api().rmDiagnostics()); })}><RotateCcw size={13} /> Retry</button>
+                  <button className="link small" onClick={() => st.setView({ kind: "settings", tab: "integrations" })}>Settings</button>
+                </div>
+                <div className="muted small">Tip: for projects with streams, paste a link to the component or a module (or set Configuration) in Settings.</div>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -129,9 +154,9 @@ export function RequirementsView({ tabs }: { tabs: ReactNode }) {
           {!data ? <div className="muted rm-hint">Open a module to read and search its requirements. Agents use the same data through <code>rm_search</code> / <code>rm_get</code>.</div> : <>
             <div className="row gap rm-toolbar">
               <div className="grow">
-                <strong>{data.module.title}</strong> <span className="muted small">#{data.module.identifier} · {data.requirements.filter((r) => !r.heading).length} requirements · fetched {ago(data.fetchedAt)}</span>
+                <strong>{data.module.title}</strong> <span className="muted small">{data.module.component ? `${data.module.component} · ` : ""}#{data.module.identifier} · {data.requirements.filter((r) => !r.heading).length} requirements · fetched {ago(data.fetchedAt)}</span>
               </div>
-              <button className="ghost small" onClick={() => openModule(data.module.uri, true)} title="Fetch again from DOORS Next"><RotateCcw size={14} /> Refresh</button>
+              <button className="ghost small" onClick={() => openModule(data.module.identifier || data.module.uuid, true, data.module.config)} title="Fetch again from DOORS Next"><RotateCcw size={14} /> Refresh</button>
             </div>
             <div className="row gap">
               <div className="search-box grow"><Search size={15} /><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()}

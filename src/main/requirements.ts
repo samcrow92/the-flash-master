@@ -9,6 +9,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { Requirement, RmHit, RmModule, RmModuleData, RmProject } from "@shared/types";
 
 export interface RmFetcher { getText(path: string, accept: string, oslc?: boolean): Promise<string> }
@@ -42,6 +43,8 @@ export function splitArtifacts(xml: string): string[] {
   return out;
 }
 
+/** Cache key per module and configuration (the same module differs between streams). */
+const cacheKey = (m: { uuid: string; config?: string }) => `${m.uuid}${m.config ? `@${createHash("sha1").update(m.config).digest("hex").slice(0, 10)}` : ""}`.replace(/[^\w.@-]/g, "_");
 const uuidOf = (uri: string) => /\/(?:resources|modules)\/([^/?#]+)/.exec(uri)?.[1] ?? uri.split("/").pop() ?? uri;
 
 export function parseArtifact(a: string): Requirement & { format: string } {
@@ -216,14 +219,17 @@ export class Requirements {
 
   private scope: { key: string; title: string; projectId: string; stream: string } | null = null;
   private noReportable = false;
+  /** What the last module listing tried (shown in the UI when nothing is found). */
+  lastLog: string[] = [];
   private shapes = new Map<string, Promise<string>>();
 
   /** OSLC Query for modules of a project (configuration-aware). */
-  private async oslcModules(projectId: string): Promise<{ uri: string; title: string; identifier: string }[]> {
+  private async oslcModules(projectId: string, log: string[] = [], cfg = this.config()): Promise<{ uri: string; title: string; identifier: string }[]> {
     const api = this.need();
-    const base = await this.queryBase(projectId);
+    const base = await this.queryBase(projectId, cfg);
+    log.push(`oslc query capability: ${base.slice(0, 160)}`);
     const q = (where: string) => `${base}${base.includes("?") ? "&" : "?"}oslc.prefix=${encodeURIComponent(RDF_PREFIXES)}`
-      + `&oslc.select=${encodeURIComponent("dcterms:title,dcterms:identifier")}&oslc.where=${encodeURIComponent(where)}&oslc.pageSize=200${this.cfgParam()}`;
+      + `&oslc.select=${encodeURIComponent("dcterms:title,dcterms:identifier")}&oslc.where=${encodeURIComponent(where)}&oslc.pageSize=200${this.cfgParam(cfg)}`;
     for (const where of ["rdf:type=jazz_rm:Module", "rdf:type=<http://jazz.net/ns/rm#Module>", "rdf:type=oslc_rm:RequirementCollection"]) {
       try {
         const all: { uri: string; title: string; identifier: string }[] = [];
@@ -233,27 +239,48 @@ export class Requirements {
           all.push(...parseOslcResources(rdf));
           url = nextPage(rdf);
         }
+        log.push(`oslc where ${where}: ${all.length} modules`);
         if (all.length) return [...new Map(all.map((x) => [x.uri, x])).values()];
-      } catch (e) { if (!missingApi(e)) throw e; }
+      } catch (e) { log.push(`oslc where ${where}: ${String((e as Error)?.message ?? e).slice(0, 160)}`); if (!missingApi(e)) throw e; }
     }
     return [];
   }
-  /** Query capability of a project (from its services document, else the well-known DOORS Next /views URL). */
-  private async queryBase(projectId: string): Promise<string> {
+  /** Components of a project area (/cm/component/ldpc?project=…) with the default stream of each. */
+  private async projectStreams(projectId: string, log: string[]): Promise<{ config: string; component: string }[]> {
     const api = this.need();
     const svc = await api.getText(`/oslc_rm/${projectId}/services.xml`, "application/rdf+xml", true).catch(() => "");
+    const root = /^(https?:\/\/[^"]+?)\/oslc_rm\//.exec(svc)?.[1] ?? /about="(https?:\/\/[^"]+?)\/oslc_rm\//.exec(svc)?.[1] ?? "";
+    const paUrl = `${root}/process/project-areas/${projectId}`;
+    const rdf = await api.getText(`/cm/component/ldpc?project=${encodeURIComponent(paUrl)}`, "application/rdf+xml", true);
+    const comps = [...new Set([...rdf.matchAll(/resource="([^"]+\/cm\/component\/_[^"/]+)"/g), ...rdf.matchAll(/about="([^"]+\/cm\/component\/_[^"/]+)"/g)].map((m) => decode(m[1]!)))];
+    log.push(`component discovery: ${comps.length} component(s) in the project`);
+    const out: { config: string; component: string }[] = [];
+    for (const c of comps.slice(0, 12)) {
+      const info = parseComponent(await api.getText(c, "application/rdf+xml", true).catch(() => ""));
+      const stream = info.configurations ? pickStream(await api.getText(info.configurations, "application/rdf+xml", true).catch(() => "")) : "";
+      log.push(`  component “${info.title || c}”: ${stream ? `stream ${stream}` : "no stream found"}`);
+      if (stream) out.push({ config: stream, component: info.title || c });
+    }
+    return out;
+  }
+
+  /** Query capability of a project (from its services document, else the well-known DOORS Next /views URL). */
+  private async queryBase(projectId: string, config = this.config()): Promise<string> {
+    const api = this.need();
+    const cfg = config ? `?oslc_config.context=${encodeURIComponent(config)}` : "";
+    const svc = await api.getText(`/oslc_rm/${projectId}/services.xml${cfg}`, "application/rdf+xml", true).catch(() => "");
     const qb = /<(?:[\w.-]+:)?queryBase\b[^>]*resource="([^"]+)"/.exec(svc)?.[1];
     if (qb) return decode(qb);
     const root = (/^(https?:\/\/[^"]+?)\/oslc_rm\//.exec(svc)?.[1]) ?? "";
     return `${root || ""}/views?oslc.query=true&projectURL=${encodeURIComponent(`${root}/process/project-areas/${projectId}`)}`;
   }
   /** Module contents via OSLC: the module's oslc_rm:uses list, then each artifact (unordered: sorted by id). */
-  private async oslcModuleContent(mod: RmModule): Promise<Requirement[]> {
+  private async oslcModuleContent(mod: RmModule, config = this.config()): Promise<Requirement[]> {
     const api = this.need();
-    const cfg = this.config() ? `${mod.uri.includes("?") ? "&" : "?"}oslc_config.context=${encodeURIComponent(this.config())}` : "";
+    const cfg = config ? `${mod.uri.includes("?") ? "&" : "?"}oslc_config.context=${encodeURIComponent(config)}` : "";
     const uses = usesOf(await api.getText(mod.uri + cfg, "application/rdf+xml", true)).slice(0, 3000);
     const reqs = await mapLimit(uses, 6, async (u) => {
-      const rdf = await api.getText(u + (this.config() ? `${u.includes("?") ? "&" : "?"}oslc_config.context=${encodeURIComponent(this.config())}` : ""), "application/rdf+xml", true).catch(() => "");
+      const rdf = await api.getText(u + (config ? `${u.includes("?") ? "&" : "?"}oslc_config.context=${encodeURIComponent(config)}` : ""), "application/rdf+xml", true).catch(() => "");
       if (!rdf) return null;
       const a = parseOslcArtifact(rdf, u);
       if (a.shape && !this.shapes.has(a.shape)) {
@@ -294,8 +321,8 @@ export class Requirements {
     if (!a) throw new Error("IBM DOORS Next is not configured (Settings → Integrations → IBM Jazz → Requirements)");
     return a;
   }
-  private cfgParam(): string {
-    const c = this.config().trim();
+  private cfgParam(config = this.config()): string {
+    const c = config.trim();
     return c ? `&oslc_config.context=${encodeURIComponent(c)}` : "";
   }
 
@@ -325,29 +352,71 @@ export class Requirements {
 
   async modules(projectId: string, refresh = false): Promise<RmModule[]> {
     if (!refresh && this.modulesByProject.has(projectId)) return this.modulesByProject.get(projectId)!;
-    await this.resolveComponent().catch(() => null);
-    let mods: RmModule[];
-    try {
-      if (this.noReportable) throw new Error("HTTP 404 (cached)");
-      const xml = await this.need().getText(`/publish/modules?projectURI=${encodeURIComponent(projectId)}${this.cfgParam()}`, "application/xml");
-      mods = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && (/module/i.test(a.format) || /module/i.test(a.type) || a.format === ""))
-        .map((a) => ({ uri: a.uri, uuid: uuidOf(a.uri), identifier: a.id, title: a.title || a.text.slice(0, 80), projectId, modified: undefined }));
-    } catch (e) {
-      if (!missingApi(e)) throw e;
-      this.noReportable = true; // this server has no Reportable REST API for modules: use OSLC Query
-      mods = (await this.oslcModules(projectId)).map((r) => ({ uri: r.uri, uuid: uuidOf(r.uri), identifier: r.identifier, title: r.title || r.identifier || uuidOf(r.uri), projectId }));
+    const log: string[] = [];
+    this.lastLog = log;
+    const comp = await this.resolveComponent().catch((e) => { log.push(`component: could not read (${String(e?.message ?? e).slice(0, 160)})`); return null; });
+    if (comp) log.push(`component: “${comp.title || "?"}” project=${comp.projectId || "?"} stream=${comp.stream || "none found"}`);
+    // Which configurations to read: the user's, else the linked component's stream (same project), else every
+    // component of the project with its default stream (DOORS Next query capabilities are component-specific).
+    // Global configurations (…/gc/configuration/…) span all contributing components; local streams one component.
+    const user = this.userConfig().trim();
+    const isGc = (c: string) => /\/gc\/configuration\//i.test(c);
+    const discover = async () => (await this.projectStreams(projectId, log).catch((e) => { log.push(`component discovery: ${String(e?.message ?? e).slice(0, 160)}`); return []; }));
+    const scopes: { config: string; component?: string }[] = [];
+    if (user) scopes.push({ config: user, component: isGc(user) ? "Global configuration" : undefined });
+    if (!user || isGc(user)) scopes.push({ config: "__discover__" });
+    const mods: RmModule[] = [];
+    const queue = [...scopes];
+    for (let n = 0; queue.length && n < 16; n++) {
+      const sc = queue.shift()!;
+      if (sc.config === "__discover__") {
+        // Local component streams: only needed when a global configuration did not cover this project
+        if (mods.length && user) continue;
+        let found = await discover();
+        if (!found.length && comp?.stream && (!comp.projectId || comp.projectId === projectId)) found = [{ config: comp.stream, component: comp.title }];
+        queue.push(...(found.length ? found : user ? [] : [{ config: "" }]));
+        continue;
+      }
+      log.push(`— configuration: ${sc.config || "(none — default)"}${sc.component ? ` (component “${sc.component}”)` : ""}`);
+      const toMods = (rs: { uri: string; title: string; identifier: string }[]): RmModule[] =>
+        rs.map((r) => ({ uri: r.uri, uuid: uuidOf(r.uri), identifier: r.identifier, title: r.title || r.identifier || uuidOf(r.uri), projectId, config: sc.config || undefined, component: sc.component }));
+      let found: RmModule[] = [];
+      // 1) Reportable REST API
+      if (!this.noReportable) {
+        const path = `/publish/modules?projectURI=${encodeURIComponent(projectId)}${this.cfgParam(sc.config)}`;
+        try {
+          const xml = await this.need().getText(path, "application/xml");
+          const arts = splitArtifacts(xml).map(parseArtifact);
+          found = toMods(arts.filter((a) => a.uri && (/module/i.test(a.format) || /module/i.test(a.type) || a.format === ""))
+            .map((a) => ({ uri: a.uri, identifier: a.id, title: a.title || a.text.slice(0, 80) })));
+          log.push(`  reportable /publish/modules: ${xml.length} bytes, ${arts.length} artifacts, ${found.length} modules`);
+          if (!arts.length && xml.length < 400) log.push(`    response: ${xml.replace(/\s+/g, " ").slice(0, 300)}`);
+        } catch (e) {
+          log.push(`  reportable /publish/modules: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+          if (!missingApi(e)) throw e;
+          this.noReportable = true;
+        }
+      }
+      // 2) OSLC Query (also when the Reportable API answered with an empty list)
+      if (!found.length) {
+        try { found = toMods(await this.oslcModules(projectId, log, sc.config)); }
+        catch (e) { log.push(`  oslc query: ${String((e as Error)?.message ?? e).slice(0, 200)}`); }
+      }
+      mods.push(...found);
     }
-    const uniq = [...new Map(mods.map((m) => [m.uri, m])).values()].sort((a, b) => a.title.localeCompare(b.title));
+    log.push(`result: ${mods.length} modules`);
+    const uniq = [...new Map(mods.map((m) => [`${m.uri}|${m.config ?? ""}`, m])).values()].sort((a, b) => a.title.localeCompare(b.title));
     this.modulesByProject.set(projectId, uniq);
     return uniq;
   }
 
   /** Module content in document order, cached on disk (refresh = fetch again). */
-  async module(ref: string, refresh = false, maxAgeH = 24): Promise<RmModuleData> {
+  async module(ref: string, refresh = false, maxAgeH = 24, config?: string): Promise<RmModuleData> {
     await this.resolveComponent().catch(() => null);
-    const known = this.findModule(ref);
-    const cached = known ? this.cached(known.uuid) : this.cachedByRef(ref);
-    if (!refresh && cached && Date.now() - cached.fetchedAt < maxAgeH * 3600000 && cached.config === this.config()) return cached;
+    const known = this.findModule(ref, config);
+    const cached = known ? this.cached(cacheKey(known)) : this.cachedByRef(ref);
+    const modCfg = known?.config ?? cached?.module.config ?? this.config();
+    if (!refresh && cached && Date.now() - cached.fetchedAt < maxAgeH * 3600000 && cached.config === modCfg) return cached;
     const mod = known ?? cached?.module;
     if (!mod) throw new Error(`Unknown module "${ref}" — list modules first (rm_modules) or use its URL`);
     const reqs = new Map<string, Requirement>();
@@ -355,7 +424,7 @@ export class Requirements {
     try {
       if (this.noReportable) throw new Error("HTTP 404 (cached)");
       for (let pos = 0; pos < 20000; pos += size) {
-        const xml = await this.need().getText(`/publish/resources?moduleURI=${encodeURIComponent(mod.uri)}${this.cfgParam()}&size=${size}&pos=${pos}`, "application/xml");
+        const xml = await this.need().getText(`/publish/resources?moduleURI=${encodeURIComponent(mod.uri)}${this.cfgParam(modCfg)}&size=${size}&pos=${pos}`, "application/xml");
         const arts = splitArtifacts(xml).map(parseArtifact).filter((a) => a.uri && a.uri !== mod.uri && !/^module$/i.test(a.format));
         const before = reqs.size;
         for (const a of arts) { const { format: _f, ...r } = a; if (!reqs.has(r.uri)) reqs.set(r.uri, r); }
@@ -364,17 +433,18 @@ export class Requirements {
     } catch (e) {
       if (!missingApi(e)) throw e;
       this.noReportable = true;
-      for (const r of await this.oslcModuleContent(mod)) reqs.set(r.uri, r);
+      for (const r of await this.oslcModuleContent(mod, modCfg)) reqs.set(r.uri, r);
     }
-    const data: RmModuleData = { module: mod, fetchedAt: Date.now(), requirements: [...reqs.values()], config: this.config() };
-    this.mem.set(mod.uuid, data);
-    writeFileSync(join(this.cacheDir, `${mod.uuid.replace(/[^\w.-]/g, "_")}.json`), JSON.stringify(data));
+    const data: RmModuleData = { module: mod, fetchedAt: Date.now(), requirements: [...reqs.values()], config: modCfg };
+    this.mem.set(cacheKey(mod), data);
+    writeFileSync(join(this.cacheDir, `${cacheKey(mod)}.json`), JSON.stringify(data));
     return data;
   }
 
   /** Module refs: identifier, uuid, URL or (part of) the title. */
-  findModule(ref: string): RmModule | undefined {
-    const all = [...this.modulesByProject.values()].flat().concat(this.allCached().map((d) => d.module));
+  findModule(ref: string, config?: string): RmModule | undefined {
+    const all = [...this.modulesByProject.values()].flat().concat(this.allCached().map((d) => d.module))
+      .filter((m) => config === undefined || (m.config ?? "") === config);
     const r = ref.trim().toLowerCase();
     return all.find((m) => m.uri === ref || m.uuid === ref || m.identifier === ref)
       ?? all.find((m) => m.title.toLowerCase() === r) ?? all.find((m) => m.title.toLowerCase().includes(r));
@@ -382,7 +452,7 @@ export class Requirements {
 
   cached(uuid: string): RmModuleData | null {
     if (this.mem.has(uuid)) return this.mem.get(uuid)!;
-    const f = join(this.cacheDir, `${uuid.replace(/[^\w.-]/g, "_")}.json`);
+    const f = join(this.cacheDir, `${uuid.replace(/[^\w.@-]/g, "_")}.json`);
     if (!existsSync(f)) return null;
     try { const d = JSON.parse(readFileSync(f, "utf8")) as RmModuleData; this.mem.set(uuid, d); return d; } catch { return null; }
   }
