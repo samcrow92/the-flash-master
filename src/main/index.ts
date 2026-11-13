@@ -40,6 +40,15 @@ if (process.env.FLASH_DATA_DIR) app.setPath("userData", process.env.FLASH_DATA_D
 const dataDir = app.getPath("userData");
 mkdirSync(dataDir, { recursive: true });
 const resources = app.isPackaged ? process.resourcesPath : app.getAppPath();
+/**
+ * The lightning-bolt app icon for every window. Windows takes the taskbar icon from the app ID's executable unless the app
+ * sets its own ID; without it, running from source shows Electron's icon. The .ico carries all sizes (16–256 px).
+ */
+if (process.platform === "win32") app.setAppUserModelId("com.theflashmaster.app");
+const appIcon = (() => {
+  const ico = join(resources, "build", "icon.ico");
+  return process.platform === "win32" && existsSync(ico) ? ico : join(resources, "build", "icon.png");
+})();
 const userRolesDir = join(dataDir, "agents");
 mkdirSync(userRolesDir, { recursive: true });
 const userSkillsDir = join(dataDir, "skills"); // workflows installed from marketplaces
@@ -207,7 +216,7 @@ function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
   return new Promise((resolve) => {
     let done = false;
     const w = new BrowserWindow({
-      width: 980, height: 760, parent: win ?? undefined, title: "Sign in to IBM Jazz", autoHideMenuBar: true, backgroundColor: "#ffffff",
+      width: 980, height: 760, parent: win ?? undefined, title: "Sign in to IBM Jazz", autoHideMenuBar: true, backgroundColor: "#ffffff", icon: appIcon,
       webPreferences: { session: jazzSession(), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
     signInWin = w;
@@ -387,7 +396,7 @@ function updateSignIn(): Promise<{ ok: boolean; detail: string }> {
   const f = parseFeed(updateFeed().url);
   if (!f || f.kind !== "github") return Promise.resolve({ ok: false, detail: "The update source is not a GitHub repository" });
   return new Promise((resolve) => {
-    const w = new BrowserWindow({ width: 1000, height: 780, parent: win ?? undefined, title: "Sign in to GitHub", autoHideMenuBar: true,
+    const w = new BrowserWindow({ width: 1000, height: 780, parent: win ?? undefined, title: "Sign in to GitHub", autoHideMenuBar: true, icon: appIcon,
       webPreferences: { session: updatesSession(), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     let done = false;
     const finish = async (ok: boolean, detail: string) => {
@@ -736,7 +745,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1000, minHeight: 640, title: "TheFlashMaster", backgroundColor: "#0f1115", show: false,
     autoHideMenuBar: true,
-    icon: join(resources, "build", "icon.png"),
+    icon: appIcon,
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.once("ready-to-show", () => win?.show());
