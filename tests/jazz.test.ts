@@ -124,3 +124,33 @@ describe("Jazz browser sign-in (SSO / Jazz Authorization Server)", () => {
     expect(explain401(401, "Bearer", "basic")).toMatch(/Browser sign-in \(SSO\)/);
   });
 });
+
+describe("Jazz query fallbacks", () => {
+  it("retries with simpler queries when the server rejects fields or filters, and remembers what works", async () => {
+    const { f, calls } = fake((url) => {
+      const u = decodeURIComponent(url);
+      if (u.includes("state/group") || u.includes("priority/name")) return { status: 500, body: "<error><message>CRJAZ1234E Unknown attribute 'group'</message></error>" };
+      return {};
+    });
+    const j = new JazzClient({ ...base, authType: "basic" }, f);
+    const open = await j.search({ state: "open" });
+    expect(open.map((w) => w.id)).toEqual(["7"]); // "Done" item 8 filtered out locally
+    const closed = await j.search({ state: "closed" });
+    expect(closed.map((w) => w.id)).toEqual(["8"]);
+    const n = calls.length;
+    await j.search({ state: "open" });
+    expect(calls.length - n).toBe(1); // goes straight to the working shape
+  });
+
+  it("surfaces the server's own error message", async () => {
+    const { f } = fake(() => ({ status: 500, body: "<html><body><h1>Error</h1><message>CRJAZ0001E Query too complex</message></body></html>" }));
+    await expect(new JazzClient({ ...base, authType: "basic" }, f).search({})).rejects.toThrow(/HTTP 500 — CRJAZ0001E Query too complex/);
+  });
+
+  it("detail falls back to basic fields and fetches comments separately", async () => {
+    const { f } = fake((url) => (decodeURIComponent(url).includes("category/name") ? { status: 500, body: "bad field" } : {}));
+    const d = await new JazzClient({ ...base, authType: "basic" }, f).detail("7");
+    expect(d.item.id).toBe("7");
+    expect(d.comments).toHaveLength(2);
+  });
+});

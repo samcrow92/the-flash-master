@@ -26,6 +26,17 @@ export interface JazzConfig {
   password: string;
 }
 
+const BASIC_FIELDS = "(id|summary|description|state/name|type/name|owner/name|projectArea/name)";
+const CLOSED_STATE = /resolv|clos|done|verif|invalid|reject|duplicat|obsolet|cancel|complet|finish|fixed|works ?as ?designed/i;
+/** Query shapes tried in order when a server rejects one (fields or filters unsupported by that EWM version). */
+type QueryLevel = 0 | 1 | 2 | 3;
+
+export class JazzQueryError extends Error {
+  constructor(readonly status: number, readonly serverMessage: string) {
+    super(`Jazz query failed: HTTP ${status}${serverMessage ? ` — ${serverMessage}` : ""}`);
+  }
+}
+
 const LIST_FIELDS = "(id|summary|description|state/name|type/name|owner/name|owner/userId|projectArea/name|priority/name|severity/name|modified|itemId)";
 const DETAIL_FIELDS = "(id|summary|description|state/name|type/name|owner/name|projectArea/name|priority/name|severity/name|category/name|target/name|creator/name|creationDate|modified|tags|comments/(content|creator/name|creationDate))";
 
@@ -34,6 +45,7 @@ export class JazzClient {
   private authed = false;
   private basicFallback = false;
   private me: string | null = null;
+  private level: QueryLevel = 0; // first query shape this server accepted
 
   constructor(private cfg: JazzConfig, private fetchImpl: FetchLike) {
     this.cfg.serverUrl = cfg.serverUrl.replace(/\/+$/, "");
@@ -76,7 +88,18 @@ export class JazzClient {
 
   /** Full work item with its comments. */
   async detail(id: string): Promise<{ item: JazzWorkItem; comments: JazzComment[] }> {
-    const xml = await this.rptXml(`[id=${Number(id)}]`, DETAIL_FIELDS, 1);
+    const f = `[id=${Number(id)}]`;
+    let xml: string;
+    try { xml = await this.rptXml(f, DETAIL_FIELDS, 1); }
+    catch (e) {
+      if (!(e instanceof JazzQueryError)) throw e;
+      // Older servers reject some detail fields: fall back to the basics, then add comments if possible.
+      xml = await this.rptXml(f, LIST_FIELDS, 1).catch(() => this.rptXml(f, BASIC_FIELDS, 1));
+      const c = await this.rptXml(f, "(id|comments/(content|creator/name|creationDate))", 1).catch(() => "");
+      const item = parseWorkItems(xml, this.cfg.serverUrl)[0];
+      if (!item) throw new Error(`work item ${id} not found`);
+      return { item, comments: c ? parseComments(c) : [] };
+    }
     const item = parseWorkItems(xml, this.cfg.serverUrl)[0];
     if (!item) throw new Error(`work item ${id} not found`);
     return { item, comments: parseComments(xml) };
@@ -91,19 +114,55 @@ export class JazzClient {
       return parseWorkItems(await this.rptXml(`[${ids.map((i) => `id=${i}`).join(" or ")}]`, LIST_FIELDS, ids.length), this.cfg.serverUrl);
     }
     const areas = s.projectAreas?.length ? s.projectAreas : this.cfg.projectAreas;
-    const parts: string[] = [];
-    if (areas.length) parts.push(`(${areas.map((a) => `projectArea/name='${esc(a)}'`).join(" or ")})`);
-    if ((s.state ?? "open") !== "all") parts.push(`state/group='${s.state ?? "open"}'`);
-    if (s.type) parts.push(`type/name='${esc(s.type)}'`);
-    if (s.owner === "me") { const me = await this.whoAmI(); if (me) parts.push(`owner/userId='${esc(me)}'`); }
-    if (s.owner === "unassigned") parts.push(`owner/userId='unassigned'`);
-    if (s.raw?.trim()) parts.push(`(${s.raw.trim()})`);
-    const filter = parts.length ? `[${parts.join(" and ")}]` : "";
-    if (!text) return parseWorkItems(await this.rptXml(filter, LIST_FIELDS, max), this.cfg.serverUrl);
-    // The reportable API has no full-text operator: fetch the filtered set and match words locally.
-    const all = parseWorkItems(await this.rptXml(filter, LIST_FIELDS, 1000), this.cfg.serverUrl);
+    const me = s.owner === "me" ? await this.whoAmI() : null;
+    // The reportable API has no full-text operator: with words, fetch a larger filtered set and match locally.
+    const all = await this.list({ areas, state: s.state ?? "open", type: s.type, owner: s.owner, me, raw: s.raw?.trim() }, text ? 1000 : max);
+    if (!text) return all.slice(0, max);
     const words = text.toLowerCase().split(/\s+/).filter(Boolean);
     return all.filter((w) => words.every((x) => `${w.id} ${w.title} ${w.description}`.toLowerCase().includes(x))).slice(0, max);
+  }
+
+  /**
+   * Work item list with graceful degradation. EWM versions differ in which reportable fields and filter attributes
+   * they accept (an unknown one gives HTTP 500), so the query is retried in simpler shapes and the remaining
+   * conditions are applied locally. The first shape that works is remembered for this server.
+   */
+  private async list(q: { areas: string[]; state: "open" | "closed" | "all"; type?: string; owner?: "me" | "unassigned" | ""; me: string | null; raw?: string },
+    size: number): Promise<JazzWorkItem[]> {
+    const areaCond = q.areas.length ? `(${q.areas.map((a) => `projectArea/name='${esc(a)}'`).join(" or ")})` : "";
+    const serverConds = [
+      areaCond,
+      q.state !== "all" ? `state/group='${q.state}'` : "",
+      q.type ? `type/name='${esc(q.type)}'` : "",
+      q.owner === "me" && q.me ? `owner/userId='${esc(q.me)}'` : q.owner === "unassigned" ? "owner/userId='unassigned'" : "",
+      q.raw ? `(${q.raw})` : "",
+    ].filter(Boolean);
+    const shapes: { level: QueryLevel; filter: string; fields: string; size: number; local: boolean }[] = [
+      { level: 0, filter: serverConds.length ? `[${serverConds.join(" and ")}]` : "", fields: LIST_FIELDS, size, local: false },
+      { level: 1, filter: serverConds.length ? `[${serverConds.join(" and ")}]` : "", fields: BASIC_FIELDS, size, local: false },
+      { level: 2, filter: [areaCond, q.raw ? `(${q.raw})` : ""].filter(Boolean).length ? `[${[areaCond, q.raw ? `(${q.raw})` : ""].filter(Boolean).join(" and ")}]` : "", fields: BASIC_FIELDS, size: Math.min(Math.max(size * 4, 200), 1000), local: true },
+      { level: 3, filter: areaCond ? `[${areaCond}]` : "", fields: BASIC_FIELDS, size: Math.min(Math.max(size * 4, 200), 1000), local: true },
+    ];
+    let first: JazzQueryError | null = null;
+    for (const sh of shapes.filter((x) => x.level >= this.level)) {
+      try {
+        let items = parseWorkItems(await this.rptXml(sh.filter, sh.fields, sh.size), this.cfg.serverUrl);
+        this.level = sh.level;
+        if (sh.local) {
+          items = items.filter((w) =>
+            (q.state === "all" || (q.state === "closed") === CLOSED_STATE.test(w.state)) &&
+            (!q.type || w.type.toLowerCase() === q.type.toLowerCase()) &&
+            (q.owner !== "unassigned" || !w.owner || /unassigned/i.test(w.owner)) &&
+            (q.owner !== "me" || !q.me || (!!w.owner && (w.owner.toLowerCase() === q.me.toLowerCase() || q.me.toLowerCase().endsWith(w.owner.toLowerCase().replace(/\s+/g, "")))))
+          );
+        }
+        return items;
+      } catch (e) {
+        if (!(e instanceof JazzQueryError) || e.status === 401 || e.status === 403) throw e;
+        first ??= e;
+      }
+    }
+    throw first ?? new Error("Jazz query failed");
   }
 
   /** Back-compat entry used by agents: ids, a raw filter (contains = < >) or words. */
@@ -148,7 +207,7 @@ export class JazzClient {
   private async rptXml(filter: string, fields: string, size: number): Promise<string> {
     const r = await this.send("GET", `/rpt/repository/workitem?size=${size}&fields=${encodeURIComponent(`workitem/workItem${filter}/${fields}`)}`,
       undefined, { Accept: "text/xml" });
-    if (!r.ok) throw new Error(`Jazz query failed: HTTP ${r.status}`);
+    if (!r.ok) throw new JazzQueryError(r.status, serverMessage(await r.text().catch(() => "")));
     return r.text();
   }
 
@@ -238,6 +297,13 @@ export function explain401(status: number, scheme: string, authType: string): st
   if (/basic/.test(s)) return `HTTP ${status}: user or password rejected${asked}. Check them in Settings → Integrations → IBM Jazz (Authentication: Basic).`;
   if (authType === "form") return `HTTP ${status}: Jazz rejected the session after login. Check user/password; if your company uses single sign-on, try Authentication "Windows (integrated)".`;
   return `HTTP ${status}: not authorised${asked}. Check the authentication settings and your access to the project area.`;
+}
+
+/** The useful line of a Jazz error page / XML (exception message), short. */
+export function serverMessage(body: string): string {
+  const m = /<(?:\w+:)?(?:message|errorMessage|detail)[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:message|errorMessage|detail)>/i.exec(body)?.[1]
+    ?? /"(?:errorMessage|message)"\s*:\s*"([^"]+)"/.exec(body)?.[1] ?? body;
+  return decode(m.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
 const esc = (s: string) => s.replace(/'/g, "''");

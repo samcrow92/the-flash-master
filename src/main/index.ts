@@ -16,6 +16,7 @@ import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { parseCopilotUsage } from "./copilot-usage";
 import { Requirements } from "./requirements";
+import { SecretStore } from "./secrets";
 import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
@@ -107,10 +108,9 @@ const git = async (cwd: string, args: string[]): Promise<{ code: number | null; 
 };
 
 // ---------------- Copilot token (optional sign-in without /login), encrypted with safeStorage ----------------
+const secrets = new SecretStore(safeStorage as any);
 const copilotSecret = join(dataDir, "copilot.secret");
-const readCopilotToken = (): string => {
-  try { return existsSync(copilotSecret) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(copilotSecret)) : ""; } catch { return ""; }
-};
+const readCopilotToken = (): string => secrets.get(copilotSecret);
 const harnessEnv = (h: HarnessId): Record<string, string> => {
   if (h !== "copilot") return {};
   const t = readCopilotToken();
@@ -119,9 +119,7 @@ const harnessEnv = (h: HarnessId): Record<string, string> => {
 
 // ---------------- Jazz (password encrypted with the OS keychain via safeStorage) ----------------
 const secretFile = join(dataDir, "jazz.secret");
-const readJazzPassword = (): string => {
-  try { return existsSync(secretFile) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(secretFile)) : ""; } catch { return ""; }
-};
+const readJazzPassword = (): string => secrets.get(secretFile);
 let jazzClient: JazzClient | null = null;
 let jazzKey = "";
 // Dedicated persistent session for Jazz: keeps the LTPA/JSESSIONID cookies across redirects and restarts,
@@ -569,9 +567,8 @@ const api: FlashApi = {
       detail: signedIn ? `Signed in — ${m.models.length} models available` : (m.error ?? "Not signed in") };
   },
   setCopilotToken: async (token) => {
-    if (!token.trim()) { if (existsSync(copilotSecret)) unlinkSync(copilotSecret); return { tokenSet: false }; }
-    if (!safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
-    writeFileSync(copilotSecret, safeStorage.encryptString(token.trim()));
+    if (!token.trim()) { await secrets.set(copilotSecret, ""); return { tokenSet: false }; }
+    await secrets.set(copilotSecret, token.trim());
     return { tokenSet: true };
   },
   copilotTokenSet: async () => existsSync(copilotSecret),
@@ -617,8 +614,7 @@ const api: FlashApi = {
   jazzUpdate: async (id, attributes, action) => needJazz().update(id, attributes, action),
   jazzProjectAreas: async () => needJazz().listProjectAreas(),
   jazzSetPassword: async (password) => {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
-    writeFileSync(secretFile, safeStorage.encryptString(password));
+    await secrets.set(secretFile, password);
     settings.update({ jazz: { hasPassword: !!password } });
     jazzClient = null; rmClient = null;
     await jazzSession().clearStorageData({ storages: ["cookies"] }); // new credentials → fresh login
@@ -697,6 +693,7 @@ async function applyProxy(): Promise<void> {
 settings.onChange(() => void applyProxy());
 
 app.whenReady().then(async () => {
+  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret)]);
   await applyProxy();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);

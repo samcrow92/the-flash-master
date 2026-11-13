@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Jazz robustness:**
+  - When a server rejects a query (for example HTTP 500 because a reportable field or filter isn't supported by that EWM version), the app retries with fewer fields, then with filters applied locally, and remembers what works.
+  - Error messages now include the server's own reason.
+  - Work item details fall back to basic fields, with comments fetched separately.
+- **No more Electron deprecation warnings:** secrets use the async `safeStorage` API. Secrets stored by older versions are read once and re-encrypted.
 - **Steering acknowledgement:** steering and queued messages show their delivery status. **sending** or **queued** turns into **delivered** when the agent receives the message, then **seen ✓✓** once the model continues with it in context.
   - Pi confirms natively when it injects the message.
   - Other harnesses count it as seen at the first output of the redirected turn.
