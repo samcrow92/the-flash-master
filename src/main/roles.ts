@@ -93,3 +93,27 @@ export function validateRole(src: string, knownTools: string[], builtinNames: st
   if (role.prompt.length > 12000) warnings.push("Long instructions cost tokens on every session — consider trimming.");
   return { ok: errors.length === 0, errors, warnings, role: errors.length ? null : role };
 }
+
+/** A role an agent defines at run time (coordinator's `create_agent` / text-mode AGENT block). */
+export interface AgentSpec {
+  name: string; title?: string; description?: string; icon?: string; instructions: string;
+  tools?: string[]; harness?: string; model?: string; skills?: string[]; maxResultTokens?: number;
+}
+
+export const slugRole = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+
+/** The role file for a spec (same format as agents/*.md), marked as created by an agent. */
+export function roleMarkdown(spec: AgentSpec, createdBy: string): string {
+  const name = slugRole(spec.name);
+  const title = (spec.title || name.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())).replace(/\n/g, " ");
+  const lines = [
+    "---", `name: ${name}`, `title: ${title}`, `icon: ${(spec.icon || "🧩").replace(/\n/g, "")}`,
+    `description: ${(spec.description || title).replace(/\n/g, " ").slice(0, 200)}`,
+    `tools: [${["flashmaster-core", ...(spec.tools ?? []).filter((t) => t !== "flashmaster-core")].join(", ")}]`,
+    ...(spec.harness ? [`harness: ${spec.harness}`] : []), ...(spec.model ? [`model: ${spec.model}`] : []),
+    ...(spec.skills?.length ? [`skills: [${spec.skills.join(", ")}]`] : []),
+    `maxResultTokens: ${spec.maxResultTokens ?? 400}`, `createdBy: ${createdBy}`, "---",
+    spec.instructions.trim(), "",
+  ];
+  return lines.join("\n");
+}

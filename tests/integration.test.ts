@@ -173,6 +173,50 @@ describe("Orchestrator", () => {
     expect(reviewer).toBeTruthy();
   });
 
+  it("the coordinator can create a custom agent and run it", async () => {
+    const created: any[] = [];
+    const { db, orch, chat } = setup({}, { createRole: (spec: any, by: string, keep: boolean) => {
+      const role = { name: spec.name, title: "CAN Analyst", icon: "🧩", description: spec.description ?? "", tools: [], maxResultTokens: 400, skills: [], prompt: spec.instructions, source: "user" };
+      created.push({ spec, by, keep }); (orch as any).d.roles = ((orig) => () => [...orig(), role])((orch as any).d.roles); return role;
+    } });
+    cleanup = () => orch.stopAll();
+    await orch.sendUserMessage(chat.id, "Plan the brake light feature", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "streaming");
+    const parentId = agentMsgs(db, chat.id)[0]!.agentId!;
+    const r = await orch.createAgent(parentId, { name: "CAN analyst", instructions: "Analyse CAN logs.", goal: "Look at trace.asc" });
+    expect(r.role).toBe("can-analyst");
+    expect(created[0]).toMatchObject({ by: "flashmaster", keep: true });
+    expect(r.result).toBeTruthy();
+    expect(db.getAgent(r.agentId!)!.role).toBe("can-analyst");
+    await expect(orch.createAgent(parentId, { name: "x", instructions: "" })).rejects.toThrow(/instructions/);
+  });
+
+  it("new chats start in Autopilot and auto-approve without asking", async () => {
+    const { db, orch, chat } = setup();
+    cleanup = () => orch.stopAll();
+    expect(db.createChat({ projectId: null, title: "x", kind: "project", agentRole: "flashmaster" }).autopilot).toBe(true);
+    db.updateChat(chat.id, { harness: "opencode", autopilot: false }); // settings default auto-all still never asks
+    await orch.sendUserMessage(chat.id, "WRITE something", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    expect(Number((db.raw.prepare("SELECT COUNT(*) c FROM messages WHERE content LIKE '%React ✅%'").get() as any).c)).toBe(0);
+  });
+
+  it("an agent without the app's tools calls them as TOOL lines", async () => {
+    const calls: any[] = [];
+    const { db, orch, chat } = setup({}, {
+      toolsLoaded: () => false,
+      listTools: (set: string) => set === "core" ? [{ name: "create_task", description: "Create a task.", inputSchema: { properties: { title: {}, priority: {} }, required: ["title"] } }] : [],
+      callTool: async (name: string, args: any, agentId: string, set: string) => { calls.push({ name, args, agentId, set }); return { id: "task-1", title: args.title }; },
+    });
+    cleanup = () => orch.stopAll();
+    db.updateChat(chat.id, { harness: "opencode", agentRole: "reviewer" });
+    (orch as any).waitForTools = async () => false;
+    await orch.sendUserMessage(chat.id, "TEXTTOOL please", null);
+    await until(() => agentMsgs(db, chat.id).some((m) => m.content.startsWith("Tool says:")), 15000);
+    expect(calls).toEqual([{ name: "create_task", args: { title: "Check debounce", priority: "high" }, agentId: expect.any(String), set: "core" }]);
+    expect(agentMsgs(db, chat.id).find((m) => m.content.startsWith("Tool says:"))!.content).toContain("task-1");
+  });
+
   it("uses a real ACP harness when the chat selects it", async () => {
     const { db, orch, chat } = setup();
     cleanup = () => orch.stopAll();
@@ -251,7 +295,7 @@ describe("Orchestrator", () => {
   it("asks for approval in chat and resolves it with a reaction", async () => {
     const { db, orch, chat } = setup({ permissions: { approval: "ask" } });
     cleanup = () => orch.stopAll();
-    db.updateChat(chat.id, { harness: "opencode" });
+    db.updateChat(chat.id, { harness: "opencode", autopilot: false }); // new chats default to Autopilot
     await orch.sendUserMessage(chat.id, "WRITE something", null);
     await until(() => db.history(chat.id, null).length > 0 && db.listAgents({}).length > 0);
     await until(() => db.raw.prepare("SELECT COUNT(*) c FROM messages WHERE author='system'").get() !== undefined &&

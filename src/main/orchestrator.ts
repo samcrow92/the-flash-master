@@ -16,14 +16,19 @@ import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
 import { prepareInstructions } from "./harness/instructions";
+import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
-  parseTextDelegations, resultForParent, TEXT_DELEGATION_RULES, type TextDelegation,
+  parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
 export interface OrchestratorDeps {
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
   harnessEnv?: (harness: HarnessId) => Record<string, string>;
+  /** Save a role an agent defined at run time (create_agent / AGENT block). keep=false: until the app restarts. */
+  createRole?: (spec: AgentSpec, createdBy: string, keep: boolean) => RoleDef;
+  listTools?: (set: string) => ToolInfo[];
+  callTool?: (name: string, args: unknown, agentId: string, set?: string) => Promise<unknown>;
   /** Did this agent's MCP server reach the app (tools/list)? */
   toolsLoaded?: (agentId: string) => boolean;
   onModels?: (harness: HarnessId, models: import("@shared/types").ModelInfo[]) => void;
@@ -63,6 +68,9 @@ interface Live {
   /** The coordinator's `delegate` tool didn't load: it delegates by writing DELEGATE lines, which the app carries out. */
   textDelegation?: boolean;
   lastReplyId?: string | null;
+  lastText?: string;
+  /** TheFlashMaster's tools weren't confirmed loaded (Pi, MCP blocked…): the agent may call them as TOOL lines. */
+  textTools?: boolean;
   depth: number;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
@@ -73,7 +81,7 @@ interface Live {
 }
 
 const MAX_CONCURRENT_FALLBACK = 4;
-const MAX_TEXT_ROUNDS = 6;
+const MAX_TEXT_ROUNDS = 12;
 
 /** Copilot CLI logs "N MCP servers were blocked by policy" when the organisation's MCP policy is off. */
 function copilotMcpBlocked(homeDir: string): boolean {
@@ -191,6 +199,26 @@ export class Orchestrator {
     const result = await Promise.race([done, new Promise<null>((r) => setTimeout(() => r(null), timeout))]);
     if (result === null) return { agentId: live.agentId, status: "running", result: "Still running. Call get_result later." };
     return { agentId: live.agentId, status: this.d.db.getAgent(live.agentId)?.status ?? "done", result };
+  }
+
+  /** Called by the coordinator's `create_agent` tool (and text-mode AGENT blocks): define a new agent, optionally run it. */
+  async createAgent(parentAgentId: string, a: AgentSpec & { keep?: boolean; goal?: string; context?: string; files?: string[]; acceptance?: string; wait?: boolean }):
+    Promise<{ role: string; created: string; agentId?: string; status?: string; result?: string }> {
+    const parent = this.byAgent.get(parentAgentId);
+    if (!parent) throw new Error("unknown parent agent");
+    if (!this.d.createRole) throw new Error("creating agents is not available here");
+    if (!a.instructions?.trim()) throw new Error("instructions are required: the new agent's complete operating instructions");
+    const name = slugRole(a.name || a.title || "");
+    if (!name) throw new Error("name is required");
+    const role = this.d.createRole({ ...a, name }, parent.role.name, a.keep !== false);
+    this.flow(parentAgentId, { kind: "delegate", label: `created agent ${role.title}` });
+    this.system(parent.chatId, parent.threadRoot ?? parent.currentMessageId ?? parent.lastReplyId ?? null,
+      `🧩 ${parent.role.title} created the agent **${role.icon} ${role.title}** (\`${role.name}\`)${a.keep === false ? " for this session" : ", saved to your agents"}.`);
+    const created = a.keep === false ? "temporary (until restart)" : "saved to the agents folder";
+    if (!a.goal) return { role: role.name, created };
+    const r = await this.delegate(parentAgentId, { role: role.name, goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, wait: a.wait,
+      harness: a.harness, model: a.model });
+    return { role: role.name, created, agentId: r.agentId, status: r.status, result: r.result };
   }
 
   getResult(agentId: string): { status: string; result: string | null } {
@@ -402,7 +430,16 @@ export class Orchestrator {
       // Coordinator: Pi has no MCP, so text mode right away; other harnesses get a few seconds to list the tools,
       // and are checked again after the first reply (some list them only when the first prompt arrives).
       let toolsPending = false;
-      if (firstTurn && this.coordinates(live, s) && !live.textDelegation) {
+      const coordinator = firstTurn && this.coordinates(live, s);
+      if (firstTurn && this.d.toolsLoaded && this.d.listTools && live.harness !== "mock") {
+        // Pi has no MCP; elsewhere give the harness a few seconds to list the app's tools.
+        const confirmed = live.harness !== "pi" && await this.waitForTools(live, coordinator ? 5000 : 3000);
+        live.textTools = !confirmed;
+        if (coordinator && !live.textDelegation) {
+          if (live.harness === "pi") this.enterTextDelegation(live, t);
+          else toolsPending = !confirmed;
+        }
+      } else if (coordinator && !live.textDelegation) {
         if (live.harness === "pi") this.enterTextDelegation(live, t);
         else toolsPending = !(await this.waitForTools(live, 5000));
       }
@@ -426,7 +463,7 @@ export class Orchestrator {
       const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
       promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
         brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
-        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : ""].filter((x) => x.trim()).join("\n\n") });
+        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : "", firstTurn && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       this.setStatus(live, "running", "Thinking…");
       // Autopilot is read per turn, so toggling it applies to the very next message.
       const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
@@ -508,9 +545,12 @@ export class Orchestrator {
         attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: 1 });
       return;
     }
-    if (live.textDelegation && finalStatus === "done" && !live.stopped && !live.paused && !live.queue.length) {
-      const reqs = parseTextDelegations(text);
-      if (reqs.length) { void this.runTextDelegations(live, t, reqs); return; }
+    if ((live.textDelegation || live.textTools) && finalStatus === "done" && !live.stopped && !live.paused && !live.queue.length) {
+      live.lastText = text;
+      const reqs = live.textDelegation ? parseTextDelegations(text) : [];
+      const agents = live.textDelegation ? parseTextAgents(text).length : 0;
+      const calls = live.textTools ? parseTextToolCalls(text, new Set(this.toolSetFor(live).map((x) => x.name))) : [];
+      if (reqs.length || agents || calls.length) { void this.runTextDelegations(live, t, reqs, calls); return; }
     }
     if (live.redirect && !live.stopped) {
       const r = live.redirect;
@@ -570,7 +610,9 @@ export class Orchestrator {
   }
 
   private askPermission(live: Live, r: PermissionRequest): Promise<boolean> {
-    if (this.d.db.getChat(live.chatId)?.autopilot) {
+    // Autopilot (default) or "Auto-approve everything": never stop to ask. Blocked commands and read-only mode are
+    // enforced before this point by the policy, so they still apply.
+    if (this.d.db.getChat(live.chatId)?.autopilot || this.d.settings().permissions.approval === "auto-all") {
       this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "auto-approved (autopilot)" });
       return Promise.resolve(true);
     }
@@ -666,16 +708,36 @@ export class Orchestrator {
   }
 
   /** Carry out DELEGATE lines from a coordinator in text mode, then feed the results back to it. */
-  private async runTextDelegations(live: Live, t: Parameters<Orchestrator["turn"]>[0], reqs: TextDelegation[]): Promise<void> {
+  /** The app's own tools this agent's role may use (sets: core, plus jazz when the role has it). */
+  private toolSetFor(live: Live): (ToolInfo & { set: string })[] {
+    if (!this.d.listTools) return [];
+    const sets = ["core", ...(live.role.tools.includes("jazz") ? ["jazz"] : [])];
+    return sets.flatMap((set) => this.d.listTools!(set).map((x) => ({ ...x, set })));
+  }
+  private textToolsFor(live: Live): string {
+    // A coordinator in text-delegation mode already has DELEGATE/AGENT; list the other tools for it.
+    const list = this.toolSetFor(live).filter((x) => !(live.textDelegation && ["delegate", "create_agent", "get_result"].includes(x.name)));
+    return list.length ? textToolRules(list) : "";
+  }
+
+  private async runTextDelegations(live: Live, t: Parameters<Orchestrator["turn"]>[0], reqs: TextDelegation[],
+    calls: import("./context").TextToolCall[] = []): Promise<void> {
     const round = (t.textRound ?? 0) + 1;
-    const known = new Set(this.d.roles().map((r) => r.name));
     if (round > MAX_TEXT_ROUNDS) {
-      this.system(t.chat.id, t.threadRoot, `⚠️ Stopped after ${MAX_TEXT_ROUNDS} delegation rounds. Send a message to continue.`, "warn");
+      this.system(t.chat.id, t.threadRoot, `⚠️ Stopped after ${MAX_TEXT_ROUNDS} rounds of text-mode calls. Send a message to continue.`, "warn");
       return;
     }
+    const created: string[] = [];
+    for (const ag of live.textDelegation ? parseTextAgents(live.lastText ?? "") : []) {
+      try {
+        const r = await this.createAgent(live.agentId, { name: ag.name, description: ag.description, instructions: ag.instructions, harness: ag.harness });
+        created.push(`### ${r.role}\nCreated (${r.created}).`);
+      } catch (e) { created.push(`### ${ag.name}\nNot created: ${String((e as Error)?.message ?? e)}`); }
+    }
+    const known = new Set(this.d.roles().map((r) => r.name));
     const runnable = reqs.filter((r) => known.has(r.role) && r.role !== live.role.name);
     if (runnable.length) this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}`).join(", ")}`);
-    const results = await Promise.all(reqs.map(async (r) => {
+    const results = created.concat(await Promise.all(reqs.map(async (r) => {
       if (!known.has(r.role) || r.role === live.role.name) return `### ${r.role}
 Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.name).join(", ")}.`;
       try {
@@ -684,9 +746,21 @@ Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.nam
 ${x.result ?? `status: ${x.status}`}`;
       } catch (e) { return `### ${r.role}
 Failed: ${String((e as Error)?.message ?? e)}`; }
-    }));
+    })));
+    const sets = new Map(this.toolSetFor(live).map((x) => [x.name, x.set]));
+    const toolResults: string[] = [];
+    for (const c of calls) {
+      if (c.error) { toolResults.push(`### ${c.name}\nNot run: ${c.error}`); continue; }
+      this.flow(live.agentId, { kind: "tool", label: `${c.name} (text mode)`, status: "completed" });
+      try {
+        const out = await this.d.callTool!(c.name, c.args, live.agentId, sets.get(c.name));
+        const json = typeof out === "string" ? out : JSON.stringify(out, null, 1);
+        toolResults.push(`### ${c.name}\n${json.length > 12000 ? `${json.slice(0, 12000)}\n… (truncated)` : json}`);
+      } catch (e) { toolResults.push(`### ${c.name}\nError: ${String((e as Error)?.message ?? e)}`); }
+    }
     if (live.stopped || !this.live.has(live.key)) return;
-    void this.turn({ ...t, input: `## Specialist results\n${results.join("\n\n")}\n\nIntegrate these results and answer the user, or delegate follow-ups the same way.`,
+    const parts = [results.length ? `## Specialist results\n${results.join("\n\n")}` : "", toolResults.length ? `## Tool results\n${toolResults.join("\n\n")}` : ""].filter(Boolean);
+    void this.turn({ ...t, input: `${parts.join("\n\n")}\n\nContinue: integrate these results and answer, or make further calls the same way.`,
       attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: round });
   }
 

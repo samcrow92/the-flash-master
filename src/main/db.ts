@@ -44,6 +44,8 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE file_changes(id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, agent_id TEXT, role TEXT, path TEXT NOT NULL,
      old_text TEXT, new_text TEXT NOT NULL, added INTEGER NOT NULL DEFAULT 0, removed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
    CREATE INDEX file_changes_chat ON file_changes(chat_id, created_at);`,
+  // v6: Autopilot becomes the default — existing chats switch to it too
+  `UPDATE chats SET autopilot=1;`,
 ];
 
 type Row = Record<string, any>;
@@ -53,6 +55,8 @@ export const newId = () => randomUUID();
 export class Db {
   readonly raw: DatabaseSync;
   private seq = 0;
+  /** Autopilot for new chats (Settings → General → Autopilot for new chats). */
+  defaultAutopilot = true;
 
   constructor(file: string) {
     this.raw = new DatabaseSync(file);
@@ -129,13 +133,13 @@ export class Db {
     if (r) return toChat(r);
     return this.createChat({ projectId: null, title: "TheFlashMaster", kind: "master", agentRole: "flashmaster" });
   }
-  createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string }): Chat {
+  createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string; autopilot?: boolean }): Chat {
     const c: Chat = {
       id: newId(), projectId: i.projectId, title: i.title, kind: i.kind, agentRole: i.agentRole,
-      harness: null, model: null, superpowers: false, mode: null, autopilot: false, archived: false, pinned: false, createdAt: now(),
+      harness: null, model: null, superpowers: false, mode: null, autopilot: i.autopilot ?? this.defaultAutopilot, archived: false, pinned: false, createdAt: now(),
     };
-    this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-      c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.createdAt);
+    this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,autopilot,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.autopilot ? 1 : 0, c.createdAt);
     return c;
   }
   updateChat(id: string, patch: Partial<Chat>): Chat {

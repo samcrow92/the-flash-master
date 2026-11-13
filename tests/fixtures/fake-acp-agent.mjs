@@ -33,6 +33,15 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       const text = msg.params.prompt[0].text;
       const upd = (update) => send({ method: "session/update", params: { sessionId: sid, update } });
       if (text.includes("NETFAIL") && netFails < 1) { netFails++; return send({ id: msg.id, error: { code: -32603, message: "Connection error.: other side closed (UND_ERR_SOCKET)" } }); }
+      // Text-mode tools: an agent without the app's tools writes TOOL lines.
+      if (text.includes("## Tool results")) {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Tool says: ${text.includes("task-1") ? "task-1 created" : "nothing"}` } });
+        return reply({ stopReason: "end_turn" });
+      }
+      if (text.includes("TheFlashMaster tools (text mode)") && text.includes("TEXTTOOL")) {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: 'Creating the task.\nTOOL create_task {"title": "Check debounce",\n "priority": "high"}\n' } });
+        return reply({ stopReason: "end_turn" });
+      }
       // Text-mode delegation: a coordinator without the delegate tool writes DELEGATE lines.
       if (text.includes("## Specialist results")) {
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Integrated: ${text.includes("### reviewer") ? "reviewer result received" : "nothing"}` } });

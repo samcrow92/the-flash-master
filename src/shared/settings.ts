@@ -21,6 +21,8 @@ export interface Settings {
     theme: "dark" | "light" | "system";
     notifications: boolean;
     confirmStop: boolean;
+    /** New chats start with Autopilot on (agents and specialists work without asking for approval or feedback). */
+    autopilotDefault: boolean;
     defaultHarness: HarnessId;
     restoreLastChat: boolean;
   };
@@ -129,7 +131,7 @@ export interface Settings {
 const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ enabled, path: "", args: "", defaultModel });
 
 export const DEFAULT_SETTINGS: Settings = {
-  general: { theme: "dark", notifications: true, confirmStop: true, defaultHarness: "copilot", restoreLastChat: true },
+  general: { theme: "dark", notifications: true, confirmStop: true, autopilotDefault: true, defaultHarness: "copilot", restoreLastChat: true },
   profile: { name: "", avatar: "", hue: 210 },
   harnesses: {
     copilot: harness(true),
@@ -162,7 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
     economyForDelegated: false,
     showTokenCounts: true,
   },
-  permissions: { approval: "auto-read", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force" },
+  permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force" },
   mcp: { autoInstall: true, pythonPath: "", pipIndexUrl: "", disabled: [], npmRegistry: "", catalog: {}, external: [] },
   jazz: {
     enabled: false,

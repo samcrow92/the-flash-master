@@ -21,7 +21,7 @@ import { Updater, parseFeed } from "./updater";
 import { parseProxy, fallbacks, isProxySetupError, describe, explainProxyError, type ProxyCfg, type ParsedProxy } from "./proxy";
 import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
-import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
+import { loadRoles, loadSkills, parseRole, roleMarkdown, slugRole, validateRole, type AgentSpec } from "./roles";
 import type { AgentImportResult, Attachment, HarnessId, HarnessModels } from "@shared/types";
 import { randomUUID } from "node:crypto";
 import { HARNESS_IDS } from "@shared/types";
@@ -50,18 +50,40 @@ const settings = new SettingsStore(join(dataDir, "settings.json"), policyFile);
 const log = makeLogger(join(dataDir, "logs"), () => settings.get().advanced.logLevel);
 log("info", `starting TheFlashMaster ${app.getVersion()}`);
 const db = new Db(join(dataDir, "flashmaster.db"));
+db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
+settings.onChange((st) => { db.defaultAutopilot = st.general.autopilotDefault !== false; });
 db.reapOrphans();
 db.applyRetention(settings.get().data.retentionDays);
 
 let roles: RoleDef[] = [];
 let skills: SkillDef[] = [];
+/** Agents created by an agent with keep: false — live until the app restarts. */
+const tempRoles = new Map<string, RoleDef>();
 const reloadRoles = () => {
   roles = loadRoles(join(resources, "agents"), userRolesDir);
+  for (const r of tempRoles.values()) if (!roles.some((x) => x.name === r.name)) roles.push(r);
   const builtinSkills = loadSkills(join(resources, "skills", "superpowers"));
   const userSkills = loadSkills(userSkillsDir);
   skills = [...builtinSkills.filter((b) => !userSkills.some((u) => u.command === b.command)), ...userSkills];
 };
 reloadRoles();
+/** create_agent / AGENT blocks: never replace a built-in role or one the user wrote; agents may update their own creations. */
+function createRole(spec: AgentSpec, createdBy: string, keep: boolean): RoleDef {
+  const md = roleMarkdown(spec, createdBy);
+  const role = parseRole(md, slugRole(spec.name), "user");
+  const existing = roles.find((r) => r.name === role.name);
+  const file = join(userRolesDir, `${role.name}.md`);
+  const ownedByAgent = existsSync(file) && /^createdBy:/m.test(readFileSync(file, "utf8"));
+  if (existing && !tempRoles.has(role.name) && !ownedByAgent)
+    throw new Error(`"${role.name}" is an existing ${existing.source === "builtin" ? "built-in" : "user"} agent; delegate to it, or create the new one under another name`);
+  const known = new Set(["flashmaster-core", ...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)]);
+  role.tools = role.tools.filter((t) => known.has(t));
+  if (keep) { writeFileSync(file, md); tempRoles.delete(role.name); } else tempRoles.set(role.name, role);
+  reloadRoles();
+  emit({ type: "roles.changed", roles });
+  log("info", `agent ${role.name} created by ${createdBy} (${keep ? "saved" : "temporary"})`);
+  return roles.find((r) => r.name === role.name) ?? role;
+}
 
 let win: BrowserWindow | null = null;
 const emit = (e: AppEvent) => {
@@ -88,6 +110,10 @@ const orch = new Orchestrator({
   extraRules: () => marketplace.instructions(),
   harnessEnv: (h) => harnessEnv(h),
   toolsLoaded: (agentId) => bridge.toolsListed.has(agentId),
+  createRole,
+  // Text-mode tools for agents without MCP (Pi, or MCP blocked): the same handlers the MCP forwarder reaches.
+  listTools: (set) => bridge.list(set),
+  callTool: (name, args, agentId, set) => bridge.call(name, args, agentId, set),
   attachmentRoots: () => attachmentRoots(),
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };

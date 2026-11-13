@@ -193,7 +193,12 @@ Your \`delegate\` tool is not available in this session, so delegate in plain te
 starting at the beginning of a line:
 DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
 DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, pi or duo, only when the user asked for one)
-A brief may continue on the following lines until a blank line. Then end your reply. TheFlashMaster runs those specialists
+A brief may continue on the following lines until a blank line.
+To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
+AGENT <name>[@<harness>]: <one-line description>
+<its complete instructions: role, how it works, what it returns; several lines and blank lines are fine>
+END
+Then delegate to it by name. Then end your reply. TheFlashMaster runs those specialists
 in parallel and sends you their results in the next message; integrate them, or delegate follow-ups the same way.
 Don't do the work yourself, and don't call tools to do it.`;
 
@@ -207,8 +212,70 @@ export function parseTextDelegations(text: string): TextDelegation[] {
     if (fence) continue;
     const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
     if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), goal: m[3]!.trim() }; out.push(cur); continue; }
+    if (/^\s*(?:\*\*)?(?:AGENT|END)\b/.test(raw)) { cur = null; continue; }
     if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
     if (cur) cur.goal = `${cur.goal}\n${raw.trim()}`.trim();
   }
   return out.filter((d) => d.goal);
+}
+
+export interface TextAgent { name: string; harness?: string; description: string; instructions: string }
+
+/** AGENT … END blocks: agents a text-mode coordinator defines before delegating to them. */
+export function parseTextAgents(text: string): TextAgent[] {
+  const out: TextAgent[] = [];
+  let cur: TextAgent | null = null;
+  let fence = false;
+  for (const raw of text.split(/\r?\n/)) {
+    if (!cur && /^\s*```/.test(raw)) { fence = !fence; continue; }
+    if (fence) continue;
+    const m = /^\s*(?:\*\*)?AGENT(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
+    if (m) { cur = { name: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), description: m[3]!.trim(), instructions: "" }; out.push(cur); continue; }
+    if (!cur) continue;
+    if (/^\s*(?:\*\*)?(END|DELEGATE)\b/.test(raw) || /^\s*<result>/.test(raw)) { cur = null; continue; }
+    cur.instructions += `${raw}\n`;
+  }
+  return out.map((a) => ({ ...a, instructions: a.instructions.trim() })).filter((a) => a.instructions);
+}
+
+export interface ToolInfo { name: string; description: string; inputSchema: Record<string, unknown> }
+export interface TextToolCall { name: string; args: Record<string, unknown>; error?: string }
+
+/**
+ * TheFlashMaster's own tools for an agent that may not have them as real tools (Pi has no MCP; MCP can be blocked by
+ * policy in Copilot/OpenCode). Compact signatures only, to keep the prompt small.
+ */
+export function textToolRules(tools: ToolInfo[]): string {
+  const sig = (t: ToolInfo) => {
+    const props = (t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+    const req = new Set(((t.inputSchema as { required?: string[] }).required) ?? []);
+    const args = Object.keys(props).map((k) => (req.has(k) ? k : `${k}?`)).join(", ");
+    return `- ${t.name}(${args}): ${t.description.split(/(?<=\.)\s/)[0]!.slice(0, 160)}`;
+  };
+  return `## TheFlashMaster tools (text mode)
+If these TheFlashMaster tools are not available to you as real tools, call them in plain text instead: one call per line,
+at the start of the line, with JSON arguments:
+TOOL <name> {"arg": "value"}
+Then end your reply. TheFlashMaster runs the calls and sends the results in the next message. Use the real tools when you have them.
+${tools.map(sig).join("\n")}`;
+}
+
+/** TOOL lines: `TOOL name {json}`; the JSON may continue over the next lines. */
+export function parseTextToolCalls(text: string, known?: Set<string>): TextToolCall[] {
+  const out: TextToolCall[] = [];
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^\s*(?:[-*]\s+)?`?TOOL`?\s+`?([a-z][a-z0-9_]*)`?\s*(.*)$/.exec(lines[i]!);
+    if (!m || (known && !known.has(m[1]!))) continue;
+    let json = m[2]!.trim().replace(/`+$/, "");
+    if (!json) { out.push({ name: m[1]!, args: {} }); continue; }
+    let parsed: unknown;
+    for (let j = i; j < Math.min(lines.length, i + 60); j++) {
+      if (j > i) json += `\n${lines[j]}`;
+      try { parsed = JSON.parse(json); i = j; break; } catch { /* keep reading */ }
+    }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) out.push({ name: m[1]!, args: parsed as Record<string, unknown> });
+    else out.push({ name: m[1]!, args: {}, error: "arguments are not a JSON object" });
+  }
+  return out;
 }

@@ -40,6 +40,21 @@ export function buildTools(d: {
       handler: (a, c) => d.orch.delegate(c.agentId, a),
     },
     {
+      set: "core", name: "create_agent",
+      description: "Create a new custom agent (any kind of specialist you need: its own instructions, tools, harness) when no existing role fits, "
+        + "and optionally run it right away with a brief. Saved to the user's agents (reusable) unless keep is false. Afterwards delegate to it by name.",
+      inputSchema: obj({
+        name: s("short slug, e.g. can-log-analyst"), title: s("display name"), description: s("one line: what it does"), icon: s("one emoji (optional)"),
+        instructions: s("its complete operating instructions: role, how to work, what to return"),
+        tools: { type: "array", items: { type: "string" }, description: "extra MCP servers it needs (e.g. jazz, office); flashmaster-core is always included" },
+        harness: { type: "string", enum: ["copilot", "opencode", "pi", "duo"], description: "agent CLI to run it on (optional)" }, model: s("model id (optional)"),
+        keep: { type: "boolean", description: "save as a reusable agent (default true); false = only until the app restarts" },
+        goal: s("optional: run it now with this goal (same as delegate)"), context: s("facts it needs"), files: { type: "array", items: { type: "string" }, description: "relevant paths" },
+        acceptance: s("done when…"), wait: { type: "boolean", description: "wait for the result when goal is given (default true)" },
+      }, ["name", "instructions"]),
+      handler: (a, c) => d.orch.createAgent(c.agentId, a),
+    },
+    {
       set: "core", name: "get_result", description: "Get status and compact result of a delegated agent.",
       inputSchema: obj({ agentId: s("agent id from delegate") }, ["agentId"]),
       handler: async (a) => d.orch.getResult(a.agentId),

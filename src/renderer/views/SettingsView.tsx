@@ -139,6 +139,7 @@ function General(f: F) {
     <h4>App</h4>
     <Row label="Theme"><Choice f={f} path="general.theme" options={[["dark", "Dark"], ["light", "Light"], ["system", "System"]]} /></Row>
     <Row label="Default harness" hint="Used when a chat or role does not pick one; falls back to the first available."><Choice f={f} path="general.defaultHarness" options={harnessOptions} /></Row>
+    <Row label="Autopilot for new chats" hint="Agents and specialists work on their own: tool calls are approved automatically and they don't stop to ask for feedback. Blocked commands and read-only mode still apply. Toggle per chat next to the chat box."><Bool f={f} path="general.autopilotDefault" /></Row>
     <Row label="Desktop notifications" hint="Approval requests, budget warnings and errors when the window is in the background."><Bool f={f} path="general.notifications" /></Row>
     <Row label="Confirm before stopping all agents"><Bool f={f} path="general.confirmStop" /></Row>
     <Row label="Restore last chat on start"><Bool f={f} path="general.restoreLastChat" /></Row>
@@ -313,7 +314,7 @@ function Tokens(f: F) {
 function Permissions(f: F) {
   return <>
     <Row label="Tool approval" hint="'Ask' posts an approval message in the chat: react ✅ to allow or ❌ to deny.">
-      <Choice f={f} path="permissions.approval" options={[["ask", "Ask for every action"], ["auto-read", "Auto-approve reads, ask for changes"], ["auto-all", "Auto-approve everything"]]} />
+      <Choice f={f} path="permissions.approval" options={[["ask", "Ask for every action"], ["auto-read", "Auto-approve reads, ask for changes"], ["auto-all", "Auto-approve everything (default)"]]} />
     </Row>
     <Row label="Read-only mode" hint="Agents cannot edit, delete, move files or run commands."><Bool f={f} path="permissions.readOnly" /></Row>
     <Row label="Blocked commands" hint="One per line. Any tool call containing one of these is denied."><Area f={f} path="permissions.blockedCommands" /></Row>
