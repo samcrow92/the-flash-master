@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Copy code:** every code block in agent replies has a header with its language and a **Copy** button (shows ✓ Copied). Inline commands like `npm ci` copy on click. HTML in code stays escaped.
+- **Chat header alignment:** Agent, Harness and Model fields and the Progress, Artifacts, Stop and … buttons sit on one line with equal heights, aligned at the top. Wrapped rows stay left-aligned when a side panel is open.
 - **DOORS Next with global configurations and component streams:**
   - A global configuration (…/gc/configuration/…) reads modules across all contributing components.
   - Without a configuration, or when the global configuration has nothing for a project, every component of the project is discovered (`/cm/component/ldpc?project=…`) and read from its default stream.

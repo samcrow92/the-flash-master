@@ -67,12 +67,17 @@ a { color: var(--blue); }
 .chat-layout { display: grid; grid-template-columns: 1fr; height: 100%; }
 .chat-layout.with-thread { grid-template-columns: 1fr 380px; }
 .chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.chat-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg2); flex-wrap: wrap; }
+.chat-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg2); flex-wrap: wrap; }
 .chat-header h2 { margin: 0; font-size: 15px; }
 .title-input { font-size: 15px; font-weight: 600; }
-.chat-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.ctl { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); gap: 1px; }
-.ctl select, .ctl input { font-size: 12.5px; padding: 3px 6px; color: var(--fg); }
+/* One row of equal-height controls; labels sit above the fields, so everything aligns on the field/button line */
+.chat-controls { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; justify-content: flex-start; }
+.ctl { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); gap: 2px; line-height: 1.2; }
+.ctl select, .ctl input { font-size: 12.5px; padding: 0 8px; color: var(--fg); height: 30px; box-sizing: border-box; }
+.chat-controls > button, .chat-controls > .pill { height: 30px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; }
+.chat-controls > .pill { display: inline-flex; align-items: center; }
+.chat-controls .model-input-wrap { height: 30px; }
+.chat-controls .model-input-wrap button { height: 30px; }
 .model-input { width: 120px; }
 .toggle.on { background: color-mix(in srgb, var(--accent) 25%, var(--bg3)); border-color: var(--accent); }
 .agent-strip { display: flex; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--bg2); }
@@ -98,7 +103,18 @@ a { color: var(--blue); }
 .md table { border-collapse: collapse; } .md td, .md th { border: 1px solid var(--line); padding: 3px 8px; }
 pre.code { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow: auto; position: relative; }
 pre.code code { background: none; padding: 0; }
-.code-lang { position: absolute; right: 8px; top: 4px; font-size: 10.5px; color: var(--muted); }
+pre.code { padding-top: 26px; }
+.code-bar { position: absolute; top: 0; left: 0; right: 0; height: 24px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 6px 0 10px; border-bottom: 1px solid var(--line); font-family: inherit; }
+.code-lang { font-size: 10.5px; color: var(--muted); text-transform: lowercase; }
+.code-copy { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; font-size: 11px; border-radius: 6px;
+  background: transparent; border: 1px solid transparent; color: var(--muted); opacity: .75; transition: opacity .15s, color .15s, border-color .15s; }
+pre.code:hover .code-copy { opacity: 1; border-color: var(--line); }
+.code-copy:hover { color: var(--fg); background: var(--bg3); }
+.code-copy.copied { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line)); opacity: 1; animation: pop .3s cubic-bezier(.2,.9,.3,1.5); }
+code.inline-code { cursor: copy; transition: background .15s, box-shadow .15s; }
+code.inline-code:hover { box-shadow: 0 0 0 1px var(--line); }
+code.inline-code.copied { box-shadow: 0 0 0 1px var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
 .streaming { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .caret { width: 8px; height: 15px; background: var(--accent); display: inline-block; animation: pulse .9s infinite; border-radius: 2px; }
 .msg-footer { display: flex; align-items: center; gap: 4px; margin-top: 4px; position: relative; flex-wrap: wrap; min-height: 20px; }
@@ -685,3 +701,5 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .rm-diag { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
 .rm-diag pre { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; color: var(--muted); }
 .rm-group { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); padding: 8px 8px 2px; }
+.chat-title-block { min-width: 0; flex: 1 1 220px; padding-top: 1px; }
+.chat-title-block h2 { line-height: 1.3; }

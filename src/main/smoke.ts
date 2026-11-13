@@ -136,6 +136,9 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       }
       await send("Implement the debounce for the brake pedal input (SRS 1102)");
       await sleep(5500);
+      await js(`(()=>{const b=[...document.querySelectorAll('.chat .code-bar')].pop();b?.scrollIntoView({block:'center'});const btn=b?.querySelector('.code-copy');btn?.click();})()`);
+      await sleep(300);
+      await shot(join(demo, "23b-code-copy.png"));
       await click("Artifacts", ".chat-controls button");
       await sleep(800);
       await shot(join(demo, "24-artifacts-panel.png"));
