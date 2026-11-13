@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: private repository not recognised by the update check.** When GitHub answers with its (SSO) sign-in page instead of `latest.json`, the error now says the repository is private, and the **Sign in to GitHub** button appears. It also appears for the "sign-in" wording, which wasn't matched before.
 - **Fix: DOORS Next with a global configuration found 0 modules (HTTP 400).**
   - **Configuration field:** a GCM web link (`…/gc/web/projects/…#action=gc.viewConfiguration&path=…`), a DOORS Next link with `oslc_config.context`, or a URL-encoded value is now turned into the configuration URI (`…/gc/configuration/51068`). This applies in Settings when pasted, and to values already saved. Pasting a GCM link into the server field sets the configuration and leaves the server unchanged.
   - **Component discovery** now runs for such global configurations as well.

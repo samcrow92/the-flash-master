@@ -66,6 +66,9 @@ describe("updater", () => {
   it("asks for sign-in when the repository answers with a login page, and rejects bad checksums", async () => {
     const login = make("https://github.hella.com/ele/tfm", () => resp(200, "<html><form action=/session>login</form></html>", { url: "https://github.hella.com/login?return_to=x", type: "text/html" }));
     expect(await login.u.check()).toMatchObject({ status: "error", needsSignIn: true });
+    // ghe.com with company SSO: a 200 HTML page on a different host, no recognisable login URL
+    const sso = make("https://forvia-hella.ghe.com/team/tfm", () => resp(200, "<!DOCTYPE html><html><body>Redirecting to your identity provider…</body></html>", { url: "https://login.microsoftonline.com/x", type: "text/html" }));
+    expect(await sso.u.check()).toMatchObject({ status: "error", needsSignIn: true, error: expect.stringMatching(/private/) });
 
     const bad = make("https://files.corp/flash", (url) => url.endsWith("latest.json") ? resp(200, JSON.stringify(manifest())) : resp(200, Buffer.from("tampered")));
     expect(await bad.u.check()).toMatchObject({ status: "available" });

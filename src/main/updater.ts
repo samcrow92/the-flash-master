@@ -103,7 +103,7 @@ export class Updater {
       return this.set({ status: "available", latest: m.version, notes: m.notes, size: file.size, checkedAt: Date.now() });
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      return this.set({ status: "error", error: msg, needsSignIn: /sign in|401|403|404|login/i.test(msg) && parseFeed(feed.url)?.kind === "github", checkedAt: Date.now() });
+      return this.set({ status: "error", error: msg, needsSignIn: /sign[ -]?in|private|401|403|404|login/i.test(msg) && parseFeed(feed.url)?.kind === "github", checkedAt: Date.now() });
     }
   }
 
@@ -112,8 +112,10 @@ export class Updater {
     const body = await r.text();
     if (!r.ok) throw new Error(`HTTP ${r.status} for ${url.replace(/\?.*$/, "")}${r.status === 404 && !api ? " — no release with latest.json, or the repository needs sign-in" : ""}`
       + (r.status === 406 && !api ? " — this looks like a GitHub repository page, not a folder with latest.json; use the repository URL (https://host/owner/repo)" : ""));
-    if (isLoginPage(r, body)) throw new Error("The repository needs sign-in — click “Sign in to GitHub” or set a token");
-    try { return JSON.parse(body); } catch { throw new Error(`Not JSON at ${url} (sign-in page?)`); }
+    // A private/internal repository answers an anonymous request with its (SSO) sign-in page instead of the file.
+    const html = /text\/html/i.test(r.headers.get("content-type") ?? "") || /^\s*<(!doctype|html)/i.test(body);
+    if (isLoginPage(r, body) || html) throw new Error("The repository is private: sign in once with “Sign in to GitHub” (company SSO works), or set a read-only token below");
+    try { return JSON.parse(body); } catch { throw new Error(`Not JSON at ${url}`); }
   }
 
   private async folderManifest(base: string): Promise<UpdateManifest> {
