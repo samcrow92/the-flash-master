@@ -137,6 +137,8 @@ const orch = new Orchestrator({
 });
 // Agents that were working when the app last closed: tell their chats they can be resumed.
 orch.announceInterrupted(interruptedAtStart);
+// Stuck-agent watchdog: warns (once per silence) about working agents that have sent nothing for a while.
+setInterval(() => orch.checkStuck(), 30_000).unref();
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {

@@ -162,3 +162,24 @@ describe("result status routing", () => {
     expect(db.listTasks({}).find((t) => t.id === task.id)!.status).toBe("blocked");
   });
 });
+
+describe("stuck-agent watchdog", () => {
+  it("warns once about a silent working agent, and clears when output resumes", async () => {
+    const db = new Db(":memory:");
+    let settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" } }) as Settings;
+    const events: AppEvent[] = [];
+    const orch = new Orchestrator({ db, harnesses: new HarnessRegistry([new MockAdapter(25)]), settings: () => settings, roles: () => loadRoles(AGENTS, "/none"),
+      skills: () => [], emit: (e) => events.push(e), mcpServersFor: () => [], homeDir: tmpdir() });
+    const a = await orch.startAgent(null, "tester", "Run the suite");
+    await until(() => db.getAgent(a.id)!.status === "running" && db.listMessages(db.getAgent(a.id)!.chatId!, null).some((m) => m.author === "agent"));
+    const later = Date.now() + 11 * 60_000;
+    expect(orch.checkStuck(later)).toEqual([a.id]);
+    expect(orch.checkStuck(later)).toEqual([]); // one warning per silence
+    const chatId = db.getAgent(a.id)!.chatId!;
+    expect(db.listMessages(chatId, null).some((m) => m.author === "system" && /has sent nothing for 11 min/.test(m.content))).toBe(true);
+    await until(() => db.listEvents(a.id).some((e) => e.label === "output resumed"));
+    settings = mergeSettings(settings, { agents: { stuckAfterMinutes: 0 } }) as Settings;
+    expect(orch.checkStuck(Date.now() + 60 * 60_000)).toEqual([]);
+    await orch.stop(a.id);
+  });
+});

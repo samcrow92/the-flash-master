@@ -77,6 +77,12 @@ interface Live {
   /** TheFlashMaster's tools weren't confirmed loaded (Pi, MCP blocked…): the agent may call them as TOOL lines. */
   textTools?: boolean;
   depth: number;
+  /** Last time the harness sent anything (text, tool update, plan…) during a turn; drives the stuck-agent watchdog. */
+  lastOutputAt?: number;
+  /** The watchdog already warned about this silence (cleared when output resumes). */
+  stuckSince?: number | null;
+  /** Waiting for the user to answer a permission request: silence is expected. */
+  awaitingApproval?: boolean;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
   lastResult: string | null;
@@ -291,6 +297,40 @@ export class Orchestrator {
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true, lastActivity: "Stopped" }));
   }
 
+  /**
+   * Stuck-agent watchdog, called every 30 s by the app. A working agent that has sent nothing for
+   * `agents.stuckAfterMinutes` gets one warning in its chat, its progress flow and a notice; it keeps running, and
+   * the warning clears as soon as output resumes. Agents waiting for an approval or for a busy specialist are not stuck.
+   */
+  checkStuck(now = Date.now()): string[] {
+    const mins = this.d.settings().agents.stuckAfterMinutes;
+    if (!mins || mins <= 0) return [];
+    const flagged: string[] = [];
+    for (const l of this.live.values()) {
+      if (!l.busy || l.paused || l.stopped || l.awaitingApproval || l.stuckSince || !l.currentMessageId || !l.lastOutputAt) continue;
+      if (now - l.lastOutputAt < mins * 60_000) continue;
+      const waitingOnSpecialist = [...this.live.values()].some((c) => c.busy && c.key.startsWith(`${l.agentId}>`));
+      if (waitingOnSpecialist) continue;
+      l.stuckSince = now;
+      const quiet = Math.round((now - l.lastOutputAt) / 60_000);
+      this.setStatus(l, "running", `⏳ No output for ${quiet} min: may be stuck`);
+      this.flow(l.agentId, { kind: "status", label: `no output for ${quiet} min`, status: "stuck" });
+      this.system(l.chatId, l.threadRoot, `⏳ **${l.role.icon} ${l.role.title}** has sent nothing for ${quiet} min. `
+        + "It is still running: keep waiting, send a message to steer it, or stop it.", "warn");
+      flagged.push(l.agentId);
+    }
+    return flagged;
+  }
+
+  private noteOutput(l: Live): void {
+    l.lastOutputAt = Date.now();
+    if (!l.stuckSince) return;
+    const quiet = Math.round((l.lastOutputAt - l.stuckSince) / 60_000);
+    l.stuckSince = null;
+    this.flow(l.agentId, { kind: "status", label: "output resumed", status: "running" });
+    this.setStatus(l, "running", quiet > 0 ? "Working again after a long silence" : "Working again");
+  }
+
   /** After a restart: tell each affected chat which agents were interrupted and that they can be resumed. */
   announceInterrupted(agents: AgentRun[]): void {
     const byChat = new Map<string, AgentRun[]>();
@@ -491,6 +531,8 @@ export class Orchestrator {
     live.tools = new Map();
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
+    live.lastOutputAt = Date.now();
+    live.stuckSince = null;
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
     let text = "";
@@ -694,6 +736,7 @@ export class Orchestrator {
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
       },
       onEvent: (e) => {
+        this.noteOutput(live);
         if (live.awaiting.length && (e.type === "text" || e.type === "tool" || e.type === "thought")) this.markSeen(live, false);
         if (e.type === "steer_ack") this.markSeen(live, true);
         if (e.type === "text") live.sink?.(e.text);
@@ -724,10 +767,13 @@ export class Orchestrator {
       role: live.role.name, content: `🔐 **${live.role.title}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
     this.setStatus(live, "running", "Waiting for your approval");
+    live.awaitingApproval = true;
     this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "waiting" });
     this.d.emit({ type: "notice", level: "warn", text: `${live.role.title} is waiting for approval` });
     return new Promise((resolve) => {
       this.pendingPermissions.set(msg.id, (allow) => {
+        live.awaitingApproval = false;
+        live.lastOutputAt = Date.now();
         this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: allow ? "allowed" : "denied" });
         resolve(allow);
       });
