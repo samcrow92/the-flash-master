@@ -748,3 +748,56 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 1.45;
   font-family: var(--mono, ui-monospace, SFMono-Regular, Consolas, monospace); }
 .tool-run-empty { padding: 2px 0; }
+
+/* ===================== inline threads ===================== */
+/* Replies open under their message in the same chat: a frosted card that grows (grid 0fr → 1fr), with a spine
+   joining the reply avatars and replies that cascade in. Collapsing runs the same curve backwards. */
+:root { --it-ease: cubic-bezier(.22,.9,.24,1); }
+.thread-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 4px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  color: var(--blue); border: 1px solid color-mix(in srgb, var(--blue) 26%, var(--line)); background: color-mix(in srgb, var(--blue) 9%, transparent);
+  backdrop-filter: blur(12px) saturate(1.3); transition: background .2s, border-color .2s, box-shadow .2s, transform .12s; }
+.thread-pill:hover { background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: 0 4px 14px -8px color-mix(in srgb, var(--blue) 70%, transparent); }
+.thread-pill:active { transform: scale(.97); }
+.thread-pill.open { background: color-mix(in srgb, var(--blue) 18%, transparent); border-color: color-mix(in srgb, var(--blue) 45%, var(--line)); }
+.tp-faces { display: inline-flex; align-items: center; padding-left: 2px; }
+.tp-face { display: inline-grid; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+.tp-face + .tp-face { margin-left: -6px; }
+.tp-face .role-badge.sys { width: 18px; height: 18px; }
+.tp-last { color: var(--muted); font-weight: 400; }
+.tp-chev { transition: transform .34s var(--it-ease); opacity: .8; }
+.thread-pill.open .tp-chev { transform: rotate(180deg); }
+
+.inline-thread { display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px) scale(.985); transform-origin: top left; margin-top: 0;
+  transition: grid-template-rows .38s var(--it-ease), opacity .26s ease, transform .38s var(--it-ease), margin-top .38s var(--it-ease); }
+.inline-thread.open { grid-template-rows: 1fr; opacity: 1; transform: none; margin-top: 8px; }
+.it-clip { min-height: 0; overflow: hidden; padding: 0 2px 4px; }
+.it-card { position: relative; border-radius: 14px; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg2) 82%, transparent), color-mix(in srgb, var(--bg2) 62%, transparent));
+  backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent), 0 12px 32px -20px rgba(0,0,0,.55); }
+[data-theme="light"] .it-card { box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 12px 30px -20px rgba(20,30,60,.35); }
+.it-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 6px 14px; font-size: 12px; }
+.it-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--fg); }
+.it-title svg { color: var(--blue); }
+.it-sub { color: var(--muted); }
+.it-collapse { margin-left: auto; display: inline-grid; place-content: center; width: 26px; height: 26px; padding: 0; border-radius: 50%;
+  background: transparent; border: 1px solid transparent; color: var(--muted); }
+.it-collapse:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.it-list { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 6px 6px; }
+/* The spine: a soft line through the centre of the reply avatars (6px list pad + 10px msg pad + 12px half-avatar). */
+.it-list:has(.it-item + .it-item)::before { content: ""; position: absolute; left: 27px; top: 20px; bottom: 26px; width: 2px; border-radius: 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 40%, transparent), color-mix(in srgb, var(--blue) 8%, transparent)); }
+.it-item { position: relative; }
+.inline-thread .msg { grid-template-columns: 24px 1fr; gap: 8px; padding: 6px 10px; animation: none; }
+.inline-thread .avatar { width: 24px; height: 24px; font-size: 12px; position: relative; z-index: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg2) 90%, transparent); border-radius: 50%; }
+.inline-thread .msg-head { font-size: 12.5px; }
+.inline-thread .msg-footer { min-height: 0; }
+.inline-thread.open .it-item { animation: it-item-in .42s var(--it-ease) both; animation-delay: calc(80ms + var(--i, 0) * 40ms); }
+@keyframes it-item-in { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
+.it-empty { color: var(--muted); font-size: 12.5px; padding: 4px 10px 8px; }
+.it-loading { padding: 6px 12px 10px; }
+.it-card .composer-wrap { background: color-mix(in srgb, var(--bg) 35%, transparent); border-top: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); }
+/* Hovering inside a thread highlights the reply, not the parent message around it. */
+.msg:has(.inline-thread:hover) { background: transparent; }
+.msg:has(.inline-thread:hover) > .msg-body > .msg-footer .msg-actions { display: none; }

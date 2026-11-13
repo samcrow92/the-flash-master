@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Threads open inline, in the same chat.** Replies no longer open in a side panel; they unfold under their message.
+  - **The thread pill** under a message shows who replied, how many replies and when the last one came. Click it to expand or collapse; the chevron flips.
+  - **Opening and closing animate:** the card grows smoothly, the replies fade in one after another, and collapsing plays it back.
+  - **Layout:** a frosted card with a header (reply count, collapse button), smaller reply avatars joined by a thin line, and its own reply box.
+  - **Reply** on any message opens its thread (empty or not) and focuses the reply box. Several threads can be open at once, and they stay live while agents answer.
 - **New specialist: EXAM Test Agent** (`@exam-test-agent`). It's an expert in EXAM, the UML-based HiL/SiL test automation from MicroNova used across the VW Group.
   - **What it does:** designs test cases from requirements (DOORS Next / Jazz, or attached specs), creates them in EXAM, runs suites on a system configuration and summarises failures.
   - **Creating test cases:** it uses the Test Case Generator (keyword test descriptions), or Groovy scripts run inside EXAM. The Groovy model API isn't public, so the agent first explores it with read-only scripts.

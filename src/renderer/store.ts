@@ -30,7 +30,10 @@ interface State {
   masterChatId: string | null;
   currentProjectId: string | null;
   messages: Record<string, Message[]>; // chatId → main-thread messages
-  thread: { chatId: string; rootId: string; messages: Message[] } | null;
+  /** Replies per thread root (root excluded), loaded on first expand and kept live by events. */
+  threads: Record<string, Message[]>;
+  /** Thread roots currently expanded inline under their message. */
+  openThreads: Record<string, boolean>;
   flowPanel: { chatId: string; agentId: string | null } | null;
   artifactsPanel: string | null; // chat id whose artifacts panel is open
   artifactsRev: Record<string, number>;
@@ -52,7 +55,8 @@ interface State {
   setView(v: View): void;
   openChat(chatId: string): Promise<void>;
   openThread(chatId: string, rootId: string): Promise<void>;
-  closeThread(): void;
+  closeThread(rootId: string): void;
+  toggleThread(chatId: string, rootId: string): void;
   refreshProjects(): Promise<void>;
   refreshChats(projectId: string): Promise<void>;
   upsertChat(c: Chat): void;
@@ -86,6 +90,16 @@ const mergeLoaded = (loaded: Message[], shown: Message[] | undefined): Message[]
 const patchMsg = (list: Message[] | undefined, id: string, fn: (m: Message) => Message) =>
   list ? list.map((m) => (m.id === id ? fn(m) : m)) : list;
 
+/** Apply a patch to a message wherever it sits in the loaded threads (unchanged lists keep their identity). */
+const patchThreads = (threads: Record<string, Message[]>, id: string, fn: (m: Message) => Message) => {
+  let out = threads;
+  for (const [root, list] of Object.entries(threads)) {
+    if (!list.some((m) => m.id === id)) continue;
+    out = { ...out, [root]: list.map((m) => (m.id === id ? fn(m) : m)) };
+  }
+  return out;
+};
+
 export const useStore = create<State>((set, get) => ({
   ready: false,
   view: { kind: "dashboard" },
@@ -95,7 +109,8 @@ export const useStore = create<State>((set, get) => ({
   masterChatId: null,
   currentProjectId: null,
   messages: {},
-  thread: null,
+  threads: {},
+  openThreads: {},
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
@@ -140,7 +155,7 @@ export const useStore = create<State>((set, get) => ({
 
   async openChat(chatId) {
     const chat = get().chatById[chatId];
-    set({ view: { kind: "chat", chatId }, thread: null, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
+    set({ view: { kind: "chat", chatId }, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
       artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
@@ -148,16 +163,22 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async openThread(chatId, rootId) {
-    const msgs = await api().listMessages(chatId, rootId);
-    set((st) => ({ thread: { chatId, rootId, messages: mergeLoaded(msgs, st.thread?.rootId === rootId ? st.thread.messages : undefined) }, flowPanel: null, artifactsPanel: null }));
+    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true } }));
+    const msgs = (await api().listMessages(chatId, rootId)).filter((m) => m.id !== rootId);
+    set((st) => ({ threads: { ...st.threads, [rootId]: mergeLoaded(msgs, st.threads[rootId]) } }));
   },
 
   openFlow(chatId, agentId) {
-    set({ flowPanel: { chatId, agentId }, thread: null, artifactsPanel: null });
+    set({ flowPanel: { chatId, agentId }, artifactsPanel: null });
   },
 
-  closeThread() {
-    set({ thread: null });
+  closeThread(rootId) {
+    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: false } }));
+  },
+
+  toggleThread(chatId, rootId) {
+    if (get().openThreads[rootId]) get().closeThread(rootId);
+    else void get().openThread(chatId, rootId);
   },
 
   async refreshProjects() {
@@ -213,7 +234,7 @@ export const useStore = create<State>((set, get) => ({
           const root = m.parentId;
           set({
             messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], root, (r) => ({ ...r, replyCount: r.replyCount + 1 })) ?? [] },
-            thread: st.thread && st.thread.rootId === root ? { ...st.thread, messages: upsertMsg(st.thread.messages, m) } : st.thread,
+            threads: st.threads[root] ? { ...st.threads, [root]: upsertMsg(st.threads[root], m) } : st.threads,
           });
         }
         break;
@@ -222,7 +243,7 @@ export const useStore = create<State>((set, get) => ({
         const add = (m: Message) => ({ ...m, content: m.content + e.delta });
         set({
           messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, add) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, add)! } : null,
+          threads: patchThreads(st.threads, e.messageId, add),
         });
         break;
       }
@@ -230,7 +251,7 @@ export const useStore = create<State>((set, get) => ({
         const add = (m: Message) => ({ ...m, tools: e.tools });
         set({
           messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, add) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, add)! } : null,
+          threads: patchThreads(st.threads, e.messageId, add),
         });
         break;
       }
@@ -239,7 +260,7 @@ export const useStore = create<State>((set, get) => ({
         const keep = (old: Message) => ({ ...m, replyCount: Math.max(old.replyCount, m.replyCount) });
         set({
           messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], m.id, keep) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, m.id, keep)! } : null,
+          threads: patchThreads(st.threads, m.id, keep),
         });
         break;
       }
@@ -247,7 +268,7 @@ export const useStore = create<State>((set, get) => ({
         const r = (m: Message) => ({ ...m, reactions: e.reactions });
         set({
           messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, r) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, r)! } : null,
+          threads: patchThreads(st.threads, e.messageId, r),
         });
         break;
       }

@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ToolRuns } from "../components/ToolRuns";
 import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
-import { api, fmtTokens, roleOf, useStore } from "../store";
+import { ago, api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
 import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
@@ -11,7 +11,7 @@ import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap } from "../components/icons";
+import { Archive, ChevronDown, ChevronUp, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, Zap } from "../components/icons";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -53,7 +53,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const isMaster = chat.kind === "master";
 
   return (
-    <div className={`chat-layout ${st.thread || st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
+    <div className={`chat-layout ${st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
       <section className="chat">
         <header className="chat-header">
           <div className="chat-title-block">
@@ -92,7 +92,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
               onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={15} /> Progress</button>
             <button className={`${st.artifactsPanel === chatId ? "toggle on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Files changed, saved artifacts and code from this chat — download and diff"
-              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, thread: null, flowPanel: null })}><Package size={15} /> Artifacts</button>
+              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, flowPanel: null })}><Package size={15} /> Artifacts</button>
             {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={13} fill="currentColor" /> Stop</button>}
             <button className="ghost icon-only" title="More actions" onClick={(e) => openMenu(e, [
               ...(!isMaster ? [{ label: "Rename", icon: <Pencil size={15} />, onClick: () => setEditingTitle(true) },
@@ -130,15 +130,14 @@ export function ChatView({ chatId }: { chatId: string }) {
         <div className="messages" ref={listRef}>
           <div className="messages-inner" ref={innerRef}>
             {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
-            {messages.map((m) => <MessageItem key={m.id} m={m} onReply={() => st.openThread(chatId, m.id)} />)}
+            {messages.map((m) => <MessageItem key={m.id} m={m} />)}
           </div>
         </div>
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
         <UsageMeter />
       </section>
-      {st.thread && st.thread.chatId === chatId && <ThreadPanel />}
-      {!st.thread && st.artifactsPanel === chatId && <ArtifactsPanel chatId={chatId} onClose={() => useStore.setState({ artifactsPanel: null })} />}
-      {!st.thread && st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
+      {st.artifactsPanel === chatId && <ArtifactsPanel chatId={chatId} onClose={() => useStore.setState({ artifactsPanel: null })} />}
+      {st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
     </div>
   );
 }
@@ -177,8 +176,12 @@ function DeliveryBadge({ steer, state }: { steer: boolean; state?: keyof typeof 
   );
 }
 
-export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: () => void; inThread?: boolean }) {
+export function MessageItem({ m, inThread }: { m: Message; inThread?: boolean }) {
   const role = roleOf(m.role);
+  const threadOpen = useStore((s) => !inThread && !!s.openThreads[m.id]);
+  const [focusReq, setFocusReq] = useState(0);
+  const reply = () => { if (!threadOpen) void useStore.getState().openThread(m.chatId, m.id); setFocusReq((n) => n + 1); };
+  const toggleThread = () => useStore.getState().toggleThread(m.chatId, m.id);
   const agent = useStore((s) => (m.agentId ? s.agents[m.agentId] : undefined));
   const showTokens = useStore((s) => s.settings?.tokens.showTokenCounts);
   const [picker, setPicker] = useState(false);
@@ -189,9 +192,10 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
   if (m.marker === "context-reset") {
     return <div className="ctx-divider" title={new Date(m.createdAt).toLocaleString()}><span><RotateCcw size={13} /> Context reset — agents start fresh from here</span></div>;
   }
-  const avatar = m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={32} /></button>
-    : m.author === "system" ? <span className="role-badge sys"><Info size={15} /></span>
-    : <RoleIcon role={m.role} emoji={role?.icon} size={32} />;
+  const sz = inThread ? 24 : 32;
+  const avatar = m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={sz} /></button>
+    : m.author === "system" ? <span className="role-badge sys"><Info size={inThread ? 12 : 15} /></span>
+    : <RoleIcon role={m.role} emoji={role?.icon} size={sz} />;
 
   return (
     <div className={`msg msg-${m.author} ${m.status === "error" ? "msg-error" : ""}`}>
@@ -224,42 +228,104 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
           )}
         </div>
         <div className="msg-footer">
+          {!inThread && m.replyCount > 0 && <ThreadPill root={m} open={threadOpen} onClick={toggleThread} />}
           {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title="Toggle reaction">{r}</button>)}
           <div className="msg-actions">
             <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={14} /></button>
-            {!inThread && onReply && <button onClick={onReply} title="Reply in thread"><CornerUpLeft size={13} /> Reply</button>}
+            {!inThread && <button onClick={reply} title="Reply in thread"><CornerUpLeft size={13} /> Reply</button>}
             <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={13} /></button>
           </div>
           {picker && <div className="emoji-picker">{EMOJIS.map((e) => <button key={e} onClick={() => react(e)}>{e}</button>)}</div>}
-          {!inThread && m.replyCount > 0 && onReply && (
-            <button className="reply-count" onClick={onReply}><MessageCircle size={13} /> {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}</button>
-          )}
         </div>
+        {!inThread && <InlineThread root={m} open={threadOpen} focusReq={focusReq} />}
       </div>
     </div>
   );
 }
 
-function ThreadPanel() {
-  const st = useStore();
-  const t = st.thread!;
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.scrollTo({ top: 1e9 }); }, [t.messages.length]);
+const plural = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`;
+
+/** The "N replies" pill under a message: who replied, how many, and a chevron that flips when the thread is open. */
+function ThreadPill({ root, open, onClick }: { root: Message; open: boolean; onClick: () => void }) {
+  const replies = useStore((s) => s.threads[root.id]);
+  const faces: Message[] = [];
+  for (const r of replies ?? []) if (!faces.some((f) => f.author === r.author && f.role === r.role)) faces.push(r);
+  const last = replies?.at(-1);
   return (
-    <aside className="thread">
-      <header className="thread-header">
-        <strong>Thread</strong>
-        <button className="ghost icon-only" title="Close thread" onClick={st.closeThread}><X size={16} /></button>
-      </header>
-      <div className="messages" ref={ref}>
-        {t.messages.map((m, i) => (
-          <div key={m.id}>
-            <MessageItem m={m} inThread />
-            {i === 0 && <div className="thread-sep">{t.messages.length - 1} replies</div>}
+    <button className={`thread-pill ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open} title={open ? "Collapse thread" : "Expand thread"}>
+      <span className="tp-faces">
+        {faces.length ? faces.slice(0, 3).map((f) => (
+          <span key={f.id} className="tp-face">{f.author === "user" ? <UserAvatar size={18} /> : f.author === "system" ? <span className="role-badge sys"><Info size={10} /></span> : <RoleIcon role={f.role} emoji={roleOf(f.role)?.icon} size={18} />}</span>
+        )) : <MessageCircle size={13} />}
+      </span>
+      <span className="tp-count">{plural(root.replyCount)}</span>
+      {last && <span className="tp-last">· last {ago(last.createdAt)} ago</span>}
+      <ChevronDown size={13} className="tp-chev" />
+    </button>
+  );
+}
+
+/**
+ * Replies shown inline under their root message. Expanding animates the height (grid 0fr → 1fr), fades the card in and
+ * staggers the replies; collapsing plays it backwards and unmounts once the transition is over.
+ */
+function InlineThread({ root, open, focusReq }: { root: Message; open: boolean; focusReq: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    if (open) { setMounted(true); return; }
+    setShown(false);
+    const t = setTimeout(() => setMounted(false), 380);
+    return () => clearTimeout(t);
+  }, [open]);
+  // Mounted collapsed → force a style flush → flip to open, so the browser animates from 0 height.
+  useLayoutEffect(() => {
+    if (mounted && open && !shown && ref.current) { void ref.current.offsetHeight; setShown(true); }
+  }, [mounted, open, shown]);
+  // "Reply" focuses the thread's composer once the card has opened, bringing it into view.
+  useEffect(() => {
+    if (!focusReq) return;
+    const t = setTimeout(() => {
+      const ta = ref.current?.querySelector("textarea");
+      ta?.focus({ preventScroll: true });
+      ta?.closest(".composer-wrap")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 260);
+    return () => clearTimeout(t);
+  }, [focusReq]);
+
+  if (!mounted) return null;
+  return (
+    <div ref={ref} className={`inline-thread ${shown ? "open" : ""}`} inert={!open}>
+      <div className="it-clip"><ThreadCard root={root} /></div>
+    </div>
+  );
+}
+
+function ThreadCard({ root }: { root: Message }) {
+  const replies = useStore((s) => s.threads[root.id]);
+  const chat = useStore((s) => s.chatById[root.chatId]);
+  const busy = useStore((s) => Object.values(s.agents).some((a) => a.chatId === root.chatId && a.status === "running"));
+  if (!chat) return null;
+  const n = replies?.length ?? root.replyCount;
+  return (
+        <div className="it-card">
+          <header className="it-head">
+            <span className="it-title"><MessageCircle size={14} /> Thread</span>
+            <span className="it-sub">{n ? plural(n) : "No replies yet"}</span>
+            <button className="it-collapse" title="Collapse thread" onClick={() => useStore.getState().closeThread(root.id)}><ChevronUp size={15} /></button>
+          </header>
+          <div className="it-list">
+            {replies === undefined
+              ? <div className="it-loading"><span className="working-dots"><i /><i /><i /></span></div>
+              : replies.length === 0
+                ? <div className="it-empty">Start the thread — replies stay attached to this message.</div>
+                : replies.map((r, i) => (
+                  <div key={r.id} className="it-item" style={{ "--i": Math.min(i, 10) } as CSSProperties}><MessageItem m={r} inThread /></div>
+                ))}
           </div>
-        ))}
-      </div>
-      <Composer chat={st.chatById[t.chatId]!} parentId={t.rootId} compact busy={Object.values(st.agents).some((a) => a.chatId === t.chatId && a.status === "running")} placeholder="Reply in thread…" />
-    </aside>
+          <Composer chat={chat} parentId={root.id} compact busy={busy} placeholder="Reply in thread…" />
+        </div>
   );
 }
