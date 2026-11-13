@@ -192,6 +192,14 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       const tall = await js<number>(`document.querySelector('.chat .messages').scrollHeight`);
       log("info", `smoke-scroll: distance-to-bottom=${gap} contentHeight=${tall}`);
       await shot(join(demo, "30-chat-opened-at-latest.png"));
+      // Commands under a reply: click one open to see command + output
+      await js(`document.querySelector('.chat-link')?.click()`);
+      await sleep(900);
+      await js(`(()=>{const h=[...document.querySelectorAll('.tool-run-head:not(:disabled)')].pop();h?.scrollIntoView({block:'center'});h?.click();})()`);
+      await sleep(500);
+      const toolOut = await js<string>(`document.querySelector('.tool-run.open .tool-run-pre')?.textContent ?? ""`);
+      log("info", `smoke-tool-output: ${JSON.stringify(toolOut.slice(0, 60))}`);
+      await shot(join(demo, "31-command-output.png"));
       // Updates (FLASH_UPDATE_URL points at a local feed in the demo)
       if (process.env.FLASH_UPDATE_URL) {
         await js(`window.flash.api.updateCheck().then(()=>{})`);

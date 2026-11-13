@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Click a command to see its output.** Every command or tool call an agent runs appears above its reply as a compact row: icon by kind (command, read, edit, search, web…), title, live spinner / ✓ / ✗ and duration.
+  - **Expanding:** click a row to see the command line or arguments and its output, each with Copy. The output updates live while the command runs.
+  - **Sources:** Copilot and OpenCode (ACP raw input, content and raw output), Pi (arguments, partial and final result) and text-mode `TOOL` calls.
+  - **Limits:** long outputs keep their start and end (the end usually holds the error), capped at 20,000 characters per call. Long lists show the last 4 with *Show all*. Runs are saved with the message.
 - **Text mode is the default for TheFlashMaster's tools** (Settings → Agents → *Agent tools*). It covers delegation, creating agents, tasks, artifacts, Jazz and DOORS Next.
   - **How it works:** agents write `DELEGATE`, `AGENT … END` and `TOOL name {json}` lines from the first message and the app carries them out. There's no waiting for MCP tools and no warnings, and the app's own tool servers are no longer sent to the CLIs.
   - **Why:** it works in corporate environments where MCP is blocked, and on Pi.

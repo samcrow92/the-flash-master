@@ -168,13 +168,18 @@ export class PiSession implements HarnessSession {
       case "tool_execution_start": {
         const title = toolTitle(m.toolName, m.args);
         if (m.toolCallId) this.toolTitles.set(m.toolCallId, title);
-        this.o.onEvent({ type: "tool", title, status: "in_progress", kind: TOOL_KIND[m.toolName] ?? "other" });
+        this.o.onEvent({ type: "tool", id: m.toolCallId, title, status: "in_progress", kind: TOOL_KIND[m.toolName] ?? "other", input: piToolInput(m.toolName, m.args) });
+        break;
+      }
+      case "tool_execution_update": {
+        const out = piToolOutput(m.partialResult);
+        if (out) this.o.onEvent({ type: "tool", id: m.toolCallId, title: this.toolTitles.get(m.toolCallId) ?? toolTitle(m.toolName, m.args), status: "in_progress", kind: TOOL_KIND[m.toolName] ?? "other", output: out });
         break;
       }
       case "tool_execution_end": {
         const title = this.toolTitles.get(m.toolCallId) ?? toolTitle(m.toolName, m.args);
         this.toolTitles.delete(m.toolCallId);
-        this.o.onEvent({ type: "tool", title, status: m.isError ? "failed" : "completed", kind: TOOL_KIND[m.toolName] ?? "other" });
+        this.o.onEvent({ type: "tool", id: m.toolCallId, title, status: m.isError ? "failed" : "completed", kind: TOOL_KIND[m.toolName] ?? "other", output: piToolOutput(m.result) });
         break;
       }
       case "auto_retry_start":
@@ -250,4 +255,20 @@ export class PiAdapter implements HarnessAdapter {
     }
     return s;
   }
+}
+
+/** Pi tool arguments as shown when the call is expanded: the bash command as is, other tools as JSON. */
+export function piToolInput(tool: string, args: unknown): string | undefined {
+  if (args == null) return undefined;
+  const a = args as Record<string, unknown>;
+  if (tool === "bash" && typeof a.command === "string") return a.command;
+  try { return JSON.stringify(args, null, 1); } catch { return undefined; }
+}
+/** Text of a Pi tool result ({ content: [{ type: "text", text }] }). */
+export function piToolOutput(result: unknown): string | undefined {
+  if (result == null) return undefined;
+  if (typeof result === "string") return result;
+  const c = (result as { content?: unknown }).content;
+  const t = Array.isArray(c) ? c.map((x: any) => (x?.type === "text" ? x.text : x?.type === "image" ? "(image)" : "")).filter(Boolean).join("\n") : "";
+  return t || undefined;
 }

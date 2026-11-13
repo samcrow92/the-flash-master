@@ -226,6 +226,14 @@ export const useStore = create<State>((set, get) => ({
         });
         break;
       }
+      case "message.tools": {
+        const add = (m: Message) => ({ ...m, tools: e.tools });
+        set({
+          messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, add) ?? [] },
+          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, add)! } : null,
+        });
+        break;
+      }
       case "message.updated": {
         const m = e.message;
         const keep = (old: Message) => ({ ...m, replyCount: Math.max(old.replyCount, m.replyCount) });

@@ -64,8 +64,23 @@ export interface Message {
   /** Steering / queued messages: sent → delivered to the agent → seen (the model continued with it in context). */
   delivery?: "sent" | "queued" | "delivered" | "seen";
   marker?: "context-reset"; // divider rows (not sent to agents)
+  /** Commands / tool calls the agent ran while writing this reply (expandable in the chat). */
+  tools?: ToolRun[];
   reactions: string[];
   replyCount: number;
+}
+
+/** One command or tool call shown under an agent reply: what ran, and what came back. */
+export interface ToolRun {
+  id: string;
+  title: string;
+  kind: string; // read | edit | execute | search | fetch | think | other …
+  status: "pending" | "in_progress" | "completed" | "failed";
+  input?: string; // the command line, or the arguments
+  output?: string; // capped; truncated says so
+  truncated?: boolean;
+  startedAt: number;
+  endedAt?: number;
 }
 
 export type StepStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -283,6 +298,7 @@ export interface JazzSearch {
 export type AppEvent =
   | { type: "message.created"; message: Message }
   | { type: "message.delta"; messageId: string; chatId: string; delta: string }
+  | { type: "message.tools"; messageId: string; chatId: string; tools: ToolRun[] }
   | { type: "message.updated"; message: Message }
   | { type: "reaction.changed"; messageId: string; chatId: string; reactions: string[] }
   | { type: "agent.updated"; agent: AgentRun }

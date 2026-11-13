@@ -7,7 +7,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
+import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
@@ -69,6 +69,9 @@ interface Live {
   textDelegation?: boolean;
   lastReplyId?: string | null;
   lastText?: string;
+  /** Commands / tool calls of the current reply, in order (shown expandable under it). */
+  tools?: Map<string, import("@shared/types").ToolRun>;
+  toolsTimer?: ReturnType<typeof setTimeout> | null;
   /** TheFlashMaster's tools weren't confirmed loaded (Pi, MCP blocked…): the agent may call them as TOOL lines. */
   textTools?: boolean;
   depth: number;
@@ -82,6 +85,15 @@ interface Live {
 
 const MAX_CONCURRENT_FALLBACK = 4;
 const MAX_TEXT_ROUNDS = 12;
+const MAX_TOOLS_PER_REPLY = 200;
+const MAX_TOOL_OUTPUT = 20000;
+
+/** Keep the start and the end of a long output (errors are usually at the end). */
+export function capOutput(text: string, max = MAX_TOOL_OUTPUT): { text: string; truncated: boolean } {
+  if (text.length <= max) return { text, truncated: false };
+  const head = Math.floor(max * 0.3);
+  return { text: `${text.slice(0, head)}\n… (${(text.length - max).toLocaleString("en")} characters omitted) …\n${text.slice(text.length - (max - head))}`, truncated: true };
+}
 
 /** The coordinator's reply says it has no `delegate` tool ("delegate tool didn't load", "isn't available"…). */
 export function saysNoDelegate(text: string): boolean {
@@ -413,6 +425,7 @@ export class Orchestrator {
       role: t.role.name, content: "", status: "streaming" });
     live.currentMessageId = reply.id;
     live.lastReplyId = reply.id;
+    live.tools = new Map();
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
@@ -552,6 +565,7 @@ export class Orchestrator {
       if (t.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(t.taskId, { status: "blocked" }) });
     } finally {
       this.liveText.delete(reply.id);
+      this.flushTools(live, reply.id, t.chat.id);
       live.sink = null;
       live.busy = false;
       live.currentMessageId = null;
@@ -616,8 +630,11 @@ export class Orchestrator {
         if (e.type === "steer_ack") this.markSeen(live, true);
         if (e.type === "text") live.sink?.(e.text);
         else if (e.type === "tool") {
-          this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
-          this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
+          // Output updates arrive often: status line and flow chart only change when the call's status does.
+          if (this.recordTool(live, e)) {
+            this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
+            this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
+          }
         } else if (e.type === "plan") this.setPlan(live.agentId, e.entries);
         else if (e.type === "diff") this.recordChange(live, projectPath, e.path, e.oldText, e.newText);
       },
@@ -774,19 +791,69 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     })));
     const sets = new Map(this.toolSetFor(live).map((x) => [x.name, x.set]));
     const toolResults: string[] = [];
+    const runs: ToolRun[] = [];
     for (const c of calls) {
       if (c.error) { toolResults.push(`### ${c.name}\nNot run: ${c.error}`); continue; }
+      const run: ToolRun = { id: `${live.lastReplyId}:t${runs.length}`, title: `${c.name} (text mode)`, kind: "other", status: "in_progress",
+        input: JSON.stringify(c.args, null, 1), startedAt: Date.now() };
+      runs.push(run);
       this.flow(live.agentId, { kind: "tool", label: `${c.name} (text mode)`, status: "completed" });
       try {
         const out = await this.d.callTool!(c.name, c.args, live.agentId, sets.get(c.name));
         const json = typeof out === "string" ? out : JSON.stringify(out, null, 1);
         toolResults.push(`### ${c.name}\n${json.length > 12000 ? `${json.slice(0, 12000)}\n… (truncated)` : json}`);
-      } catch (e) { toolResults.push(`### ${c.name}\nError: ${String((e as Error)?.message ?? e)}`); }
+        const cap = capOutput(json);
+        Object.assign(run, { status: "completed", output: cap.text, truncated: cap.truncated, endedAt: Date.now() });
+      } catch (e) {
+        toolResults.push(`### ${c.name}\nError: ${String((e as Error)?.message ?? e)}`);
+        Object.assign(run, { status: "failed", output: String((e as Error)?.message ?? e), endedAt: Date.now() });
+      }
+    }
+    if (runs.length && live.lastReplyId) {
+      const m = this.d.db.getMessage(live.lastReplyId);
+      if (m) { const all = [...(m.tools ?? []), ...runs]; this.d.db.setMessageTools(m.id, all); this.d.emit({ type: "message.tools", messageId: m.id, chatId: m.chatId, tools: all }); }
     }
     if (live.stopped || !this.live.has(live.key)) return;
     const parts = [results.length ? `## Specialist results\n${results.join("\n\n")}` : "", toolResults.length ? `## Tool results\n${toolResults.join("\n\n")}` : ""].filter(Boolean);
     void this.turn({ ...t, input: `${parts.join("\n\n")}\n\nContinue: integrate these results and answer, or make further calls the same way.`,
       attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: round });
+  }
+
+  /**
+   * Upsert a tool call of the current reply. Returns true when it is new or its status changed (worth a status line).
+   * Output is capped per call (head + tail) so a noisy build can't bloat the chat or the database.
+   */
+  private recordTool(live: Live, e: { id?: string; title: string; status: string; kind: string; input?: string; output?: string }): boolean {
+    const msgId = live.currentMessageId;
+    if (!msgId) return true;
+    const tools = (live.tools ??= new Map());
+    // Without an id (mock harness), an update belongs to the newest unfinished call with the same title.
+    let key = e.id ?? "";
+    if (!key) {
+      const open = [...tools.entries()].reverse().find(([, x]) => x.title === e.title && x.status !== "completed" && x.status !== "failed");
+      key = open?.[0] ?? `${e.title}#${tools.size}`;
+    }
+    const prev = tools.get(key);
+    const status = (["pending", "in_progress", "completed", "failed"].includes(e.status) ? e.status : prev?.status ?? "in_progress") as ToolRun["status"];
+    const capped = e.output !== undefined ? capOutput(e.output) : null;
+    const run: ToolRun = {
+      id: prev?.id ?? `${msgId}:${tools.size}`, title: e.title || prev?.title || "tool", kind: (e.kind && e.kind !== "other" ? e.kind : prev?.kind) || e.kind || "other", status,
+      input: e.input ?? prev?.input, output: capped ? capped.text : prev?.output, truncated: capped ? capped.truncated : prev?.truncated,
+      startedAt: prev?.startedAt ?? Date.now(), endedAt: status === "completed" || status === "failed" ? prev?.endedAt ?? Date.now() : undefined,
+    };
+    if (tools.size >= MAX_TOOLS_PER_REPLY && !prev) return false;
+    tools.set(key, run);
+    if (!live.toolsTimer) live.toolsTimer = setTimeout(() => { live.toolsTimer = null; this.flushTools(live, msgId, live.chatId); }, 400);
+    return !prev || prev.status !== status;
+  }
+
+  /** Send the reply's tool calls to the UI and keep them with the message. */
+  private flushTools(live: Live, messageId: string, chatId: string): void {
+    if (live.toolsTimer) { clearTimeout(live.toolsTimer); live.toolsTimer = null; }
+    const tools = [...(live.tools?.values() ?? [])];
+    if (!tools.length) return;
+    this.d.db.setMessageTools(messageId, tools);
+    this.d.emit({ type: "message.tools", messageId, chatId, tools });
   }
 
   /** Record a progress event for the flow chart and notify the UI. */

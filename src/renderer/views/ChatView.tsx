@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ToolRuns } from "../components/ToolRuns";
 import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
@@ -207,6 +208,7 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
         </div>
         <div className="msg-content">
           {(m.steer || m.delivery) && <DeliveryBadge steer={m.steer} state={m.delivery} />}
+          {!!m.tools?.length && <ToolRuns tools={m.tools} />}
           {m.author === "user" ? <div className="plain">{m.content}</div> : <Markdown text={m.content || (m.status === "streaming" ? "" : "")} />}
           {m.attachments.length > 0 && (
             <div className="msg-atts">

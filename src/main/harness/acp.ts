@@ -131,6 +131,7 @@ export class AcpSession implements HarnessSession {
   sessionId: string | null = null;
   models: ModelInfo[] = [];
   private seenDiffs = new Set<string>();
+  private toolTitles = new Map<string, string>();
   /** Slash commands the agent advertised (available_commands_update), without the leading "/". */
   commands: string[] = [];
   private commandWaiters: (() => void)[] = [];
@@ -243,7 +244,13 @@ export class AcpSession implements HarnessSession {
         break;
       case "tool_call":
       case "tool_call_update":
-        if (u.title || u.status || u.sessionUpdate === "tool_call") this.o.onEvent({ type: "tool", title: u.title ?? u.toolCallId ?? "tool", status: u.status ?? "pending", kind: asKind(u.kind) });
+        if (u.title || u.status || u.sessionUpdate === "tool_call" || u.content || u.rawOutput || u.rawInput) {
+          const prev = this.toolTitles.get(u.toolCallId);
+          const title = u.title ?? prev ?? u.toolCallId ?? "tool";
+          if (u.toolCallId && u.title) this.toolTitles.set(u.toolCallId, u.title);
+          this.o.onEvent({ type: "tool", id: u.toolCallId, title, status: u.status ?? (u.sessionUpdate === "tool_call" ? "pending" : ""), kind: asKind(u.kind),
+            input: toolInputText(u.rawInput), output: toolOutputText(u.content, u.rawOutput) });
+        }
         // File edits come as diff content (ACP ToolCallContent "diff": path, oldText, newText)
         for (const c of Array.isArray(u.content) ? u.content : []) {
           if (c?.type !== "diff" || typeof c.path !== "string" || typeof c.newText !== "string") continue;
@@ -380,4 +387,37 @@ function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
     const t = setTimeout(() => reject(new Error(msg)), ms);
     p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
   });
+}
+
+/** The command line or arguments of an ACP tool call (rawInput), as shown when the call is expanded. */
+export function toolInputText(raw: unknown): string | undefined {
+  if (raw == null || raw === "") return undefined;
+  if (typeof raw === "string") return raw;
+  const r = raw as Record<string, unknown>;
+  const cmd = r.command ?? r.cmd ?? r.commandLine;
+  if (Array.isArray(cmd)) return cmd.map(String).join(" ");
+  if (typeof cmd === "string") return [cmd, ...(Array.isArray(r.args) ? r.args.map(String) : [])].join(" ");
+  try { const j = JSON.stringify(raw, null, 1); return j === "{}" ? undefined : j; } catch { return undefined; }
+}
+
+/** Text output of an ACP tool call: content blocks ("content" text, diffs as a summary) and rawOutput. */
+export function toolOutputText(content: unknown, raw: unknown): string | undefined {
+  const parts: string[] = [];
+  for (const c of Array.isArray(content) ? content : []) {
+    const x = c as Record<string, any>;
+    if (x?.type === "content" && x.content?.type === "text" && typeof x.content.text === "string") parts.push(x.content.text);
+    else if (x?.type === "text" && typeof x.text === "string") parts.push(x.text);
+    else if (x?.type === "diff" && typeof x.path === "string") parts.push(`(edited ${x.path})`);
+  }
+  if (!parts.length && raw != null) {
+    if (typeof raw === "string") parts.push(raw);
+    else {
+      const r = raw as Record<string, unknown>;
+      const t = [r.output, r.stdout, r.stderr, r.content, r.result, r.text].filter((v) => typeof v === "string" && v) as string[];
+      if (t.length) parts.push(t.join("\n"));
+      else { try { parts.push(JSON.stringify(raw, null, 1)); } catch { /* ignore */ } }
+    }
+  }
+  const out = parts.join("\n");
+  return out ? out : undefined;
 }

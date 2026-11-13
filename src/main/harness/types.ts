@@ -19,7 +19,8 @@ export interface PermissionRequest {
 export type HarnessEvent =
   | { type: "text"; text: string }
   | { type: "thought"; text: string }
-  | { type: "tool"; title: string; status: string; kind: ToolKind }
+  /** A tool call started or changed. id groups updates; input = command/arguments; output = the full output so far. */
+  | { type: "tool"; title: string; status: string; kind: ToolKind; id?: string; input?: string; output?: string }
   | { type: "plan"; entries: { title: string; status: "pending" | "in_progress" | "completed" | "failed" }[] }
   | { type: "log"; text: string }
   | { type: "steer_ack" } // the harness put a steering message into the model's context

@@ -203,6 +203,20 @@ describe("Orchestrator", () => {
     expect(all().some((m) => m.role === "reviewer" && m.author === "agent")).toBe(true);
   });
 
+  it("keeps each command with its output on the reply (expandable in the chat)", async () => {
+    const { db, orch, chat, events } = setup();
+    cleanup = () => orch.stopAll();
+    db.updateChat(chat.id, { harness: "opencode" });
+    await orch.sendUserMessage(chat.id, "RUNCMD please", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    const tools = db.getMessage(agentMsgs(db, chat.id)[0]!.id)!.tools!;
+    const run = tools.find((x) => x.title === "Run tests")!;
+    expect(run).toMatchObject({ kind: "execute", status: "completed", input: "ctest --output-on-failure", output: "Test #1: brake ... Passed\n100% tests passed" });
+    expect(run.endedAt).toBeGreaterThanOrEqual(run.startedAt);
+    expect(tools.filter((x) => x.title === "Run tests")).toHaveLength(1); // updates merged into one run
+    expect(events.some((e) => e.type === "message.tools")).toBe(true);
+  });
+
   it("the coordinator can create a custom agent and run it", async () => {
     const created: any[] = [];
     const { db, orch, chat } = setup({}, { createRole: (spec: any, by: string, keep: boolean) => {

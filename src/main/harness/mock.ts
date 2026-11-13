@@ -53,7 +53,9 @@ export class MockSession implements HarnessSession {
     const steps = ["Understand the request", "Inspect relevant files", "Draft the answer", "Write the result block"];
     const plan = (done: number) => steps.map((title, i) => ({ title, status: (i < done ? "completed" : i === done ? "in_progress" : "pending") as "completed" | "in_progress" | "pending" }));
     this.o.onEvent({ type: "plan", entries: plan(0) });
-    this.o.onEvent({ type: "tool", title: "Reading project structure", status: "completed", kind: "read" });
+    this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "in_progress", kind: "execute", input: "git ls-files src | head -20" });
+    this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "completed", kind: "execute",
+      output: "src/brake_light.c\nsrc/brake_light.h\nsrc/can_signals.c\nsrc/can_signals.h\ntests/test_brake_light.c" });
     this.o.onEvent({ type: "plan", entries: plan(1) });
     const words = reply.split(/(?<=\s)/);
     let k = 0;

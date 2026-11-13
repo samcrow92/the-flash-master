@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
+  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, ToolRun, UsageSummary,
 } from "@shared/types";
 
 const MIGRATIONS: string[] = [
@@ -201,6 +201,15 @@ export class Db {
       (patch.estimated ?? m.estimated) ? 1 : 0, id);
     return this.getMessage(id)!;
   }
+  /** Commands / tool calls of an agent reply (kept in meta). */
+  setMessageTools(id: string, tools: ToolRun[]): void {
+    const r = this.get("SELECT meta FROM messages WHERE id=?", id);
+    if (!r) return;
+    let meta: Record<string, unknown> = {};
+    try { meta = r.meta ? JSON.parse(r.meta as string) : {}; } catch { /* ignore */ }
+    meta.tools = tools;
+    this.run("UPDATE messages SET meta=? WHERE id=?", JSON.stringify(meta), id);
+  }
   /** Update the delivery state of a steering/queued message (never goes backwards). */
   setDelivery(id: string, state: NonNullable<Message["delivery"]>): Message | null {
     const r = this.get("SELECT meta FROM messages WHERE id=?", id);
@@ -224,12 +233,12 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
-    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"] } = {};
+    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[] } = {};
     try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
-      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}), ...(meta.delivery ? { delivery: meta.delivery } : {}),
+      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}), ...(meta.delivery ? { delivery: meta.delivery } : {}), ...(meta.tools?.length ? { tools: meta.tools } : {}),
       reactions: this.reactions(r.id), replyCount,
     };
   }
