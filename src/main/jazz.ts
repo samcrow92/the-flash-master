@@ -266,7 +266,11 @@ export class JazzClient {
   /** Authenticated GET returning the body (used by the DOORS Next client on the /rm context root). */
   async getText(path: string, accept: string, oslc = false): Promise<string> {
     const r = await this.send("GET", path, undefined, { Accept: accept, "OSLC-Core-Version": oslc ? "2.0" : "none" });
-    if (!r.ok) throw new Error(`HTTP ${r.status} for ${path.split("?")[0]}`);
+    if (!r.ok) {
+      // The server's own reason (DOORS Next explains a bad query or configuration in the body).
+      const why = serverMessage(await r.text().catch(() => ""));
+      throw new Error(`HTTP ${r.status} for ${path.split("?")[0]}${why && !/^<!doctype|^<html/i.test(why) ? `: ${why}` : ""}`);
+    }
     return r.text();
   }
 

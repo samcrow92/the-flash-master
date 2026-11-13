@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Fix: DOORS Next with a global configuration found 0 modules (HTTP 400).**
+  - **Configuration field:** a GCM web link (`…/gc/web/projects/…#action=gc.viewConfiguration&path=…`), a DOORS Next link with `oslc_config.context`, or a URL-encoded value is now turned into the configuration URI (`…/gc/configuration/51068`). This applies in Settings when pasted, and to values already saved. Pasting a GCM link into the server field sets the configuration and leaves the server unchanged.
+  - **Component discovery** now runs for such global configurations as well.
+  - **OSLC query fallback** sends an absolute `projectURL`.
+  - **Diagnostics** show the server's own reason for HTTP errors and why the services document failed.
 - **The coordinator can create custom agents.** The new `create_agent` tool defines any kind of agent: name, description, complete instructions, optional extra tools, harness and model. It can run the new agent right away. Agents are saved to your agents folder and reusable; with `keep: false` they last until the app restarts. Built-in agents and agents you wrote yourself are never overwritten. In text mode the coordinator uses `AGENT name[@harness]: description … END` blocks. TheFlashMaster's instructions describe this and say to reuse existing agents first.
 - **Autopilot by default.** New chats start with Autopilot on, existing chats are switched to it once, and tool approval defaults to *Auto-approve everything*. Agents and specialists no longer stop to ask for permission. Blocked commands and read-only mode still apply. Settings → General → *Autopilot for new chats*; the per-chat toggle stays next to the chat box.
 - **Text-mode tools for agents without MCP.** This covers Pi, which has no MCP, and OpenCode or Copilot with MCP blocked. Any agent whose TheFlashMaster tools aren't confirmed loaded gets a compact list of the app's tools (tasks, artifacts, progress, Jazz, DOORS Next) and can call them as `TOOL name {json}` lines. The app runs them and returns the results, for up to 12 rounds per request. Separate MCP servers (office, Context7…) can't be reached this way.

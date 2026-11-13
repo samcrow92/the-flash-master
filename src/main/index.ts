@@ -248,7 +248,7 @@ const rmApi = (): JazzClient | null => {
   return rmClient;
 };
 const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config,
-  () => settings.get().jazz.rm.component || parseRmLink(settings.get().jazz.rm.serverUrl).componentUri);
+  () => settings.get().jazz.rm.component || parseRmLink(settings.get().jazz.rm.serverUrl).componentUri, () => rmUrl());
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects,

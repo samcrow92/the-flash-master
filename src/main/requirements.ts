@@ -7,6 +7,7 @@
  * projects. Module contents are cached on disk and searched locally (BM25), so agents retrieve only the requirements
  * relevant to a question instead of loading whole modules into their context.
  */
+import { configUri } from "@shared/rm-config";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -103,7 +104,7 @@ export function parseRmLink(input: string): { base: string; componentUri: string
     base: `${u.origin}${root ? `/${root}` : ""}`,
     componentUri,
     projectId: /(_[\w-]+)\/?$/.exec(project)?.[1] ?? project,
-    config: get("oslc_config.context", "vvc.configuration", "configURI"),
+    config: configUri(raw) !== raw ? configUri(raw) : get("oslc_config.context", "vvc.configuration", "configURI"),
   };
 }
 
@@ -226,7 +227,7 @@ export class Requirements {
   /** OSLC Query for modules of a project (configuration-aware). */
   private async oslcModules(projectId: string, log: string[] = [], cfg = this.config()): Promise<{ uri: string; title: string; identifier: string }[]> {
     const api = this.need();
-    const base = await this.queryBase(projectId, cfg);
+    const base = await this.queryBase(projectId, cfg, log);
     log.push(`oslc query capability: ${base.slice(0, 160)}`);
     const q = (where: string) => `${base}${base.includes("?") ? "&" : "?"}oslc.prefix=${encodeURIComponent(RDF_PREFIXES)}`
       + `&oslc.select=${encodeURIComponent("dcterms:title,dcterms:identifier")}&oslc.where=${encodeURIComponent(where)}&oslc.pageSize=200${this.cfgParam(cfg)}`;
@@ -241,7 +242,7 @@ export class Requirements {
         }
         log.push(`oslc where ${where}: ${all.length} modules`);
         if (all.length) return [...new Map(all.map((x) => [x.uri, x])).values()];
-      } catch (e) { log.push(`oslc where ${where}: ${String((e as Error)?.message ?? e).slice(0, 160)}`); if (!missingApi(e)) throw e; }
+      } catch (e) { log.push(`oslc where ${where}: ${String((e as Error)?.message ?? e).slice(0, 320)}`); if (!missingApi(e)) throw e; }
     }
     return [];
   }
@@ -265,14 +266,16 @@ export class Requirements {
   }
 
   /** Query capability of a project (from its services document, else the well-known DOORS Next /views URL). */
-  private async queryBase(projectId: string, config = this.config()): Promise<string> {
+  private async queryBase(projectId: string, config = this.config(), log: string[] = []): Promise<string> {
     const api = this.need();
     const cfg = config ? `?oslc_config.context=${encodeURIComponent(config)}` : "";
-    const svc = await api.getText(`/oslc_rm/${projectId}/services.xml${cfg}`, "application/rdf+xml", true).catch(() => "");
+    const svc = await api.getText(`/oslc_rm/${projectId}/services.xml${cfg}`, "application/rdf+xml", true)
+      .catch((e) => { log.push(`services document: ${String((e as Error)?.message ?? e).slice(0, 240)}`); return ""; });
     const qb = /<(?:[\w.-]+:)?queryBase\b[^>]*resource="([^"]+)"/.exec(svc)?.[1];
     if (qb) return decode(qb);
-    const root = (/^(https?:\/\/[^"]+?)\/oslc_rm\//.exec(svc)?.[1]) ?? "";
-    return `${root || ""}/views?oslc.query=true&projectURL=${encodeURIComponent(`${root}/process/project-areas/${projectId}`)}`;
+    // DOORS Next wants an absolute project URL in projectURL.
+    const root = (/^(https?:\/\/[^"]+?)\/oslc_rm\//.exec(svc)?.[1]) ?? this.serverRoot().replace(/\/+$/, "");
+    return `${root}/views?oslc.query=true&projectURL=${encodeURIComponent(`${root}/process/project-areas/${projectId}`)}`;
   }
   /** Module contents via OSLC: the module's oslc_rm:uses list, then each artifact (unordered: sorted by id). */
   private async oslcModuleContent(mod: RmModule, config = this.config()): Promise<Requirement[]> {
@@ -294,13 +297,13 @@ export class Requirements {
   }
 
   constructor(private api: () => RmFetcher | null, private cacheDir: string, private userConfig: () => string,
-    private component: () => string = () => "") {
+    private component: () => string = () => "", private serverRoot: () => string = () => "") {
     mkdirSync(cacheDir, { recursive: true });
   }
 
   /** Configuration used for reads: the one set by the user, else the default stream of the configured component. */
   private config(): string {
-    return this.userConfig().trim() || (this.scope?.key === this.component() ? this.scope.stream : "");
+    return configUri(this.userConfig()) || (this.scope?.key === this.component() ? this.scope.stream : "");
   }
 
   /** Resolve the component from the link (title, project area, default stream) once. */
@@ -359,7 +362,7 @@ export class Requirements {
     // Which configurations to read: the user's, else the linked component's stream (same project), else every
     // component of the project with its default stream (DOORS Next query capabilities are component-specific).
     // Global configurations (…/gc/configuration/…) span all contributing components; local streams one component.
-    const user = this.userConfig().trim();
+    const user = configUri(this.userConfig());
     const isGc = (c: string) => /\/gc\/configuration\//i.test(c);
     const discover = async () => (await this.projectStreams(projectId, log).catch((e) => { log.push(`component discovery: ${String(e?.message ?? e).slice(0, 160)}`); return []; }));
     const scopes: { config: string; component?: string }[] = [];

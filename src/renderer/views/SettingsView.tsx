@@ -9,6 +9,7 @@ import { UserAvatar, toAvatarDataUrl } from "../components/UserAvatar";
 import { Camera, ImagePlus, Loader2, Trash2 } from "../components/icons";
 import { AgentImportDialog, reportImports } from "../components/AgentImport";
 import { ModelInput } from "../components/ModelInput";
+import { configUri, isGcWebLink } from "@shared/rm-config";
 
 const TABS = [
   ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["usage", "Usage"], ["permissions", "Permissions"],
@@ -538,7 +539,9 @@ function parseRmLinkUi(input: string): { base: string; componentUri: string; con
     const u = new URL(input);
     const p = new URLSearchParams([u.search.slice(1), u.hash.replace(/^#/, "")].filter(Boolean).join("&"));
     const root = u.pathname.split("/").filter(Boolean)[0] ?? "";
-    return { base: `${u.origin}${root ? `/${root}` : ""}`, componentUri: p.get("componentURI") ?? "", config: p.get("oslc_config.context") ?? p.get("vvc.configuration") ?? "" };
+    const config = configUri(input) !== input.trim() ? configUri(input) : p.get("oslc_config.context") ?? p.get("vvc.configuration") ?? "";
+    // A GCM page (…/gc/web/…) names a configuration, not the requirements server.
+    return { base: isGcWebLink(input) ? "" : `${u.origin}${root ? `/${root}` : ""}`, componentUri: p.get("componentURI") ?? "", config };
   } catch { return { base: input.replace(/[#?].*$/, "").replace(/\/+$/, ""), componentUri: "", config: "" }; }
 }
 
@@ -559,10 +562,11 @@ function RmSettings({ f }: { f: F }) {
             const v = e.target.value.trim();
             if (v === rm.serverUrl) return;
             const l = parseRmLinkUi(v);
-            await f.set("jazz.rm.serverUrl", l.base || v);
+            if (l.base || !l.config) await f.set("jazz.rm.serverUrl", l.base || v);
             if (l.componentUri) await f.set("jazz.rm.component", l.componentUri);
             if (l.config) await f.set("jazz.rm.config", l.config);
-            if (l.base && l.base !== v) st.toast("info", `DOORS Next link recognised: server ${l.base}${l.componentUri ? " + component" : ""}${l.config ? " + configuration" : ""}`);
+            if (!l.base && l.config) st.toast("info", "That is a configuration link: it was set as the configuration, the server stays unchanged.");
+            else if (l.base && l.base !== v) st.toast("info", `DOORS Next link recognised: server ${l.base}${l.componentUri ? " + component" : ""}${l.config ? " + configuration" : ""}`);
           }} />
       </Row>
       {rm.component && <Row label="Component" hint="From the pasted link. Its project is used and, if no configuration is set, its default stream.">
@@ -581,7 +585,8 @@ function RmSettings({ f }: { f: F }) {
         </div>
       </Row>
       <Row label="Configuration (optional)" hint="A global configuration (…/gc/configuration/…) reads all contributing components; a local stream or baseline reads one component. Blank = every component of the project with its default stream (discovered automatically). If a global configuration has nothing for a project, its component streams are used.">
-        <Text f={f} path="jazz.rm.config" placeholder="https://alm.company.com/gc/configuration/… or …/rm/cm/stream/_…" /></Row>
+        <input key={rm.config} defaultValue={rm.config} placeholder="https://alm.company.com/gc/configuration/… or …/rm/cm/stream/_… (or paste the configuration's web link)" disabled={f.locked("jazz.rm")}
+          onBlur={async (e) => { const c = configUri(e.target.value); if (c !== rm.config) await f.set("jazz.rm.config", c); if (c !== e.target.value.trim()) { e.target.value = c; st.toast("info", `Configuration recognised: ${c}`); } }} /></Row>
       <Row label="Cache modules for (hours)" hint="Agents and searches use the cached copy; Refresh in the Requirements tab fetches again."><Num f={f} path="jazz.rm.cacheHours" /></Row>
       <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().rmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
     </>}
