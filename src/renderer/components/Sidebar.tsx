@@ -128,7 +128,7 @@ export function Sidebar() {
         <NavBtn active={view.kind === "dashboard"} onClick={() => st.setView({ kind: "dashboard" })} icon={<LayoutDashboard size={17} />} label="Dashboard" />
         <NavBtn active={view.kind === "tasks"} onClick={() => st.setView({ kind: "tasks" })} icon={<SquareKanban size={17} />} label="Tasks"
           extra={openTasks > 0 && <span className="count">{openTasks}</span>} />
-        <NavBtn active={view.kind === "jazz"} onClick={() => st.setView({ kind: "jazz" })} icon={<ClipboardList size={17} />} label="Jazz work items" />
+        <NavBtn active={view.kind === "jazz"} onClick={() => st.setView({ kind: "jazz" })} icon={<ClipboardList size={17} />} label="IBM Jazz" />
         <NavBtn active={view.kind === "marketplace"} onClick={() => st.setView({ kind: "marketplace" })} icon={<Puzzle size={17} />} label="Marketplace" />
         <NavBtn active={view.kind === "docs"} onClick={() => st.setView({ kind: "docs" })} icon={<BookOpen size={17} />} label="Documentation" />
       </nav>

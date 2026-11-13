@@ -4,6 +4,7 @@ import type { Db } from "./db";
 import type { Orchestrator } from "./orchestrator";
 import type { ToolDef } from "./bridge";
 import type { JazzClient } from "./jazz";
+import type { Requirements } from "./requirements";
 import type { RoleDef } from "@shared/types";
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
@@ -12,7 +13,12 @@ const s = (description: string) => ({ type: "string", description });
 /** Tools exposed to agents through the flashmaster-core and jazz MCP servers. Results are kept compact on purpose. */
 export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void;
+  requirements?: Requirements; rmProjects?: () => string[];
 }): ToolDef[] {
+  const rm = () => {
+    if (!d.requirements) throw new Error("DOORS Next requirements are not available");
+    return d.requirements;
+  };
   const jazz = () => {
     const j = d.jazz();
     if (!j) throw new Error("Jazz integration is not configured (Settings → Integrations → IBM Jazz)");
@@ -134,6 +140,45 @@ export function buildTools(d: {
       set: "jazz", name: "jazz_comment", description: "Add a comment to a work item (e.g. analysis results).",
       inputSchema: obj({ id: s("work item id"), text: s("comment text") }, ["id", "text"]),
       handler: async (a) => { await jazz().comment(a.id, a.text); return { ok: true }; },
+    },
+    // ---------------- DOORS Next requirements (targeted retrieval: search → get, never whole modules) ----------------
+    {
+      set: "jazz", name: "rm_modules",
+      description: "List DOORS Next requirement modules. project: project name or id (default: the configured projects). Returns id, title.",
+      inputSchema: obj({ project: s("project name or id, optional"), refresh: { type: "boolean" } }),
+      handler: async (a) => {
+        const projects = await rm().projects();
+        const wanted = a.project ? projects.filter((p) => p.id === a.project || p.title.toLowerCase().includes(String(a.project).toLowerCase()))
+          : projects.filter((p) => !(d.rmProjects?.() ?? []).length || (d.rmProjects?.() ?? []).includes(p.title));
+        const out: { project: string; modules: { id: string; title: string }[] }[] = [];
+        for (const p of wanted.slice(0, 8)) out.push({ project: p.title, modules: (await rm().modules(p.id, a.refresh)).map((m) => ({ id: m.identifier || m.uuid, title: m.title })) });
+        return out;
+      },
+    },
+    {
+      set: "jazz", name: "rm_outline",
+      description: "Heading structure of a requirements module (section, title, number of requirements per section). Cheap way to orient before searching.",
+      inputSchema: obj({ module: s("module id, title or URL"), maxDepth: { type: "number", description: "default 3" } }, ["module"]),
+      handler: async (a) => rm().outline(a.module, a.maxDepth ?? 3),
+    },
+    {
+      set: "jazz", name: "rm_search",
+      description: "Find the requirements most relevant to a question (ranked, short text). Use this instead of reading whole modules. query: words or requirement ids. modules: ids/titles to search (default: all loaded).",
+      inputSchema: obj({
+        query: s("what you are looking for, e.g. 'brake light debounce timing' or '1234 1240'"),
+        modules: { type: "array", items: { type: "string" }, description: "module ids or titles" },
+        type: s("artifact type filter, e.g. 'System Requirement'"), top: { type: "number", description: "default 10, max 40" },
+      }, ["query"]),
+      handler: async (a) => rm().search(a.query, { modules: a.modules, type: a.type, top: Math.min(a.top ?? 10, 40) }),
+    },
+    {
+      set: "jazz", name: "rm_get",
+      description: "Full text, attributes and links of specific requirements by id (after rm_search).",
+      inputSchema: obj({ ids: { type: "array", items: { type: "string" } }, module: s("module id or title, optional") }, ["ids"]),
+      handler: async (a) => (await rm().get((a.ids ?? []).slice(0, 25), a.module)).map((r) => ({
+        id: r.id, module: r.module, section: r.section, type: r.type, text: r.text.slice(0, 3000), attrs: r.attrs,
+        links: r.links.slice(0, 10).map((l) => `${l.type}: ${l.title ?? l.target}`), url: r.uri,
+      })),
     },
   ];
 }

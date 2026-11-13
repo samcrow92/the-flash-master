@@ -80,6 +80,8 @@ export interface Settings {
     serverUrl: string; // e.g. https://jazz.company.com/ccm
     projectArea: string; // legacy single area (migrated into projectAreas)
     projectAreas: string[];
+    /** DOORS Next (Jazz Requirements Management). Uses the same sign-in as Jazz work items. */
+    rm: { enabled: boolean; serverUrl: string; projects: string[]; config: string; cacheHours: number };
     authType: "form" | "basic" | "windows" | "browser"; // windows = integrated Kerberos/NTLM; browser = SSO window (Jazz Authorization Server / OIDC)
     username: string;
     hasPassword: boolean; // password stored encrypted via safeStorage, never in settings
@@ -159,6 +161,7 @@ export const DEFAULT_SETTINGS: Settings = {
     serverUrl: "",
     projectArea: "",
     projectAreas: [],
+    rm: { enabled: false, serverUrl: "", projects: [], config: "", cacheHours: 24 },
     authType: "form",
     username: "",
     hasPassword: false,

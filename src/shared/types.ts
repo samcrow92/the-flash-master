@@ -201,6 +201,24 @@ export interface JazzWorkItem {
   tags?: string;
 }
 
+/** IBM DOORS Next (Jazz Requirements Management) */
+export interface RmProject { id: string; title: string }
+export interface RmModule { uri: string; uuid: string; identifier: string; title: string; projectId: string; modified?: string }
+export interface Requirement {
+  id: string; // DOORS Next identifier (number shown in the UI)
+  uri: string;
+  title: string;
+  text: string; // primary text as plain text
+  type: string; // artifact type, e.g. "System Requirement", "Heading"
+  heading: boolean;
+  section: string; // e.g. "3.2.1" (module context)
+  depth: number;
+  attrs: Record<string, string>;
+  links: { type: string; target: string; title?: string }[];
+}
+export interface RmModuleData { module: RmModule; fetchedAt: number; requirements: Requirement[]; config: string }
+export interface RmHit { id: string; module: string; moduleTitle: string; section: string; type: string; text: string; score: number }
+
 export interface CopilotUsage {
   ok: boolean;
   fetchedAt: number;

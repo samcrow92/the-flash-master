@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, useStore } from "../store";
 import {
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
-  KeyRound, LifeBuoy, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
+  KeyRound, LifeBuoy, ListChecks, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
   CornerDownRight, Leaf,
 } from "../components/icons";
 
@@ -196,6 +196,7 @@ function Use() {
       <Item icon={<Bot size={18} />} title="Agents overview">See every running agent, pause, resume or stop it.</Item>
       <Item icon={<SquareKanban size={18} />} title="Tasks">A simple board; “Run with agent” hands a task to its assigned specialist.</Item>
       <Item icon={<ClipboardList size={18} />} title="Jazz work items">Search, read and comment on IBM Jazz items and send them to an agent for analysis (Settings → Integrations).</Item>
+      <Item icon={<ListChecks size={18} />} title="Requirements (DOORS Next)">IBM Jazz → Requirements: pick a project and module, read it by section, search it, select requirements and click <b>Analyse</b>. Agents search modules themselves with <code>rm_search</code> and read details with <code>rm_get</code>, so only relevant requirements enter their context.</Item>
       <Item icon={<Puzzle size={18} />} title="Marketplace">Install agents, workflows and team rules published by your department.</Item>
       <Item icon={<Gauge size={18} />} title="Usage">The bar under the chat box shows your Copilot premium requests; details in Settings → Usage.</Item>
       <Item icon={<Wrench size={18} />} title="Tools (MCP)">Context7, MarkItDown and other tools are installed automatically and given to the agents that need them (Settings → MCP).</Item>

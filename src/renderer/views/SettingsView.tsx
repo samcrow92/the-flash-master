@@ -514,6 +514,37 @@ function JazzAreas({ f }: { f: F }) {
   </div>;
 }
 
+function RmSettings({ f }: { f: F }) {
+  const st = useStore();
+  const [test, setTest] = useState("");
+  const [projects, setProjects] = useState<{ id: string; title: string }[] | null>(null);
+  const rm = f.s.jazz.rm;
+  const derived = f.s.jazz.serverUrl.replace(/\/(ccm|jts|qm)\/?$/, "/rm");
+  return <>
+    <h4>IBM DOORS Next — requirements</h4>
+    <p className="muted small">Uses the same sign-in as Jazz work items above. Requirement modules are read with the DOORS Next Reportable REST API (read-only) and cached on this PC, so agents can search them quickly with <code>rm_search</code>.</p>
+    <Row label="Enabled"><Bool f={f} path="jazz.rm.enabled" /></Row>
+    {rm.enabled && <>
+      <Row label="Requirements server URL" hint={`Blank = derived from the Jazz URL: ${derived || "…/rm"}`}><Text f={f} path="jazz.rm.serverUrl" placeholder={derived || "https://jazz.company.com/rm"} /></Row>
+      <Row label="Projects" hint="Limit to these requirements projects (blank = all you can see).">
+        <div className="col gap-s">
+          <div className="row gap wrap">
+            {rm.projects.length === 0 && <span className="muted small">All projects</span>}
+            {rm.projects.map((p) => <span key={p} className="chip">{p} <button className="link" onClick={() => f.set("jazz.rm.projects", rm.projects.filter((x) => x !== p))}>✕</button></span>)}
+          </div>
+          <div className="row gap wrap">
+            <button onClick={async () => { try { setProjects(await api().rmProjects()); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } }}>↻ Load from server</button>
+            {projects?.filter((p) => !rm.projects.includes(p.title)).slice(0, 40).map((p) => <button key={p.id} className="chip" onClick={() => f.set("jazz.rm.projects", [...rm.projects, p.title])}>＋ {p.title}</button>)}
+          </div>
+        </div>
+      </Row>
+      <Row label="Configuration (optional)" hint="For configuration-managed projects: the stream, baseline or global configuration URL to read from (oslc_config.context). Blank = default."><Text f={f} path="jazz.rm.config" placeholder="https://jazz.company.com/rm/cm/stream/_…" /></Row>
+      <Row label="Cache modules for (hours)" hint="Agents and searches use the cached copy; Refresh in the Requirements tab fetches again."><Num f={f} path="jazz.rm.cacheHours" /></Row>
+      <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().rmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
+    </>}
+  </>;
+}
+
 function Integrations(f: F) {
   const st = useStore();
   const [pw, setPw] = useState("");
@@ -538,6 +569,7 @@ function Integrations(f: F) {
     </Row>}
     <Row label="Default query"><Text f={f} path="jazz.defaultQuery" placeholder="words or ids shown when the Jazz page opens (optional)" /></Row>
     <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().jazzTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
+    <RmSettings f={f} />
 
     <h4>winIDEA (iSYSTEM / TASKING)</h4>
     <Row label="winIDEA install path" hint="Folder or winIDEA.exe; blank = most recently used instance."><Text f={f} path="winidea.installPath" /></Row>

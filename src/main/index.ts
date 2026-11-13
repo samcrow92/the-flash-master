@@ -15,6 +15,7 @@ import { buildTools } from "./tools";
 import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { parseCopilotUsage } from "./copilot-usage";
+import { Requirements } from "./requirements";
 import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
@@ -176,7 +177,7 @@ function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
       clearTimeout(limit);
       if (!w.isDestroyed()) w.close();
       signInWin = null;
-      jazzClient = null;
+      jazzClient = null; rmClient = null;
       resolve(r);
     };
     const check = async () => { const user = await jazzIdentity(base); if (user) finish({ ok: true, detail: `Signed in as ${user}` }); };
@@ -187,9 +188,27 @@ function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
     void w.loadURL(`${base}/web`);
   });
 }
+// ---------------- DOORS Next requirements (same Jazz session/sign-in, /rm context root) ----------------
+const rmUrl = () => {
+  const j = settings.get().jazz;
+  return (j.rm.serverUrl || j.serverUrl.replace(/\/(ccm|jts|qm)\/?$/, "/rm")).replace(/\/+$/, "");
+};
+let rmClient: JazzClient | null = null;
+let rmKey = "";
+const rmApi = (): JazzClient | null => {
+  const j = settings.get().jazz;
+  if (!j.enabled || !j.rm.enabled || !rmUrl()) return null;
+  const key = JSON.stringify([rmUrl(), j.authType, j.username, j.hasPassword]);
+  if (!rmClient || key !== rmKey) {
+    rmClient = new JazzClient({ serverUrl: rmUrl(), projectAreas: [], authType: j.authType, username: j.username, password: readJazzPassword() }, netFetch);
+    rmKey = key;
+  }
+  return rmClient;
+};
+const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config);
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
-bridge.register(buildTools({ db, orch, roles: () => roles, jazz, emitTask: (task) => emit({ type: "task.updated", task }) }));
+bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects, emitTask: (task) => emit({ type: "task.updated", task }) }));
 
 // ---------------- chat attachments ----------------
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
@@ -553,11 +572,17 @@ const api: FlashApi = {
     if (!safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
     writeFileSync(secretFile, safeStorage.encryptString(password));
     settings.update({ jazz: { hasPassword: !!password } });
-    jazzClient = null;
+    jazzClient = null; rmClient = null;
     await jazzSession().clearStorageData({ storages: ["cookies"] }); // new credentials → fresh login
   },
   jazzSignIn: async () => jazzSignIn(),
-  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; },
+  rmTest: async () => requirements.test(),
+  rmProjects: async () => requirements.projects(),
+  rmModules: async (projectId, refresh) => requirements.modules(projectId, refresh),
+  rmModule: async (ref, refresh) => requirements.module(ref, refresh, settings.get().jazz.rm.cacheHours),
+  rmSearch: async (q, modules, top) => requirements.search(q, { modules, top: top ?? 25 }),
+  rmCached: async () => requirements.allCached().map((d) => ({ module: d.module, fetchedAt: d.fetchedAt, count: d.requirements.filter((r) => !r.heading).length })),
+  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; rmClient = null; },
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),
   updateSettings: async (patch) => { const r = settings.update(patch); if ((patch as any).usage) scheduleUsage(); return r; },

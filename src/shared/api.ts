@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, CopilotUsage, JazzSearch, McpServerStatus, Message,
+  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -102,6 +102,13 @@ export interface FlashApi {
   /** Opens a sign-in window (company SSO / Jazz Authorization Server); resolves when signed in or closed. */
   jazzSignIn(): Promise<{ ok: boolean; detail: string }>;
   jazzSignOut(): Promise<void>;
+  // DOORS Next requirements
+  rmTest(): Promise<{ ok: boolean; detail: string }>;
+  rmProjects(): Promise<RmProject[]>;
+  rmModules(projectId: string, refresh?: boolean): Promise<RmModule[]>;
+  rmModule(moduleRef: string, refresh?: boolean): Promise<RmModuleData>;
+  rmSearch(query: string, modules?: string[], top?: number): Promise<RmHit[]>;
+  rmCached(): Promise<{ module: RmModule; fetchedAt: number; count: number }[]>;
 
   // settings
   getSettings(): Promise<{ settings: Settings; locked: string[] }>;
@@ -118,7 +125,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
 

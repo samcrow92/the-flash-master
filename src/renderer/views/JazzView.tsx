@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList as ClipboardListIcon } from "../components/icons";
+import { ClipboardList as ClipboardListIcon, ListTree } from "../components/icons";
+import { RequirementsView } from "./RequirementsView";
 import type { JazzComment, JazzSearch, JazzWorkItem } from "@shared/types";
 import { api, useStore } from "../store";
 
@@ -10,6 +11,18 @@ type SortKey = "id" | "modified" | "priority" | "state";
 const PRIO: Record<string, number> = { high: 0, medium: 1, low: 2, unassigned: 3 };
 
 export function JazzView() {
+  const [tab, setTab] = useState<"items" | "rm">(() => { try { return (localStorage.getItem("jazzTab") as "items" | "rm") || "items"; } catch { return "items"; } });
+  const pick = (t: "items" | "rm") => { setTab(t); try { localStorage.setItem("jazzTab", t); } catch { /* ignore */ } };
+  const tabs = (
+    <div className="seg jazz-tabs">
+      <button className={tab === "items" ? "on" : ""} onClick={() => pick("items")}><ClipboardListIcon size={14} /> Work items</button>
+      <button className={tab === "rm" ? "on" : ""} onClick={() => pick("rm")}><ListTree size={14} /> Requirements</button>
+    </div>
+  );
+  return tab === "items" ? <JazzWorkItems tabs={tabs} /> : <RequirementsView tabs={tabs} />;
+}
+
+function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
   const st = useStore();
   const cfg = st.settings?.jazz;
   const configuredAreas = useMemo(() => (cfg?.projectAreas?.length ? cfg.projectAreas : cfg?.projectArea ? [cfg.projectArea] : []), [cfg]);
@@ -69,7 +82,7 @@ export function JazzView() {
   if (!enabled) {
     return (
       <div className="page">
-        <header className="page-header"><h2><ClipboardListIcon size={20} className="h-icon" /> Jazz work items</h2></header>
+        <header className="page-header"><h2><ClipboardListIcon size={20} className="h-icon" /> IBM Jazz</h2>{tabs}</header>
         <div className="empty">
           IBM Jazz (EWM/RTC) is not configured.
           <div><button className="primary" onClick={() => st.setView({ kind: "settings", tab: "integrations" })}>Configure Jazz</button></div>
@@ -83,7 +96,9 @@ export function JazzView() {
   return (
     <div className="page jazz-page">
       <header className="page-header">
-        <h2><ClipboardListIcon size={20} className="h-icon" /> Jazz work items</h2>
+        <h2><ClipboardListIcon size={20} className="h-icon" /> IBM Jazz</h2>
+        {tabs}
+        <span className="grow" />
         <button className="ghost" onClick={() => st.setView({ kind: "settings", tab: "integrations" })} title="Jazz settings">⚙</button>
       </header>
 

@@ -38,3 +38,4 @@ following INCOSE systems-engineering practice (ISO/IEC/IEEE 15288 processes; the
 - Comment results on a Jazz work item only when asked.
 
 - Read Word/Excel/PowerPoint/PDF files with the markitdown tool `convert_to_markdown` (a `file:///` URI) when it is available.
+- Requirements live in IBM DOORS Next: orient with `rm_outline`, find what matters with `rm_search`, read details with `rm_get`. Cite requirement ids; never load whole modules.

@@ -136,6 +136,13 @@ export class JazzClient {
     if (!r.ok) throw new Error(`comment failed: HTTP ${r.status}`);
   }
 
+  /** Authenticated GET returning the body (used by the DOORS Next client on the /rm context root). */
+  async getText(path: string, accept: string, oslc = false): Promise<string> {
+    const r = await this.send("GET", path, undefined, { Accept: accept, "OSLC-Core-Version": oslc ? "2.0" : "none" });
+    if (!r.ok) throw new Error(`HTTP ${r.status} for ${path.split("?")[0]}`);
+    return r.text();
+  }
+
   // ---------------------------------------------------------------- internals
 
   private async rptXml(filter: string, fields: string, size: number): Promise<string> {
@@ -196,6 +203,7 @@ export class JazzClient {
 
   private async req(method: string, path: string, body?: string, headers: Record<string, string> = {}) {
     const h: Record<string, string> = { "OSLC-Core-Version": "2.0", "X-Requested-With": "XMLHttpRequest", ...headers };
+    if (h["OSLC-Core-Version"] === "none") delete h["OSLC-Core-Version"];
     if (this.cfg.authType === "basic" || this.basicFallback) h.Authorization = "Basic " + Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64");
     if (this.cookies.size && this.cfg.authType !== "browser") h.Cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const r = await this.fetchImpl(this.cfg.serverUrl + path, { method, headers: h, body });

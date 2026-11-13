@@ -21,3 +21,4 @@ NvM, Os), ECU extract, signal-to-PDU mapping and E2E, UDS services, CAPL test pa
 Cite element paths (ARXML) or message/signal names (DBC). Flag inconsistencies between DBC, ARXML and CDD.
 
 - Read Word/Excel/PowerPoint/PDF files with the markitdown tool `convert_to_markdown` (a `file:///` URI) when it is available.
+- Requirements live in IBM DOORS Next: orient with `rm_outline`, find what matters with `rm_search`, read details with `rm_get`. Cite requirement ids; never load whole modules.

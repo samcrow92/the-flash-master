@@ -144,6 +144,33 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await click("Settings", ".sidebar button");
       await sleep(500);
       await shot(join(demo, "20-profile-picture.png"));
+      const rmBase = process.env.FLASH_SMOKE_RM_URL;
+      if (rmBase) {
+        await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(rmBase + "/ccm")}, authType: "basic", username: "ana", rm: { enabled: true } } }).then(()=>{})`);
+        win.webContents.reload();
+        await sleep(2200);
+        await click("Jazz", ".sidebar button");
+        await sleep(600);
+        await click("Requirements", ".jazz-tabs button");
+        await sleep(1500);
+        await js(`document.querySelector('.rm-module')?.click()`);
+        await sleep(1200);
+        await shot(join(demo, "21-requirements-module.png"));
+        await js(`(()=>{const i=document.querySelector('.search-box input');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(i,'brake light flicker supply voltage');i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
+        await sleep(900);
+        await js(`[...document.querySelectorAll('.rm-req input')].slice(0,2).forEach(c=>c.click())`);
+        await sleep(300);
+        await js(`document.querySelector('.rm-req-body')?.click()`);
+        await sleep(600);
+        await shot(join(demo, "22-requirements-search.png"));
+        await click("Settings", ".sidebar button");
+        await sleep(400);
+        await click("Integrations", ".tabs button");
+        await sleep(500);
+        await js(`document.querySelector('.tab-body')?.scrollTo(0, 99999); document.querySelector('.settings')?.scrollTo?.(0,99999)`);
+        await sleep(300);
+        await shot(join(demo, "23-settings-rm.png"));
+      }
       const ssoUrl = process.env.FLASH_SMOKE_JAZZ_SSO_URL;
       if (ssoUrl) {
         await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(ssoUrl)}, authType: "browser" } }).then(()=>{})`);

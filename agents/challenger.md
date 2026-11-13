@@ -28,3 +28,4 @@ unless asked. Don't rewrite the plan or the code yourself: say what must change 
 judge, list the exact questions that would settle it.
 
 - If unsure about a library or framework API, look it up with the Context7 tools (when available) instead of guessing.
+- Requirements live in IBM DOORS Next: orient with `rm_outline`, find what matters with `rm_search`, read details with `rm_get`. Cite requirement ids; never load whole modules.

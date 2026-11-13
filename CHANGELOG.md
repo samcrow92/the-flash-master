@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- **IBM DOORS Next requirements** (Jazz Requirements Management):
+  - **Sign-in:** uses the same Jazz sign-in (form, Basic, Windows or browser SSO). The `/rm` server is derived from the Jazz URL. There are an optional project filter and an optional configuration (stream/baseline/GC) for configuration-managed projects.
+  - **Data:** projects come from the OSLC RM catalog. Modules and their contents (document order, sections, types, attributes, links) come from the read-only Reportable REST API, with paging. Contents are cached on disk.
+  - **Requirements tab on the IBM Jazz page:**
+    - module list, document view with collapsible headings, ranked search, detail panel
+    - select requirements and **Analyse** with any agent, scoped to a code project and an optional goal
+    - create a task, copy, open in DOORS Next
+  - **Requirement retrieval tools for agents:**
+    - `rm_modules`, `rm_outline`, `rm_search` (BM25 with stemming, exact id hits first, short text) and `rm_get` (full text, attributes, links)
+    - agents fetch only the requirements relevant to the question, never whole modules
+    - the analyst, tester, architect, reviewer, challenger, RCA and AUTOSAR agents have them
 - **Your profile:** in Settings → General you can set a display name (shown instead of "You") and a profile picture. Upload, drop or paste an image; it is centre-cropped, downscaled and stored only on this PC. Without a picture, your initials appear on a colour you choose. Your avatar shows on your chat messages and at the bottom of the sidebar; click either to change it.
 - **Chat management:**
   - **Right-click menus** on chats: rename, pin to top, reset context, copy as Markdown, archive/restore, delete. The same menu opens from the "…" button and the chat header.
