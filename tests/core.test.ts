@@ -146,7 +146,7 @@ describe("roles and skills", () => {
     const roles = loadRoles(join(__dirname, "..", "agents"), join(tmp(), "none"));
     const names = roles.map((r) => r.name);
     expect(names[0]).toBe("flashmaster");
-    for (const n of ["reviewer", "architect", "analyst", "software-expert", "tester", "autosar-vector", "winidea-debugger", "jazz-analyst"]) expect(names).toContain(n);
+    for (const n of ["reviewer", "architect", "analyst", "software-expert", "tester", "autosar-vector", "winidea-debugger", "jazz-analyst", "presentation-expert", "rca-analyst"]) expect(names).toContain(n);
     expect(roles.find((r) => r.name === "autosar-vector")!.tools).toContain("vector-autosar");
     const skills = loadSkills(join(__dirname, "..", "skills", "superpowers"));
     expect(skills.map((s) => s.command).sort()).toEqual(["brainstorm", "debug", "execute", "plan", "review", "superpowers-index", "tdd", "verify"]);

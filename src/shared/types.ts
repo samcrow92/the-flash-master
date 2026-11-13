@@ -45,6 +45,29 @@ export interface Message {
   replyCount: number;
 }
 
+export type StepStatus = "pending" | "in_progress" | "completed" | "failed";
+export interface PlanStep {
+  title: string;
+  status: StepStatus;
+}
+
+export interface AgentEvent {
+  id: number;
+  agentId: string;
+  kind: "turn" | "tool" | "plan" | "delegate" | "approval" | "result" | "error" | "status";
+  label: string;
+  status: string | null;
+  ref: string | null; // e.g. child agent id for delegate
+  at: number;
+}
+
+export interface AgentFlow {
+  agent: AgentRun;
+  parent: AgentRun | null;
+  children: AgentRun[];
+  events: AgentEvent[];
+}
+
 export interface AgentRun {
   id: string;
   projectId: string | null;
@@ -62,6 +85,7 @@ export interface AgentRun {
   startedAt: number;
   endedAt: number | null;
   lastActivity: string | null;
+  plan: PlanStep[];
 }
 
 export interface Task {
@@ -157,4 +181,14 @@ export type AppEvent =
   | { type: "task.updated"; task: Task }
   | { type: "task.deleted"; taskId: string }
   | { type: "mcp.status"; servers: McpServerStatus[] }
+  | { type: "roles.changed"; roles: RoleDef[] }
+  | { type: "flow.updated"; agentId: string }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
+
+export interface AgentImportResult {
+  file: string;
+  ok: boolean;
+  name: string | null;
+  errors: string[];
+  warnings: string[];
+}

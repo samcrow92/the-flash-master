@@ -1,5 +1,5 @@
 import type {
-  AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
+  AgentFlow, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -32,9 +32,17 @@ export interface FlashApi {
   resumeAgent(id: string): Promise<void>;
   stopAgent(id: string): Promise<void>;
   stopAll(): Promise<void>;
+  getAgentFlow(agentId: string): Promise<AgentFlow>;
   listRoles(): Promise<RoleDef[]>;
   listSkills(): Promise<SkillDef[]>;
   openRolesFolder(): Promise<void>;
+  agentTemplate(): Promise<string>;
+  saveAgentTemplate(): Promise<string | null>;
+  validateAgent(text: string): Promise<AgentImportResult>;
+  importAgentText(text: string, fileName?: string): Promise<AgentImportResult>;
+  importAgentFiles(): Promise<AgentImportResult[]>;
+  removeAgent(name: string): Promise<void>;
+  exportAgent(name: string): Promise<string | null>;
 
   // tasks
   listTasks(filter?: { projectId?: string | null; status?: TaskStatus }): Promise<Task[]>;
@@ -69,7 +77,8 @@ export interface FlashApi {
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
   "updateChat", "deleteChat", "listMessages", "sendMessage", "toggleReaction", "listAgents", "startAgent",
-  "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "listRoles", "listSkills", "openRolesFolder", "listTasks",
+  "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
+  "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses",
   "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",

@@ -9,5 +9,5 @@ for (const [cmd, pre] of candidates) {
     process.exit(r.status ?? 1);
   }
 }
-console.error("Python 3 with pytest not found (pip install pytest cantools).");
+console.error("Python 3 with pytest not found (pip install pytest cantools python-pptx).");
 process.exit(1);

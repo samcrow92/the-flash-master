@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  AgentRun, AgentStatus, Artifact, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
+  AgentEvent, AgentRun, AgentStatus, PlanStep, Artifact, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
 } from "@shared/types";
 
 const MIGRATIONS: string[] = [
@@ -28,6 +28,11 @@ const MIGRATIONS: string[] = [
    CREATE INDEX usage_at ON usage(at);
    CREATE TABLE artifacts(id TEXT PRIMARY KEY, agent_id TEXT, kind TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL,
      bytes INTEGER NOT NULL, created_at INTEGER NOT NULL);`,
+  // v2: progress tracking for the flow chart
+  `ALTER TABLE agents ADD COLUMN plan TEXT NOT NULL DEFAULT '[]';
+   CREATE TABLE agent_events(id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL,
+     status TEXT, ref TEXT, at INTEGER NOT NULL);
+   CREATE INDEX agent_events_agent ON agent_events(agent_id, id);`,
 ];
 
 type Row = Record<string, any>;
@@ -228,6 +233,27 @@ export class Db {
   getAgentSession(id: string): string | null {
     return (this.get("SELECT session_id FROM agents WHERE id=?", id)?.session_id as string) ?? null;
   }
+  setPlan(agentId: string, plan: PlanStep[]): void {
+    this.run("UPDATE agents SET plan=? WHERE id=?", JSON.stringify(plan.slice(0, 40)), agentId);
+  }
+  addEvent(e: { agentId: string; kind: AgentEvent["kind"]; label: string; status?: string | null; ref?: string | null }): void {
+    // Collapse repeated updates of the same tool call into one row so the timeline stays short.
+    const last = this.get("SELECT id, kind, label FROM agent_events WHERE agent_id=? ORDER BY id DESC LIMIT 1", e.agentId);
+    if (last && e.kind === "tool" && last.kind === "tool" && last.label === e.label.slice(0, 200)) {
+      this.run("UPDATE agent_events SET status=?, at=? WHERE id=?", e.status ?? null, now(), last.id);
+      return;
+    }
+    this.run("INSERT INTO agent_events(agent_id,kind,label,status,ref,at) VALUES(?,?,?,?,?,?)", e.agentId, e.kind, e.label.slice(0, 200),
+      e.status ?? null, e.ref ?? null, now());
+  }
+  listEvents(agentId: string, limit = 200): AgentEvent[] {
+    return this.all("SELECT * FROM (SELECT * FROM agent_events WHERE agent_id=? ORDER BY id DESC LIMIT ?) ORDER BY id", agentId, limit)
+      .map((r) => ({ id: Number(r.id), agentId: r.agent_id, kind: r.kind, label: r.label, status: r.status ?? null, ref: r.ref ?? null, at: Number(r.at) }));
+  }
+  childAgents(agentId: string): AgentRun[] {
+    return this.all("SELECT * FROM agents WHERE parent_agent_id=? ORDER BY started_at", agentId).map(toAgent);
+  }
+
   /** Mark agents left running by a previous app session as stopped. */
   reapOrphans(): void {
     this.run("UPDATE agents SET status='stopped', ended_at=? WHERE status IN ('idle','running','paused')", now());
@@ -327,11 +353,12 @@ export class Db {
     const cutoff = now() - days * 86400000;
     this.run("DELETE FROM usage WHERE at<?", cutoff);
     this.run("DELETE FROM artifacts WHERE created_at<?", cutoff);
+    this.run("DELETE FROM agent_events WHERE at<?", cutoff);
     this.run("DELETE FROM agents WHERE ended_at IS NOT NULL AND ended_at<?", cutoff);
   }
   exportAll(): Record<string, Row[]> {
     const out: Record<string, Row[]> = {};
-    for (const t of ["projects", "chats", "messages", "reactions", "agents", "tasks", "usage", "artifacts"]) out[t] = this.all(`SELECT * FROM ${t}`);
+    for (const t of ["projects", "chats", "messages", "reactions", "agents", "agent_events", "tasks", "usage", "artifacts"]) out[t] = this.all(`SELECT * FROM ${t}`);
     return out;
   }
 }
@@ -345,8 +372,11 @@ const toAgent = (r: Row): AgentRun => ({
   id: r.id, projectId: r.project_id ?? null, chatId: r.chat_id ?? null, role: r.role, harness: r.harness, model: r.model ?? null,
   status: r.status, parentAgentId: r.parent_agent_id ?? null, brief: r.brief, resultSummary: r.result_summary ?? null,
   tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), estimated: !!r.estimated, startedAt: Number(r.started_at),
-  endedAt: r.ended_at == null ? null : Number(r.ended_at), lastActivity: r.last_activity ?? null,
+  endedAt: r.ended_at == null ? null : Number(r.ended_at), lastActivity: r.last_activity ?? null, plan: parsePlan(r.plan),
 });
+function parsePlan(s: unknown): PlanStep[] {
+  try { const v = JSON.parse(String(s ?? "[]")); return Array.isArray(v) ? v : []; } catch { return []; }
+}
 const toTask = (r: Row): Task => ({
   id: r.id, projectId: r.project_id ?? null, title: r.title, description: r.description, status: r.status, priority: Number(r.priority),
   assigneeRole: r.assignee_role ?? null, agentId: r.agent_id ?? null, parentId: r.parent_id ?? null, jazzId: r.jazz_id ?? null,

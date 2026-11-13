@@ -2,7 +2,7 @@
 
 **A desktop orchestrator for AI coding agents, built for enterprise automotive software teams.**
 
-TheFlashMaster is a Windows x64 desktop app in the spirit of Codex Desktop, Claude Desktop and T3 Code. It runs a team of AI agents on your **local project folders**. It uses the agent CLIs **already installed and signed in on your machine**:
+TheFlashMaster is a Windows x64 desktop app in the spirit of Codex Desktop and Claude Desktop. It runs a team of AI agents on your **local project folders**. It uses the agent CLIs **already installed and signed in on your machine**:
 
 | Harness | How TheFlashMaster talks to it |
 |---|---|
@@ -15,6 +15,10 @@ TheFlashMaster is a Windows x64 desktop app in the spirit of Codex Desktop, Clau
 The app calls no model API itself and stores no model credentials. There's no login: it's a single-user local app.
 
 ![Chat with streaming, a thread and reactions](docs/screenshots/2-chat-thread-reactions.png)
+
+| Progress flowchart | Ishikawa in chat | Import your own agent |
+|---|---|---|
+| ![](docs/screenshots/2c-progress-live.png) | ![](docs/screenshots/2d-rca-ishikawa.png) | ![](docs/screenshots/2e-import-agent.png) |
 
 ## Features
 
@@ -30,6 +34,10 @@ The app calls no model API itself and stores no model credentials. There's no lo
   - 🚗 **AUTOSAR & Vector Expert**: DBC, ARXML, CDD, DaVinci, CANoe, CAPL
   - 🐞 **winIDEA Debug Engineer**: uses the winIDEA Python SDK, `isystem.connect`
   - 📌 Jazz Work Item Analyst
+  - 📊 **Presentation Expert**: creates and edits PowerPoint decks, works with corporate templates, and adds native, editable Ishikawa slides
+  - 🧭 **NOW Analysis & RCA**: structured NOW analysis (Now · Objective · Way forward) with an Ishikawa root-cause analysis and 5 Whys, following INCOSE practice. The fishbone is drawn directly in the chat.
+- **Bring your own agents:** start from the editable template (yourself or with your LLM), check it with live validation, and import it in the app, from `.md` files, or by dragging files onto the window. Imported agents appear in the specialist list right away; you can export or remove them.
+- **🧭 Progress flowchart** for every agent: request → plan steps (done / current / pending) → specialists it delegated to → approvals → result, plus an activity timeline. Open it with the 🧭 Progress button in any chat, by clicking an agent chip, or from the Agents overview as a full page.
 - **Agents overview:** every running agent, with **pause / resume / stop** and Stop all.
 - **Dashboard:** token usage across agents, projects, roles, harnesses and days, plus budgets.
 - **Task board** in SQLite: kanban with priorities, an assignee agent and Jazz links. **Run with agent** starts the assigned specialist with the task as its brief.
@@ -78,7 +86,7 @@ npm run ci -- --smoke  # + launches the built app headlessly and checks the UI b
 npm run dist:win       # Windows x64 portable exe + installer (run on Windows)
 ```
 
-Requirements: Node 22.13+, and Python 3.10+ with `pytest cantools` for the Python tests.
+Requirements: Node 22.13+, and Python 3.10+ with `pytest cantools python-pptx` for the Python tests.
 
 ### Release pipeline
 
@@ -108,11 +116,11 @@ The full design, the decisions taken and a traceability table for every requirem
 | `src/main/` | backend: orchestrator, harness adapters, db, bridge, MCP bootstrap, Jazz |
 | `src/renderer/` | UI: chat, threads, agents, dashboard, tasks, Jazz, settings |
 | `src/shared/` | types, settings schema, IPC contract |
-| `agents/` | specialist role definitions (Markdown + frontmatter); users can override them in `%APPDATA%/TheFlashMaster/agents` |
+| `agents/` | specialist role definitions (Markdown + frontmatter); `_template.md` is the template for your own agents; imported agents live in `%APPDATA%/TheFlashMaster/agents` |
 | `skills/superpowers/` | on-demand workflow skills |
-| `mcp-servers/` | `flashmaster-core`, `jazz` (TS), `vector-autosar`, `winidea` (Python) |
+| `mcp-servers/` | `flashmaster-core`, `jazz` (TS), `vector-autosar`, `winidea`, `office` (Python: PowerPoint + Ishikawa) |
 | `tests/` | Vitest unit and integration tests (fake ACP agent, orchestrator end to end, bridge) |
 
 ## Credits
 
-The harness integration approach is inspired by [T3 Code](https://github.com/pingdotgg/t3code) (MIT). The workflow skills are concise rewrites of [obra/superpowers](https://github.com/obra/superpowers) (MIT). Released under the MIT license.
+The workflow skills are concise rewrites of [obra/superpowers](https://github.com/obra/superpowers) (MIT). Released under the MIT license.

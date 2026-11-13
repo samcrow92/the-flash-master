@@ -124,6 +124,7 @@ export class Orchestrator {
       taskId = t.id;
       this.d.emit({ type: "task.updated", task: t });
     }
+    this.flow(parentAgentId, { kind: "delegate", label: `${role.title}: ${a.goal.slice(0, 120)}`, ref: live.agentId });
     const done = new Promise<string>((resolve) => live.waiters.push(resolve));
     void this.turn({ chat, threadRoot, role, input: a.goal, skills: [], depth: live.depth, brief, taskId, liveKey: live.key })
       .catch((e) => this.finishWaiters(live, `error: ${String(e?.message ?? e)}`));
@@ -147,6 +148,7 @@ export class Orchestrator {
     l.paused = true;
     if (l.busy) void l.session?.cancel();
     this.setStatus(l, "paused", "Paused — new input is queued until resumed");
+    this.flow(agentId, { kind: "status", label: "paused", status: "paused" });
   }
 
   resume(agentId: string): void {
@@ -157,6 +159,7 @@ export class Orchestrator {
     const chat = this.mustChat(l.chatId);
     const input = queued.length ? queued.join("\n\n") : "Continue where you left off. Be concise.";
     this.setStatus(l, "idle", "Resumed");
+    this.flow(agentId, { kind: "status", label: "resumed", status: "running" });
     void this.turn({ chat, threadRoot: l.threadRoot, role: l.role, input, skills: [], depth: l.depth, brief: null, liveKey: l.key });
   }
 
@@ -220,6 +223,7 @@ export class Orchestrator {
     live.currentMessageId = reply.id;
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
+    this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
     let text = "";
     let lastFlush = Date.now();
@@ -248,7 +252,9 @@ export class Orchestrator {
         }
         recent = (plan.compact ? plan.keep : hist).slice(-s.tokens.keepRecentTurns) as Message[];
       }
-      promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: t.skills, summary, recent, input: t.input,
+      // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
+      const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
+      promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
         brief: t.brief, firstTurn });
       this.setStatus(live, "running", "Thinking…");
       const res = await live.session!.prompt(promptText);
@@ -265,6 +271,9 @@ export class Orchestrator {
       this.d.emit({ type: "message.updated", message: final });
       const compact = resultForParent(text, t.role.maxResultTokens);
       live.lastResult = compact;
+      const resultLine = /summary:\s*(.+)/.exec(compact)?.[1] ?? compact.replace(/\s+/g, " ");
+      this.flow(live.agentId, status === "error" ? { kind: "error", label: (res.error ?? "error").slice(0, 160) }
+        : { kind: status === "done" ? "result" : "status", label: status === "done" ? resultLine.slice(0, 160) : status, status });
       this.emitAgent(this.d.db.updateAgent(live.agentId, { status: status === "done" ? "idle" : status, resultSummary: compact.slice(0, 4000),
         lastActivity: status === "done" ? "Waiting for input" : status, ended: status === "stopped" }));
       if (t.taskId) {
@@ -282,6 +291,7 @@ export class Orchestrator {
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       this.d.log?.("error", `turn failed (${live.role.name}/${live.harness}): ${msg}`);
+      this.flow(live.agentId, live.stopped ? { kind: "status", label: "stopped", status: "stopped" } : { kind: "error", label: msg.slice(0, 160) });
       const final = this.d.db.updateMessage(reply.id, { content: (text ? text + "\n\n" : "") + `⚠️ ${msg}`, status: "error" });
       this.d.emit({ type: "message.updated", message: final });
       this.emitAgent(this.d.db.updateAgent(live.agentId, live.stopped ? { status: "stopped", lastActivity: "Stopped" } : { status: "error", lastActivity: msg }));
@@ -322,8 +332,10 @@ export class Orchestrator {
       },
       onEvent: (e) => {
         if (e.type === "text") onText(e.text);
-        else if (e.type === "tool") this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
-        else if (e.type === "plan") this.setStatus(live, "running", e.entries.slice(0, 3).join("  "));
+        else if (e.type === "tool") {
+          this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
+          this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
+        } else if (e.type === "plan") this.setPlan(live.agentId, e.entries);
       },
       askPermission: (r) => this.askPermission(live, r),
     });
@@ -336,10 +348,14 @@ export class Orchestrator {
       role: live.role.name, content: `🔐 **${live.role.title}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
     this.setStatus(live, "running", "Waiting for your approval");
+    this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "waiting" });
     this.d.emit({ type: "notice", level: "warn", text: `${live.role.title} is waiting for approval` });
     return new Promise((resolve) => {
-      this.pendingPermissions.set(msg.id, resolve);
-      setTimeout(() => { if (this.pendingPermissions.delete(msg.id)) resolve(false); }, 10 * 60 * 1000);
+      this.pendingPermissions.set(msg.id, (allow) => {
+        this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: allow ? "allowed" : "denied" });
+        resolve(allow);
+      });
+      setTimeout(() => { const r2 = this.pendingPermissions.get(msg.id); if (r2) { this.pendingPermissions.delete(msg.id); r2(false); } }, 10 * 60 * 1000);
     });
   }
 
@@ -387,6 +403,21 @@ export class Orchestrator {
     this.byAgent.set(agent.id, l);
     this.emitAgent(agent);
     return l;
+  }
+
+  /** Record a progress event for the flow chart and notify the UI. */
+  private flow(agentId: string, e: { kind: import("@shared/types").AgentEvent["kind"]; label: string; status?: string | null; ref?: string | null }): void {
+    this.d.db.addEvent({ agentId, ...e });
+    this.d.emit({ type: "flow.updated", agentId });
+  }
+
+  /** Plan published by the harness (ACP plan updates) or by the agent via report_progress. */
+  setPlan(agentId: string, plan: import("@shared/types").PlanStep[]): void {
+    this.d.db.setPlan(agentId, plan);
+    const cur = plan.find((p) => p.status === "in_progress");
+    const done = plan.filter((p) => p.status === "completed").length;
+    this.emitAgent(this.d.db.updateAgent(agentId, { lastActivity: cur ? `Step ${done + 1}/${plan.length}: ${cur.title}` : `${done}/${plan.length} steps done` }));
+    this.d.emit({ type: "flow.updated", agentId });
   }
 
   private finishWaiters(l: Live, result: string): void {

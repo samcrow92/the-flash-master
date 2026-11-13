@@ -48,6 +48,15 @@ export function buildTools(d: {
         .map((x) => ({ id: x.id, role: x.role, status: x.status, activity: x.lastActivity })),
     },
     {
+      set: "core", name: "report_progress",
+      description: "Publish/update your step plan for multi-step work (shown to the user as a live flow chart). Call once with all steps, then again as steps complete. Keep titles short.",
+      inputSchema: obj({ steps: { type: "array", items: obj({ title: s("step"), status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] } }, ["title", "status"]) } }, ["steps"]),
+      handler: async (a, c) => {
+        d.orch.setPlan(c.agentId, (a.steps ?? []).slice(0, 30).map((x: any) => ({ title: String(x.title).slice(0, 120), status: x.status ?? "pending" })));
+        return { ok: true };
+      },
+    },
+    {
       set: "core", name: "create_task", description: "Create a task in the project's task board.",
       inputSchema: obj({ title: s("short title"), description: s("details"), priority: { type: "number", description: "1 high … 4 low" },
         assigneeRole: s("role to assign"), jazzId: s("linked Jazz work item id"), parentId: s("parent task id") }, ["title"]),

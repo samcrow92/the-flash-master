@@ -3,6 +3,7 @@ import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
+import { FlowPanel } from "./FlowView";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -28,7 +29,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const isMaster = chat.kind === "master";
 
   return (
-    <div className={`chat-layout ${st.thread ? "with-thread" : ""}`}>
+    <div className={`chat-layout ${st.thread || st.flowPanel?.chatId === chatId ? "with-thread" : ""}`}>
       <section className="chat">
         <header className="chat-header">
           <div className="chat-title-block">
@@ -63,6 +64,8 @@ export function ChatView({ chatId }: { chatId: string }) {
             </label>
             <button className={`toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (off by default, on demand)"
               onClick={() => update({ superpowers: !chat.superpowers })}>⚡ Superpowers {chat.superpowers ? "on" : "off"}</button>
+            <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
+              onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}>🧭 Progress</button>
             {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}>■ Stop</button>}
             {!isMaster && (
               <button className="ghost" title="Delete chat" onClick={async () => {
@@ -78,8 +81,11 @@ export function ChatView({ chatId }: { chatId: string }) {
         {chatAgents.length > 0 && (
           <div className="agent-strip">
             {chatAgents.map((a) => (
-              <span key={a.id} className={`agent-chip st-${a.status}`} title={a.lastActivity ?? ""}>
-                {roleOf(a.role)?.icon} {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
+              <span key={a.id} className={`agent-chip st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
+                <button className="chip-main" onClick={() => st.openFlow(chatId, a.id)}>
+                  {roleOf(a.role)?.icon} {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
+                  {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}
+                </button>
                 {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause">⏸</button>}
                 {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume">▶</button>}
                 <button onClick={() => api().stopAgent(a.id)} title="Stop">■</button>
@@ -95,6 +101,7 @@ export function ChatView({ chatId }: { chatId: string }) {
         <Composer chatId={chatId} parentId={null} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @role to route, / for commands`} />
       </section>
       {st.thread && st.thread.chatId === chatId && <ThreadPanel />}
+      {!st.thread && st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
     </div>
   );
 }

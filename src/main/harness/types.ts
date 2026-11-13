@@ -20,7 +20,7 @@ export type HarnessEvent =
   | { type: "text"; text: string }
   | { type: "thought"; text: string }
   | { type: "tool"; title: string; status: string; kind: ToolKind }
-  | { type: "plan"; entries: string[] }
+  | { type: "plan"; entries: { title: string; status: "pending" | "in_progress" | "completed" | "failed" }[] }
   | { type: "log"; text: string };
 
 export interface TurnResult {

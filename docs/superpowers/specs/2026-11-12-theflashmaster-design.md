@@ -4,7 +4,7 @@ Date: 2026-11-12 · Status: approved for autonomous build (owner: Mari, "build t
 
 ## 1. Intent
 
-TheFlashMaster is a Windows x64 desktop app, in the spirit of Codex Desktop, Claude Desktop and T3 Code. It orchestrates AI coding agents **through the agent CLIs already installed and signed in on the user's machine**: GitHub Copilot CLI, OpenCode, Pi and GitLab Duo CLI. It never calls a model API itself and stores no model credentials.
+TheFlashMaster is a Windows x64 desktop app, in the spirit of Codex Desktop and Claude Desktop. It orchestrates AI coding agents **through the agent CLIs already installed and signed in on the user's machine**: GitHub Copilot CLI, OpenCode, Pi and GitLab Duo CLI. It never calls a model API itself and stores no model credentials.
 It runs in an automotive enterprise environment: AUTOSAR/Vector toolchains, IBM Jazz (EWM/RTC) for work items, and iSYSTEM/TASKING winIDEA for debugging.
 The main orchestrator agent and the tool share the name **TheFlashMaster**.
 
@@ -171,7 +171,7 @@ The enterprise policy file is `%PROGRAMDATA%/TheFlashMaster/policy.json`. It ove
 
 | # | Requirement | Where |
 |---|---|---|
-| 1 | Windows app like Codex/Claude Desktop/T3 Code | Electron app, §4, §9 |
+| 1 | Windows desktop app like Codex/Claude Desktop | Electron app, §4, §9 |
 | 2 | Uses Copilot/OpenCode/Pi/GitLab Duo, already authenticated | §4 harness adapters, no credentials stored |
 | 3 | Custom tools as MCP servers auto-installed at start | §8 McpBootstrap |
 | 4 | Local project folder, agents pointed there, chats per project | `projects`, `chats`, cwd = project path |
@@ -197,3 +197,16 @@ The enterprise policy file is `%PROGRAMDATA%/TheFlashMaster/policy.json`. It ove
 | 24 | Task system with a database | `tasks` + kanban |
 | 25 | No login, simple | §2, §12 |
 | 26 | Chat streaming and reactions | ACP chunk streaming → IPC events |
+
+## 14. Additions (2026-11-13)
+
+| # | Requirement | Where |
+|---|---|---|
+| 27 | Presentation expert (PowerPoint create/edit) | `agents/presentation-expert.md`, `mcp-servers/office` |
+| 28 | NOW-format analysis with Ishikawa RCA, INCOSE practice | `agents/rca-analyst.md`; fishbone rendering in chat (`ishikawa` block), SVG and PPTX |
+| 29 | Users import their own agents from an editable template | `agents/_template.md`, `validateRole`, import dialog / files / drag-and-drop, Settings → Agents |
+| 30 | Easy-to-reach flowchart of where an agent is in its task | `agent_events` + `agents.plan` (migration v2), `report_progress` tool, 🧭 Progress panel in chats, flow page |
+| 31 | No third-party branding in the app | About page and README credit only TheFlashMaster and the MIT superpowers workflow |
+
+Builder decision: "NOW" was not found as a published standard, so it is defined as **N**ow (current situation) · **O**bjective
+(target state) · **W**ay forward (actions). The definitions live at the top of the agent file, so they can be edited in one place.

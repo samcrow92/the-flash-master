@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { api, useStore } from "../store";
+import { AgentImportDialog } from "./AgentImport";
 
 export function Sidebar() {
   const st = useStore();
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [importing, setImporting] = useState(false);
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const view = st.view;
   const isChat = (id: string) => view.kind === "chat" && view.chatId === id;
@@ -74,16 +76,19 @@ export function Sidebar() {
         ))}
       </div>
 
-      <div className="section-title">Specialists</div>
+      <div className="section-title">
+        Specialists <button className="icon-btn" title="Add your own agent (template / import)" onClick={() => setImporting(true)}>＋</button>
+      </div>
       <div className="palette">
         {st.roles.filter((r) => r.name !== "flashmaster").map((r) => (
           <button key={r.name} className="palette-item" title={`${r.description}\n\nClick: new chat with ${r.title} in the current project.\nTip: type @${r.name} in any chat.`}
             onClick={() => startSpecialist(r.name)}>
-            <span className="palette-icon">{r.icon}</span><span>{r.title}</span>
+            <span className="palette-icon">{r.icon}</span><span>{r.title}</span>{r.source === "user" && <span className="custom-tag">custom</span>}
           </button>
         ))}
       </div>
 
+      {importing && <AgentImportDialog onClose={() => setImporting(false)} />}
       <div className="sidebar-footer">
         <button className={view.kind === "settings" ? "active" : ""} onClick={() => st.setView({ kind: "settings" })}>⚙️ Settings</button>
       </div>

@@ -40,7 +40,8 @@ export function parseRole(src: string, fallbackName: string, source: RoleDef["so
 
 function readDir(dir: string): { name: string; src: string }[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => ({ name: basename(f, ".md"), src: readFileSync(join(dir, f), "utf8") }));
+  // Files starting with "_" (e.g. _template.md) are never loaded as roles.
+  return readdirSync(dir).filter((f) => f.endsWith(".md") && !f.startsWith("_")).map((f) => ({ name: basename(f, ".md"), src: readFileSync(join(dir, f), "utf8") }));
 }
 
 /** Built-in roles, overridden/extended by files in the user's roles folder. */
@@ -57,4 +58,38 @@ export function loadSkills(dir: string): SkillDef[] {
     const { meta, body } = parseFrontmatter(f.src);
     return { name: str(meta.name, f.name), command: str(meta.command, f.name), description: str(meta.description), body };
   });
+}
+
+export const ROLE_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
+const HARNESSES = ["copilot", "opencode", "pi", "duo", "mock"];
+
+export interface RoleValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  role: RoleDef | null;
+}
+
+/** Validate an agent definition (imported by users or written by their LLM). */
+export function validateRole(src: string, knownTools: string[], builtinNames: string[], knownSkills: string[] = []): RoleValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!/^\s*---\r?\n[\s\S]*?\r?\n---/.test(src)) {
+    return { ok: false, errors: ["Missing the --- header block at the top (see the template)."], warnings, role: null };
+  }
+  const { meta } = parseFrontmatter(src.trimStart());
+  const role = parseRole(src.trimStart(), str(meta.name), "user");
+  if (!meta.name) errors.push("`name` is required.");
+  else if (!ROLE_NAME_RE.test(role.name)) errors.push("`name` must be 2–41 chars: lowercase letters, digits, dashes, starting with a letter.");
+  if (!meta.title) errors.push("`title` is required.");
+  if (role.prompt.length < 20) errors.push("The instructions below the header are missing or too short.");
+  if (role.prompt.includes("Write the agent's instructions here")) warnings.push("The instructions still contain template placeholder text.");
+  if (role.name === "my-agent") warnings.push("`name` is still the template default (my-agent).");
+  if (role.maxResultTokens < 50 || role.maxResultTokens > 4000) errors.push("`maxResultTokens` must be between 50 and 4000.");
+  if (role.harness && !HARNESSES.includes(role.harness)) errors.push(`\`harness\` must be one of ${HARNESSES.join(", ")}.`);
+  for (const t of role.tools) if (!knownTools.includes(t)) warnings.push(`Tool server "${t}" is not installed/known — it will be ignored until it exists.`);
+  for (const k of role.skills) if (knownSkills.length && !knownSkills.includes(k)) warnings.push(`Skill "${k}" is unknown and will be ignored.`);
+  if (builtinNames.includes(role.name)) warnings.push(`Overrides the built-in agent "${role.name}".`);
+  if (role.prompt.length > 12000) warnings.push("Long instructions cost tokens on every session — consider trimming.");
+  return { ok: errors.length === 0, errors, warnings, role: errors.length ? null : role };
 }

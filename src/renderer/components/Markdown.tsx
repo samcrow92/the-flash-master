@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 import { Marked } from "marked";
+import { fishboneSvg } from "./diagrams";
 
 // Raw HTML in agent output is escaped, never rendered (agents can echo untrusted file content).
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -10,7 +11,12 @@ const md = new Marked({
     html: ({ text }) => esc(text),
     link: ({ href, text }) => (/^(https?:|mailto:)/.test(href) ? `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>` : esc(text)),
     image: ({ text }) => esc(`[image: ${text}]`),
-    code: ({ text, lang }) => `<pre class="code"><div class="code-lang">${esc(lang ?? "")}</div><code>${esc(text)}</code></pre>`,
+    code: ({ text, lang }) => {
+      if (lang === "ishikawa" || lang === "fishbone") {
+        try { return `<div class="diagram-wrap">${fishboneSvg(JSON.parse(text))}</div>`; } catch { /* fall through: show the source */ }
+      }
+      return `<pre class="code"><div class="code-lang">${esc(lang ?? "")}</div><code>${esc(text)}</code></pre>`;
+    },
   },
 });
 

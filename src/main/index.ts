@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, net, safeStorage, shell, Notification } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -13,7 +13,8 @@ import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
 import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
-import { loadRoles, loadSkills } from "./roles";
+import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
+import type { AgentImportResult } from "@shared/types";
 import { makeLogger } from "./log";
 import { runSmoke } from "./smoke";
 
@@ -90,6 +91,23 @@ const jazz = (): JazzClient | null => {
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, emitTask: (task) => emit({ type: "task.updated", task }) }));
 
+// ---------------- agent import ----------------
+const knownTools = () => [...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)];
+const builtinNames = () => loadRoles(join(resources, "agents"), join(dataDir, "__none__")).map((r) => r.name);
+function checkAgent(text: string, file: string): AgentImportResult {
+  const v = validateRole(text, knownTools(), builtinNames(), skills.map((k) => k.command));
+  return { file, ok: v.ok, name: v.role?.name ?? (parseRole(text, "", "user").name || null), errors: v.errors, warnings: v.warnings };
+}
+function importAgent(text: string, file: string): AgentImportResult {
+  const res = checkAgent(text, file);
+  if (!res.ok || !res.name) return res;
+  writeFileSync(join(userRolesDir, `${res.name}.md`), text.trimStart().replace(/\r\n/g, "\n"));
+  reloadRoles();
+  emit({ type: "roles.changed", roles });
+  log("info", `agent imported: ${res.name} (${file})`);
+  return res;
+}
+
 // ---------------- IPC ----------------
 const api: FlashApi = {
   listProjects: async () => db.listProjects(),
@@ -123,9 +141,44 @@ const api: FlashApi = {
   resumeAgent: async (id) => orch.resume(id),
   stopAgent: async (id) => orch.stop(id),
   stopAll: async () => orch.stopAll(),
+  getAgentFlow: async (agentId) => {
+    const agent = db.getAgent(agentId);
+    if (!agent) throw new Error("agent not found");
+    return { agent, parent: agent.parentAgentId ? db.getAgent(agent.parentAgentId) : null, children: db.childAgents(agentId), events: db.listEvents(agentId) };
+  },
   listRoles: async () => { reloadRoles(); return roles; },
   listSkills: async () => skills,
   openRolesFolder: async () => { await shell.openPath(userRolesDir); },
+  agentTemplate: async () => readFileSync(join(resources, "agents", "_template.md"), "utf8"),
+  saveAgentTemplate: async () => {
+    const r = await dialog.showSaveDialog(win!, { title: "Save agent template", defaultPath: "my-agent.md", filters: [{ name: "Agent (Markdown)", extensions: ["md"] }] });
+    if (r.canceled || !r.filePath) return null;
+    writeFileSync(r.filePath, readFileSync(join(resources, "agents", "_template.md"), "utf8"));
+    return r.filePath;
+  },
+  validateAgent: async (text) => checkAgent(text, "pasted"),
+  importAgentText: async (text, fileName) => importAgent(text, fileName ?? "pasted"),
+  importAgentFiles: async () => {
+    const r = await dialog.showOpenDialog(win!, { title: "Import agents", properties: ["openFile", "multiSelections"], filters: [{ name: "Agent (Markdown)", extensions: ["md"] }] });
+    if (r.canceled) return [];
+    return r.filePaths.map((f) => importAgent(readFileSync(f, "utf8"), basename(f)));
+  },
+  removeAgent: async (name) => {
+    const file = join(userRolesDir, `${name}.md`);
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(name) || !existsSync(file)) throw new Error("only imported/custom agents can be removed");
+    unlinkSync(file);
+    reloadRoles();
+    emit({ type: "roles.changed", roles });
+  },
+  exportAgent: async (name) => {
+    const role = roles.find((r) => r.name === name);
+    if (!role) throw new Error("unknown agent");
+    const src = role.source === "user" ? join(userRolesDir, `${name}.md`) : join(resources, "agents", `${name}.md`);
+    const r = await dialog.showSaveDialog(win!, { title: "Export agent", defaultPath: `${name}.md`, filters: [{ name: "Agent (Markdown)", extensions: ["md"] }] });
+    if (r.canceled || !r.filePath) return null;
+    writeFileSync(r.filePath, readFileSync(src, "utf8"));
+    return r.filePath;
+  },
   listTasks: async (f) => db.listTasks(f ?? {}),
   createTask: async (i) => { const t = db.createTask(i); emit({ type: "task.updated", task: t }); return t; },
   updateTask: async (id, patch) => { const t = db.updateTask(id, patch); emit({ type: "task.updated", task: t }); return t; },

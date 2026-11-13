@@ -10,7 +10,8 @@ export type View =
   | { kind: "dashboard" }
   | { kind: "tasks" }
   | { kind: "jazz" }
-  | { kind: "settings"; tab?: string };
+  | { kind: "settings"; tab?: string }
+  | { kind: "flow"; agentId: string };
 
 export interface Toast {
   id: number;
@@ -28,6 +29,8 @@ interface State {
   currentProjectId: string | null;
   messages: Record<string, Message[]>; // chatId → main-thread messages
   thread: { chatId: string; rootId: string; messages: Message[] } | null;
+  flowPanel: { chatId: string; agentId: string | null } | null;
+  openFlow(chatId: string, agentId: string | null): void;
   agents: Record<string, AgentRun>;
   tasks: Record<string, Task>;
   roles: RoleDef[];
@@ -73,6 +76,7 @@ export const useStore = create<State>((set, get) => ({
   currentProjectId: null,
   messages: {},
   thread: null,
+  flowPanel: null,
   agents: {},
   tasks: {},
   roles: [],
@@ -105,7 +109,7 @@ export const useStore = create<State>((set, get) => ({
 
   async openChat(chatId) {
     const chat = get().chatById[chatId];
-    set({ view: { kind: "chat", chatId }, thread: null, currentProjectId: chat?.projectId ?? get().currentProjectId });
+    set({ view: { kind: "chat", chatId }, thread: null, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
     set((st) => ({ messages: { ...st.messages, [chatId]: msgs } }));
@@ -113,7 +117,11 @@ export const useStore = create<State>((set, get) => ({
 
   async openThread(chatId, rootId) {
     const msgs = await api().listMessages(chatId, rootId);
-    set({ thread: { chatId, rootId, messages: msgs } });
+    set({ thread: { chatId, rootId, messages: msgs }, flowPanel: null });
+  },
+
+  openFlow(chatId, agentId) {
+    set({ flowPanel: { chatId, agentId }, thread: null });
   },
 
   closeThread() {
@@ -216,6 +224,9 @@ export const useStore = create<State>((set, get) => ({
       }
       case "mcp.status":
         set({ mcp: e.servers });
+        break;
+      case "roles.changed":
+        set({ roles: e.roles });
         break;
       case "notice":
         st.toast(e.level, e.text);

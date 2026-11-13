@@ -25,6 +25,7 @@ interface Paths {
 const PY_SERVERS = [
   { id: "vector-autosar", label: "Vector / AUTOSAR tools (DBC, ARXML, CDD, CAPL, CANoe, DaVinci)" },
   { id: "winidea", label: "winIDEA debugger (isystem.connect SDK)" },
+  { id: "office", label: "PowerPoint & diagrams (python-pptx, Ishikawa)" },
 ];
 
 export class McpBootstrap {
@@ -126,6 +127,7 @@ export class McpBootstrap {
       if (s.winidea.sdkPath) paths.push(s.winidea.sdkPath);
       Object.assign(env, { WINIDEA_PATH: s.winidea.installPath, WINIDEA_WORKSPACE: s.winidea.workspace });
     }
+    if (id === "office") env.FLASH_CLIP_CHARS = String(s.tokens.clipOutputChars);
     if (id === "vector-autosar") {
       Object.assign(env, { CANOE_PATH: s.vector.canoePath, CANOE_VERSION: s.vector.canoeVersion, DAVINCI_CLI: s.vector.davinciCliPath,
         CAPL_INCLUDE: s.vector.caplIncludePaths, FLASH_CLIP_CHARS: String(s.tokens.clipOutputChars) });

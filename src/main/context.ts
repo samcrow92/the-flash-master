@@ -98,6 +98,7 @@ export function rolePrefix(role: RoleDef, projectPath: string | null): string {
     role.prompt.trim(),
     projectPath ? `Project root: ${projectPath} — work only inside it.` : "No project folder is attached to this chat.",
     "Token discipline: read only what you need (search before reading, read ranges not whole files), never paste large files back, summarise tool output.",
+    "Progress: for multi-step work, publish a short step plan with report_progress and update it as steps complete.",
     RESULT_CONTRACT(role.maxResultTokens),
   ].join("\n\n");
 }

@@ -20,6 +20,9 @@ extraResources:
   - from: mcp-servers/pycommon
     to: mcp-servers/pycommon
     filter: ["**/*", "!**/__pycache__"]
+  - from: mcp-servers/office
+    to: mcp-servers/office
+    filter: ["**/*", "!**/__pycache__", "!**/.venv", "!**/tests"]
   - from: mcp-servers/winidea
     to: mcp-servers/winidea
     filter: ["**/*", "!**/__pycache__", "!**/.venv", "!**/tests"]

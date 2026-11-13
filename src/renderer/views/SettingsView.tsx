@@ -3,6 +3,7 @@ import type { HarnessId, HarnessStatus } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { api, useStore } from "../store";
+import { AgentImportDialog, reportImports } from "../components/AgentImport";
 
 const TABS = [
   ["general", "General"], ["harnesses", "Harnesses"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["permissions", "Permissions"],
@@ -120,6 +121,7 @@ function Harnesses(f: F) {
 
 function Agents(f: F) {
   const st = useStore();
+  const [editor, setEditor] = useState(false);
   const overrides = f.s.agents.roleOverrides;
   const setOverride = (role: string, key: string, value: unknown) =>
     f.set(`agents.roleOverrides.${role}`, { ...(overrides[role] ?? {}), [key]: value || undefined });
@@ -127,16 +129,29 @@ function Agents(f: F) {
     <Row label="Max concurrent agent turns" hint="Further turns queue until a slot is free."><Num f={f} path="agents.maxConcurrent" min={1} /></Row>
     <Row label="Delegation depth" hint="How many levels of specialists may delegate further (1 = only the coordinator delegates)."><Num f={f} path="agents.delegationDepth" min={0} /></Row>
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
-    <div className="row between"><h4>Roles</h4><button onClick={() => api().openRolesFolder()}>Open roles folder</button></div>
-    <p className="muted small">Add or override roles by placing Markdown files (with frontmatter) in the roles folder. They load on the next start or when you open this page.</p>
+    <div className="row between">
+      <h4>Agents</h4>
+      <div className="row gap">
+        <button className="primary" onClick={() => setEditor(true)}>➕ New agent from template</button>
+        <button onClick={async () => reportImports(await api().importAgentFiles(), st.toast)}>📂 Import .md…</button>
+        <button onClick={async () => { const p = await api().saveAgentTemplate(); if (p) st.toast("info", `Template saved to ${p}`); }}>⬇ Template</button>
+        <button onClick={() => api().openRolesFolder()}>Open folder</button>
+      </div>
+    </div>
+    <p className="muted small">Agents are Markdown files with a small header. Get the template, edit it yourself or ask your LLM to fill it in, then import it (or drag the file onto the window). Custom agents override built-ins with the same name.</p>
+    {editor && <AgentImportDialog onClose={() => setEditor(false)} />}
     <table className="table">
-      <thead><tr><th>Role</th><th>Harness</th><th>Model</th><th>Max result tokens</th></tr></thead>
+      <thead><tr><th>Agent</th><th>Harness</th><th>Model</th><th>Max result tokens</th><th /></tr></thead>
       <tbody>{st.roles.map((r) => <tr key={r.name}>
-        <td>{r.icon} {r.title} <span className="muted small">{r.source === "user" ? "(custom)" : ""}</span><div className="muted small">{r.description}</div></td>
+        <td>{r.icon} {r.title} {r.source === "user" && <span className="custom-tag">custom</span>} <span className="muted small">@{r.name}</span><div className="muted small">{r.description}</div></td>
         <td><select value={overrides[r.name]?.harness ?? ""} onChange={(e) => setOverride(r.name, "harness", e.target.value)}>
           <option value="">{r.harness ? `role default (${r.harness})` : "chat default"}</option>{HARNESS_IDS.map((h) => <option key={h}>{h}</option>)}</select></td>
         <td><input defaultValue={overrides[r.name]?.model ?? ""} placeholder={r.model ?? "default"} onBlur={(e) => setOverride(r.name, "model", e.target.value.trim())} /></td>
         <td><input type="number" defaultValue={overrides[r.name]?.maxResultTokens ?? r.maxResultTokens} onBlur={(e) => setOverride(r.name, "maxResultTokens", Number(e.target.value))} /></td>
+        <td className="actions">
+          <button title="Export as .md" onClick={async () => { const p = await api().exportAgent(r.name); if (p) st.toast("info", `Exported to ${p}`); }}>⬇</button>
+          {r.source === "user" && <button className="danger" title="Remove custom agent" onClick={async () => { if (confirm(`Remove agent "${r.title}"?`)) await api().removeAgent(r.name); }}>🗑</button>}
+        </td>
       </tr>)}</tbody>
     </table>
   </>;
@@ -268,6 +283,6 @@ function About() {
     <p className="muted">Desktop orchestrator for AI coding agents on locally authenticated harnesses (GitHub Copilot CLI, OpenCode, Pi, GitLab Duo).</p>
     <p className="small">Data folder: <code>{info?.dataDir}</code><br />Platform: {info?.platform}</p>
     <p className="small muted">Enterprise policy: place <code>%PROGRAMDATA%\TheFlashMaster\policy.json</code> with <code>{"{ \"settings\": {…}, \"lock\": [\"network\", …] }"}</code> to preset and lock settings.</p>
-    <p className="small muted">MIT licensed. Superpowers workflow adapted from obra/superpowers (MIT). Harness integration inspired by T3 Code (MIT).</p>
+    <p className="small muted">MIT licensed. Superpowers workflow adapted from obra/superpowers (MIT).</p>
   </div>;
 }

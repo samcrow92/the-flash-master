@@ -162,7 +162,8 @@ export class AcpSession implements HarnessSession {
         this.o.onEvent({ type: "tool", title: u.title ?? u.toolCallId ?? "tool", status: u.status ?? "pending", kind: asKind(u.kind) });
         break;
       case "plan":
-        this.o.onEvent({ type: "plan", entries: (u.entries ?? []).map((e: Json) => `${e.status === "completed" ? "✓" : "•"} ${e.content}`) });
+        this.o.onEvent({ type: "plan", entries: (u.entries ?? []).map((e: Json) => ({ title: String(e.content ?? ""),
+          status: ["pending", "in_progress", "completed", "failed"].includes(e.status) ? e.status : "pending" })) });
         break;
     }
   }

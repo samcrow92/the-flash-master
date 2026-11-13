@@ -44,6 +44,26 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`(async()=>{const st=window.flash.api;const chats=await st.listChats((await st.listProjects())[0].id);const msgs=await st.listMessages(chats[0].id,null);const a=msgs.find(m=>m.author==='agent');if(a){await st.toggleReaction(a.id,'👍');await st.toggleReaction(a.id,'🚀');}})()`);
       await sleep(600);
       await shot(join(demo, "2-chat-thread-reactions.png"));
+      await click("Progress", ".chat-controls button");
+      await sleep(900);
+      await shot(join(demo, "2b-progress-flow.png"));
+      await click("Progress", ".chat-controls button");
+      await sleep(300);
+      await send("@rca-analyst Analyse the brake light flicker in NOW format with an Ishikawa root cause analysis");
+      await sleep(1500);
+      await click("Progress", ".chat-controls button");
+      await sleep(400);
+      await shot(join(demo, "2c-progress-live.png"));
+      await click("Progress", ".chat-controls button");
+      await sleep(8000);
+      await js(`(()=>{const l=document.querySelector('.chat .messages');l.scrollTop=l.scrollHeight})()`);
+      await sleep(500);
+      await shot(join(demo, "2d-rca-ishikawa.png"));
+      await js(`[...document.querySelectorAll('.section-title button')].find(b=>b.title.startsWith('Add your own agent'))?.click()`);
+      await sleep(1200);
+      await shot(join(demo, "2e-import-agent.png"));
+      await js(`document.querySelector('.modal-back')?.click()`);
+      await sleep(300);
       await js(`(async()=>window.flash.api.createTask({ title: "Verify BrakeLightReq timing on HIL", priority: 1, assigneeRole: "tester", status: "todo", projectId: (await window.flash.api.listProjects())[0]?.id ?? null }))()`);
       await js(`(async()=>window.flash.api.createTask({ title: "Review CAPL test module for brake light", priority: 2, assigneeRole: "autosar-vector", status: "in_progress", jazzId: "48213", projectId: (await window.flash.api.listProjects())[0]?.id ?? null }))()`);
       for (const [label, name] of [["Agents", "3-agents"], ["Dashboard", "4-dashboard"], ["Tasks", "5-tasks"], ["Settings", "6-settings"]] as const) {

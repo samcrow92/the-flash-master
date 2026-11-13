@@ -47,13 +47,17 @@ export function AgentsView() {
                 <td>{pname(a.projectId)}</td>
                 <td>{a.harness}{a.harness === "duo" && <span className="warn-badge" title="GitLab Duo headless mode auto-approves its own tools">!</span>}</td>
                 <td><span className={`status st-${a.status}`}>{a.status}</span></td>
-                <td className="activity" title={a.lastActivity ?? ""}>{a.lastActivity ?? "—"}</td>
+                <td className="activity" title={a.lastActivity ?? ""}>
+                  {a.plan.length > 0 && <div className="mini-progress"><div style={{ width: `${(a.plan.filter((p) => p.status === "completed").length / a.plan.length) * 100}%` }} /></div>}
+                  {a.lastActivity ?? "—"}
+                </td>
                 <td title={a.estimated ? "estimated" : "reported"}>{fmtTokens(a.tokensIn + a.tokensOut)}{a.estimated ? "*" : ""}</td>
                 <td>{ago(a.startedAt)}</td>
                 <td className="actions">
                   {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause">⏸</button>}
                   {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume">▶</button>}
                   {["running", "paused", "idle"].includes(a.status) && <button onClick={() => api().stopAgent(a.id)} title="Stop">■</button>}
+                  <button onClick={() => st.setView({ kind: "flow", agentId: a.id })} title="Progress flow chart">🧭</button>
                   {a.chatId && <button onClick={() => st.openChat(a.chatId!)} title="Open chat">↗</button>}
                 </td>
               </tr>
