@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState } from "@shared/types";
+import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
 
 export const api = () => window.flash.api;
@@ -23,6 +23,8 @@ export interface Toast {
 
 interface State {
   ready: boolean;
+  /** The app window (custom title bar, glass material). */
+  window: WindowState | null;
   view: View;
   projects: Project[];
   chats: Record<string, Chat[]>; // projectId → chats
@@ -30,7 +32,12 @@ interface State {
   masterChatId: string | null;
   currentProjectId: string | null;
   messages: Record<string, Message[]>; // chatId → main-thread messages
-  thread: { chatId: string; rootId: string; messages: Message[] } | null;
+  /** Thread messages per root (root first, then replies), loaded on first open and kept live by events. */
+  threads: Record<string, Message[]>;
+  /** The thread shown in the side panel (or filling a pop-out thread window). */
+  sideThread: { chatId: string; rootId: string } | null;
+  /** Thread roots currently expanded inline under their message. */
+  openThreads: Record<string, boolean>;
   flowPanel: { chatId: string; agentId: string | null } | null;
   artifactsPanel: string | null; // chat id whose artifacts panel is open
   artifactsRev: Record<string, number>;
@@ -52,7 +59,11 @@ interface State {
   setView(v: View): void;
   openChat(chatId: string): Promise<void>;
   openThread(chatId: string, rootId: string): Promise<void>;
-  closeThread(): void;
+  closeThread(rootId: string): void;
+  toggleThread(chatId: string, rootId: string): void;
+  loadThread(chatId: string, rootId: string): Promise<void>;
+  openSideThread(chatId: string, rootId: string): void;
+  closeSideThread(): void;
   refreshProjects(): Promise<void>;
   refreshChats(projectId: string): Promise<void>;
   upsertChat(c: Chat): void;
@@ -86,8 +97,19 @@ const mergeLoaded = (loaded: Message[], shown: Message[] | undefined): Message[]
 const patchMsg = (list: Message[] | undefined, id: string, fn: (m: Message) => Message) =>
   list ? list.map((m) => (m.id === id ? fn(m) : m)) : list;
 
+/** Apply a patch to a message wherever it sits in the loaded threads (unchanged lists keep their identity). */
+const patchThreads = (threads: Record<string, Message[]>, id: string, fn: (m: Message) => Message) => {
+  let out = threads;
+  for (const [root, list] of Object.entries(threads)) {
+    if (!list.some((m) => m.id === id)) continue;
+    out = { ...out, [root]: list.map((m) => (m.id === id ? fn(m) : m)) };
+  }
+  return out;
+};
+
 export const useStore = create<State>((set, get) => ({
   ready: false,
+  window: null,
   view: { kind: "dashboard" },
   projects: [],
   chats: {},
@@ -95,7 +117,9 @@ export const useStore = create<State>((set, get) => ({
   masterChatId: null,
   currentProjectId: null,
   messages: {},
-  thread: null,
+  threads: {},
+  openThreads: {},
+  sideThread: null,
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
@@ -140,7 +164,7 @@ export const useStore = create<State>((set, get) => ({
 
   async openChat(chatId) {
     const chat = get().chatById[chatId];
-    set({ view: { kind: "chat", chatId }, thread: null, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
+    set({ view: { kind: "chat", chatId }, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
       artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
@@ -148,16 +172,35 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async openThread(chatId, rootId) {
+    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true } }));
+    await get().loadThread(chatId, rootId);
+  },
+
+  async loadThread(chatId, rootId) {
     const msgs = await api().listMessages(chatId, rootId);
-    set((st) => ({ thread: { chatId, rootId, messages: mergeLoaded(msgs, st.thread?.rootId === rootId ? st.thread.messages : undefined) }, flowPanel: null, artifactsPanel: null }));
+    set((st) => ({ threads: { ...st.threads, [rootId]: mergeLoaded(msgs, st.threads[rootId]) } }));
+  },
+
+  openSideThread(chatId, rootId) {
+    set((st) => ({ sideThread: { chatId, rootId }, flowPanel: null, artifactsPanel: null, openThreads: { ...st.openThreads, [rootId]: false } }));
+    void get().loadThread(chatId, rootId);
+  },
+
+  closeSideThread() {
+    set({ sideThread: null });
   },
 
   openFlow(chatId, agentId) {
-    set({ flowPanel: { chatId, agentId }, thread: null, artifactsPanel: null });
+    set({ flowPanel: { chatId, agentId }, artifactsPanel: null, sideThread: null });
   },
 
-  closeThread() {
-    set({ thread: null });
+  closeThread(rootId) {
+    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: false } }));
+  },
+
+  toggleThread(chatId, rootId) {
+    if (get().openThreads[rootId]) get().closeThread(rootId);
+    else void get().openThread(chatId, rootId);
   },
 
   async refreshProjects() {
@@ -213,7 +256,7 @@ export const useStore = create<State>((set, get) => ({
           const root = m.parentId;
           set({
             messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], root, (r) => ({ ...r, replyCount: r.replyCount + 1 })) ?? [] },
-            thread: st.thread && st.thread.rootId === root ? { ...st.thread, messages: upsertMsg(st.thread.messages, m) } : st.thread,
+            threads: st.threads[root] ? { ...st.threads, [root]: upsertMsg(st.threads[root], m) } : st.threads,
           });
         }
         break;
@@ -222,7 +265,7 @@ export const useStore = create<State>((set, get) => ({
         const add = (m: Message) => ({ ...m, content: m.content + e.delta });
         set({
           messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, add) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, add)! } : null,
+          threads: patchThreads(st.threads, e.messageId, add),
         });
         break;
       }
@@ -230,7 +273,7 @@ export const useStore = create<State>((set, get) => ({
         const add = (m: Message) => ({ ...m, tools: e.tools });
         set({
           messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, add) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, add)! } : null,
+          threads: patchThreads(st.threads, e.messageId, add),
         });
         break;
       }
@@ -239,7 +282,7 @@ export const useStore = create<State>((set, get) => ({
         const keep = (old: Message) => ({ ...m, replyCount: Math.max(old.replyCount, m.replyCount) });
         set({
           messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], m.id, keep) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, m.id, keep)! } : null,
+          threads: patchThreads(st.threads, m.id, keep),
         });
         break;
       }
@@ -247,7 +290,7 @@ export const useStore = create<State>((set, get) => ({
         const r = (m: Message) => ({ ...m, reactions: e.reactions });
         set({
           messages: { ...st.messages, [e.chatId]: patchMsg(st.messages[e.chatId], e.messageId, r) ?? [] },
-          thread: st.thread ? { ...st.thread, messages: patchMsg(st.thread.messages, e.messageId, r)! } : null,
+          threads: patchThreads(st.threads, e.messageId, r),
         });
         break;
       }
@@ -283,12 +326,25 @@ export const useStore = create<State>((set, get) => ({
       case "plugins.changed":
         void api().listSkills().then((skills) => set({ skills }));
         break;
+      case "window.state":
+        set({ window: e.state });
+        applyWindow(e.state);
+        break;
       case "notice":
         st.toast(e.level, e.text);
         break;
     }
   },
 }));
+
+/** Root attributes the glass styles key off: platform, native material, focus (dims the chrome like macOS), maximised. */
+export function applyWindow(w: WindowState): void {
+  const d = document.documentElement.dataset;
+  d.platform = w.platform;
+  d.material = w.material;
+  d.focused = String(w.focused);
+  d.maximized = String(w.maximized || w.fullscreen);
+}
 
 let currentTheme: "dark" | "light" | "system" = "dark";
 export function applyTheme(theme: "dark" | "light" | "system"): void {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SquareKanban as SquareKanbanIcon } from "../components/icons";
+import { Pin, Plus, RoleIcon, SquareKanban as SquareKanbanIcon } from "../components/icons";
 import type { Task, TaskStatus } from "@shared/types";
 import { TASK_STATUSES } from "@shared/types";
 import { api, ago, roleOf, useStore } from "../store";
@@ -33,7 +33,7 @@ export function TasksView() {
             <option value="none">No project</option>
             {st.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <button className="primary" onClick={create}>＋ New task</button>
+          <button className="primary" onClick={create}><Plus size={15} /> New task</button>
         </div>
       </header>
       <div className="kanban">
@@ -47,8 +47,8 @@ export function TasksView() {
                 <div className="row between"><span className={`prio p${t.priority}`}>{PRIO[t.priority]}</span><span className="muted small">{ago(t.updatedAt)}</span></div>
                 <div className="task-title">{t.title}</div>
                 <div className="row gap-s wrap small">
-                  {t.assigneeRole && <span className="chip">{roleOf(t.assigneeRole)?.icon} {roleOf(t.assigneeRole)?.title ?? t.assigneeRole}</span>}
-                  {t.jazzId && <span className="chip">📌 {t.jazzId}</span>}
+                  {t.assigneeRole && <span className="chip row gap-s"><RoleIcon role={t.assigneeRole} size={14} /> {roleOf(t.assigneeRole)?.title ?? t.assigneeRole}</span>}
+                  {t.jazzId && <span className="chip"><Pin size={11} /> {t.jazzId}</span>}
                   {t.agentId && st.agents[t.agentId] && <span className={`status st-${st.agents[t.agentId]!.status}`}>{st.agents[t.agentId]!.status}</span>}
                 </div>
               </div>
@@ -89,7 +89,7 @@ function TaskEditor({ task, onClose }: { task: Task; onClose: () => void }) {
           </label>
           <label className="field"><span>Assignee (agent)</span>
             <select value={t.assigneeRole ?? ""} onChange={(e) => setT({ ...t, assigneeRole: e.target.value || null })}>
-              <option value="">—</option>{st.roles.map((r) => <option key={r.name} value={r.name}>{r.icon} {r.title}</option>)}
+              <option value="">—</option>{st.roles.map((r) => <option key={r.name} value={r.name}>{r.title}</option>)}
             </select>
           </label>
           <label className="field"><span>Project</span>

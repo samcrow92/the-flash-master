@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- **Threads open inline, in the same chat.** Replies unfold under their message; the side panel and a pop-out window are one click away.
+  - **The thread pill** under a message shows who replied, how many replies and when the last one came. Click it to expand or collapse; the chevron flips.
+  - **Opening and closing animate:** the card grows smoothly, the replies fade in one after another, and collapsing plays it back.
+  - **Layout:** a frosted card with a header (reply count, collapse button), smaller reply avatars joined by a thin line, and its own reply box.
+  - **Reply** on any message opens its thread (empty or not) and focuses the reply box. Several threads can be open at once, and they stay live while agents answer.
+  - **Side panel and new window:** the thread card's header has **Open in side panel**, which is the classic thread column next to the chat, and **Open in new window**, which pops the thread out into its own window. The side panel can pop out too. Pop-out windows stay live, you can reply from them, and they close with the main window.
+- **New look: macOS style with liquid glass.**
+  - **No more Windows title bar:** the window is frameless with macOS traffic lights (close, minimise, zoom). Drag the top strip to move the window; double-click it (or press F11) to maximise. Windows Snap, resizing and the window shadow still work.
+  - **Glass panels:** the sidebar and content float as translucent, blurred panels. On Windows 11 the desktop shows through, blurred (acrylic). Turn it off in Settings → General → Translucent window if the window feels slow.
+  - **Icons instead of emoji:** thin line icons everywhere; agents get iOS-style glass tiles. Reactions are drawn as icons and each has its own animation (thumbs up tilts, heart beats, rocket launches…).
+  - **Fun loading indicator:** 3, 4 or 5 glowing dots that hop, swap, orbit, fold, wave, bounce like an equalizer or zip like a comet, and change pattern while an agent works.
 - **New specialist: EXAM Test Agent** (`@exam-test-agent`). It's an expert in EXAM, the UML-based HiL/SiL test automation from MicroNova used across the VW Group.
   - **What it does:** designs test cases from requirements (DOORS Next / Jazz, or attached specs), creates them in EXAM, runs suites on a system configuration and summarises failures.
   - **Creating test cases:** it uses the Test Case Generator (keyword test descriptions), or Groovy scripts run inside EXAM. The Groovy model API isn't public, so the agent first explores it with read-only scripts.

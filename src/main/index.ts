@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { FlashApi } from "@shared/api";
-import type { AppEvent, RoleDef, SkillDef } from "@shared/types";
+import type { AppEvent, RoleDef, SkillDef, WindowState } from "@shared/types";
 import { Db } from "./db";
 import { SettingsStore } from "./settings-store";
 import { HarnessRegistry } from "./harness/registry";
@@ -96,8 +96,10 @@ function createRole(spec: AgentSpec, createdBy: string, keep: boolean): RoleDef 
 }
 
 let win: BrowserWindow | null = null;
+/** Threads popped out into their own windows, keyed by root message id; they get every app event like the main window. */
+const threadWins = new Map<string, BrowserWindow>();
 const emit = (e: AppEvent) => {
-  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("flash:event", e);
+  for (const w of [win, ...threadWins.values()]) if (w && !w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send("flash:event", e);
   if (e.type === "notice" && e.level !== "info" && settings.get().general.notifications && !win?.isFocused() && Notification.isSupported()) {
     new Notification({ title: "TheFlashMaster", body: e.text }).show();
   }
@@ -544,6 +546,7 @@ const api: FlashApi = {
     if (!ok || !existsSync(path)) throw new Error("attachment not found");
     await shell.openPath(path);
   },
+  openThreadWindow: async (chatId, rootId) => openThreadWindow(chatId, rootId),
   toggleReaction: async (messageId, emoji) => {
     const reactions = db.toggleReaction(messageId, emoji);
     const m = db.getMessage(messageId);
@@ -761,6 +764,13 @@ const api: FlashApi = {
   updateSignIn: async () => updateSignIn(),
   updateSetToken: async (token) => { await secrets.set(updateSecret, token.trim()); settings.update({ updates: { hasToken: !!token.trim() } }); void updater.check(); },
   appInfo: async () => ({ version: app.getVersion(), dataDir, platform: `${process.platform}-${process.arch}` }),
+  windowState: async () => windowState(),
+  windowControl: async (action) => {
+    if (!win || win.isDestroyed()) return;
+    if (action === "minimize") win.minimize();
+    else if (action === "maximize") { if (win.isFullScreen()) win.setFullScreen(false); else if (win.isMaximized()) win.unmaximize(); else win.maximize(); }
+    else if (action === "close") win.close();
+  },
 };
 
 for (const [name, fn] of Object.entries(api)) {
@@ -768,14 +778,46 @@ for (const [name, fn] of Object.entries(api)) {
 }
 
 // ---------------- window & lifecycle ----------------
+/**
+ * Native blur behind the window ("liquid glass"): acrylic on Windows 11 22H2+ (build 22621), vibrancy on macOS.
+ * Older Windows and Linux get an opaque window; the renderer then paints its own backdrop under the glass panels.
+ */
+function windowMaterial(): WindowState["material"] {
+  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) return "none";
+  if (process.platform === "darwin") return "vibrancy";
+  if (process.platform === "win32") {
+    const build = Number(process.getSystemVersion().split(".")[2] ?? 0);
+    return build >= 22621 ? "acrylic" : "none";
+  }
+  return "none";
+}
+let material: WindowState["material"] = "none";
+function windowState(): WindowState {
+  const w = win && !win.isDestroyed() ? win : null;
+  return { maximized: !!w?.isMaximized(), focused: !!w?.isFocused(), fullscreen: !!w?.isFullScreen(), platform: process.platform, material };
+}
+
 function createWindow(): void {
+  material = windowMaterial();
   win = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 1000, minHeight: 640, title: "TheFlashMaster", backgroundColor: "#0f1115", show: false,
+    width: 1440, height: 900, minWidth: 1000, minHeight: 640, title: "TheFlashMaster", show: false,
+    backgroundColor: material === "none" ? "#0f1115" : "#00000000",
+    // Frameless: the app draws its own macOS-style title bar (traffic lights). "hidden" keeps the native frame for
+    // resizing, Snap layouts, the shadow and rounded corners on Windows 11; macOS keeps its own traffic lights.
+    titleBarStyle: "hidden",
+    roundedCorners: true, // Windows 11 rounds frameless windows natively (DWM); older Windows can't.
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 18, y: 14 } } : {}),
+    ...(material === "acrylic" ? { backgroundMaterial: "acrylic" as const } : {}),
+    ...(material === "vibrancy" ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
     autoHideMenuBar: true,
     icon: appIcon,
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
+  const pushState = () => emit({ type: "window.state", state: windowState() });
+  win.on("maximize", pushState).on("unmaximize", pushState).on("restore", pushState).on("focus", pushState).on("blur", pushState)
+    .on("enter-full-screen", pushState).on("leave-full-screen", pushState);
   win.once("ready-to-show", () => win?.show());
+  win.on("closed", () => { for (const w of threadWins.values()) if (!w.isDestroyed()) w.close(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
   if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) win.webContents.once("did-finish-load", () => void runSmoke(win!, log));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
@@ -783,6 +825,25 @@ function createWindow(): void {
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(here, "../renderer/index.html"));
+}
+
+/** A thread in its own window: same renderer, started on `#thread/<chat>/<root>`, which shows only that thread. */
+function openThreadWindow(chatId: string, rootId: string): void {
+  const open = threadWins.get(rootId);
+  if (open && !open.isDestroyed()) { if (open.isMinimized()) open.restore(); open.focus(); return; }
+  const w = new BrowserWindow({
+    width: 560, height: 820, minWidth: 380, minHeight: 420, title: "Thread — TheFlashMaster", backgroundColor: "#0f1115", show: false,
+    autoHideMenuBar: true, icon: appIcon,
+    webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  threadWins.set(rootId, w);
+  w.on("closed", () => threadWins.delete(rootId));
+  w.once("ready-to-show", () => w.show());
+  w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
+  w.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
+  const hash = `thread/${encodeURIComponent(chatId)}/${encodeURIComponent(rootId)}`;
+  if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
+  else void w.loadFile(join(here, "../renderer/index.html"), { hash });
 }
 
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Puzzle as PuzzleIcon } from "../components/icons";
+import { CircleAlert, CircleArrowUp, CircleCheck, Puzzle as PuzzleIcon, RefreshCw, Settings } from "../components/icons";
 import type { InstalledPlugin, MarketplaceListing, PluginEntry, PluginKind } from "@shared/types";
 import { api, useStore } from "../store";
 
 type State = Awaited<ReturnType<ReturnType<typeof api>["marketplaceList"]>>;
-const KIND_LABEL: Record<PluginKind, string> = { agent: "🤖 Agents", workflow: "🔁 Workflows", instructions: "📜 Instructions", mcp: "🔌 Tools (MCP)" };
+const KIND_LABEL: Record<PluginKind, string> = { agent: "Agents", workflow: "Workflows", instructions: "Instructions", mcp: "Tools (MCP)" };
 
 export function MarketplaceView() {
   const st = useStore();
@@ -65,10 +65,10 @@ export function MarketplaceView() {
         <h2><PuzzleIcon size={20} className="h-icon" /> Marketplace</h2>
         <div className="row gap">
           {(data?.updates.length ?? 0) > 0 && (
-            <button className="primary" disabled={!!busy} onClick={() => act("update-all", () => api().marketplaceUpdateAll(), "Plugins updated")}>⬆ Update all ({data!.updates.length})</button>
+            <button className="primary" disabled={!!busy} onClick={() => act("update-all", () => api().marketplaceUpdateAll(), "Plugins updated")}><CircleArrowUp size={15} /> Update all ({data!.updates.length})</button>
           )}
-          <button disabled={!!busy} onClick={() => load(true)}>{busy === "refresh" ? "Refreshing…" : "↻ Refresh"}</button>
-          <button onClick={() => st.setView({ kind: "settings", tab: "marketplace" })}>⚙ Marketplaces</button>
+          <button disabled={!!busy} onClick={() => load(true)}><RefreshCw size={14} className={busy === "refresh" ? "spin" : ""} /> {busy === "refresh" ? "Refreshing…" : "Refresh"}</button>
+          <button onClick={() => st.setView({ kind: "settings", tab: "marketplace" })}><Settings size={14} /> Marketplaces</button>
         </div>
       </header>
 
@@ -78,7 +78,7 @@ export function MarketplaceView() {
           {sources.filter((s) => s.enabled).map((s) => {
             const l = data?.listings.find((x) => x.sourceId === s.id);
             return <button key={s.id} className={tab === s.id ? "on" : ""} onClick={() => setTab(s.id)} title={l?.error ?? s.url}>
-              {s.department ? `${s.department} · ` : ""}{s.name}{l?.error ? " ⚠" : ` (${l?.plugins.length ?? "…"})`}</button>;
+              {s.department ? `${s.department} · ` : ""}{s.name}{l?.error ? <CircleAlert size={12} className="warn-text" /> : ` (${l?.plugins.length ?? "…"})`}</button>;
           })}
           <button className={tab === "installed" ? "on" : ""} onClick={() => setTab("installed")}>Installed ({data?.installed.length ?? 0})</button>
         </div>
@@ -90,7 +90,7 @@ export function MarketplaceView() {
       </div>
 
       {data?.listings.filter((l) => l.error && (tab === "all" || tab === l.sourceId)).map((l) => (
-        <div key={l.sourceId} className="warn-note">⚠ {l.sourceName} ({l.url}) is unreachable: {l.error}</div>
+        <div key={l.sourceId} className="warn-note row gap-s"><CircleAlert size={14} /> {l.sourceName} ({l.url}) is unreachable: {l.error}</div>
       ))}
 
       <div className="mp-layout">
@@ -107,8 +107,8 @@ export function MarketplaceView() {
                 <div className="row gap-s wrap">{entry.kinds.map((k) => <span key={k} className="chip">{KIND_LABEL[k] ?? k}</span>)}{entry.tags.slice(0, 4).map((t) => <span key={t} className="chip muted">#{t}</span>)}</div>
                 <div className="row gap-s mp-actions" onClick={(e) => e.stopPropagation()}>
                   {!inst && <button className="primary" disabled={!!busy} onClick={() => act(entry.id, () => api().marketplaceInstall(listing.sourceId, entry.id), `Installed ${entry.name}`)}>{busy === entry.id ? "Installing…" : "Install"}</button>}
-                  {inst && up && <button className="primary" disabled={!!busy} onClick={() => act(entry.id, () => api().marketplaceInstall(listing.sourceId, entry.id), `Updated ${entry.name} to ${up.to}`)}>⬆ Update to {up.to}</button>}
-                  {inst && !up && <span className="pill green">✓ Installed {inst.version}</span>}
+                  {inst && up && <button className="primary" disabled={!!busy} onClick={() => act(entry.id, () => api().marketplaceInstall(listing.sourceId, entry.id), `Updated ${entry.name} to ${up.to}`)}><CircleArrowUp size={14} /> Update to {up.to}</button>}
+                  {inst && !up && <span className="pill green"><CircleCheck size={12} /> Installed {inst.version}</span>}
                   {inst && <button className="ghost danger" disabled={!!busy} onClick={() => confirm(`Uninstall ${entry.name}? Its agents, workflows and instructions are removed.`) && act(entry.id, () => api().marketplaceUninstall(entry.id), `Uninstalled ${entry.name}`)}>Uninstall</button>}
                 </div>
               </div>
@@ -127,7 +127,7 @@ function InstalledCard({ p, busy, onUninstall }: { p: InstalledPlugin; busy: boo
     <div className="mp-card">
       <div className="row between"><strong>{p.name}</strong><span className="muted small">v{p.version}</span></div>
       <div className="muted small">{p.team} · from {p.sourceName} (not listed right now)</div>
-      <div className="row gap-s mp-actions"><span className="pill green">✓ Installed</span><button className="ghost danger" disabled={busy} onClick={onUninstall}>Uninstall</button></div>
+      <div className="row gap-s mp-actions"><span className="pill green"><CircleCheck size={12} /> Installed</span><button className="ghost danger" disabled={busy} onClick={onUninstall}>Uninstall</button></div>
     </div>
   );
 }

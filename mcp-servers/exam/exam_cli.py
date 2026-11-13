@@ -19,6 +19,10 @@ from server import S  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
+    # Results contain non-ASCII text (→, —, names); a Windows console defaults to cp1252 and would crash on print.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     if not argv or argv[0] in ("-h", "--help", "list"):
         for name, (_, meta) in S.tools.items():
             props = ", ".join(meta["inputSchema"].get("properties", {}).keys())
@@ -39,4 +43,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # Windows consoles/pipes default to cp1252, which can't print tool texts with "→" etc.: always write UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))
