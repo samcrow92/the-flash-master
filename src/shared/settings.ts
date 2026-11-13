@@ -112,6 +112,21 @@ export interface Settings {
     workspace: string;
     sdkPath: string;
   };
+  /** EXAM test automation (MicroNova / VW Group), reached through the EXAM RESTapi plugin. */
+  exam: {
+    installPath: string; // folder containing EXAM.exe (only needed to start EXAM from the app)
+    restPort: number; // RESTapi port (Jenkins plugin default 8085)
+    licenseHost: string;
+    licensePort: number;
+    modelName: string; // default model on the EXAM application server
+    targetEndpoint: string; // URL of the EXAM application server
+    modelConfigUuid: string; // ModelConfiguration UUID (EXAM 4.6+ with versioning)
+    systemConfig: string; // default system configuration (UUID, ID or full scoped name)
+    reportProject: string; // report project name ("" = no report DB)
+    pythonPath: string; // Python EXAM uses for test execution ("" = EXAM's own setting)
+    workspace: string; // EXAM workspace folder for headless runs ("" = temp folder)
+    javaOpts: string;
+  };
   vector: {
     canoePath: string;
     canoeVersion: string;
@@ -185,6 +200,8 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   marketplace: { sources: [], autoCheckUpdates: true, allowMcpServers: false },
   winidea: { installPath: "", workspace: "", sdkPath: "" },
+  exam: { installPath: "", restPort: 8085, licenseHost: "", licensePort: 5053, modelName: "", targetEndpoint: "", modelConfigUuid: "",
+    systemConfig: "", reportProject: "", pythonPath: "", workspace: "", javaOpts: "" },
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
   data: { retentionDays: 0 },

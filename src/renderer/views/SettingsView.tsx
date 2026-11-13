@@ -626,6 +626,21 @@ function Integrations(f: F) {
     <Row label="Workspace (.xjrf)"><Text f={f} path="winidea.workspace" /></Row>
     <Row label="Python SDK path" hint="Folder containing isystem/connect.py if the SDK is not pip-installed."><Text f={f} path="winidea.sdkPath" /></Row>
 
+    <h4>EXAM test automation (MicroNova)</h4>
+    <p className="muted">Used by the EXAM Test Agent through the EXAM RESTapi plugin. Model fields are defaults the agent can override per request.</p>
+    <Row label="Install folder" hint="Folder containing EXAM.exe. Only needed if the agent should start EXAM itself."><Text f={f} path="exam.installPath" /></Row>
+    <Row label="RESTapi port" hint="Port of the EXAM RESTapi plugin (default 8085)."><Num f={f} path="exam.restPort" min={1} /></Row>
+    <Row label="License server host"><Text f={f} path="exam.licenseHost" /></Row>
+    <Row label="License server port"><Num f={f} path="exam.licensePort" min={0} /></Row>
+    <Row label="Application server URL" hint="Target endpoint of the EXAM application server holding the models."><Text f={f} path="exam.targetEndpoint" /></Row>
+    <Row label="Default model"><Text f={f} path="exam.modelName" /></Row>
+    <Row label="Model configuration UUID" hint="EXAM 4.6+ with versioning; blank otherwise."><Text f={f} path="exam.modelConfigUuid" /></Row>
+    <Row label="Default system configuration" hint="UUID, ID or full scoped name."><Text f={f} path="exam.systemConfig" /></Row>
+    <Row label="Report project" hint="Blank = run without a report database."><Text f={f} path="exam.reportProject" /></Row>
+    <Row label="Python for test execution" hint="Blank = EXAM's own setting."><Text f={f} path="exam.pythonPath" /></Row>
+    <Row label="Workspace folder" hint="EXAM workspace for headless runs; blank = a temp folder."><Text f={f} path="exam.workspace" /></Row>
+    <Row label="Extra Java options"><Text f={f} path="exam.javaOpts" placeholder="-Xmx4g" /></Row>
+
     <h4>Vector toolchain</h4>
     <Row label="CANoe install path"><Text f={f} path="vector.canoePath" /></Row>
     <Row label="CANoe version"><Text f={f} path="vector.canoeVersion" placeholder="e.g. 17 SP3" /></Row>

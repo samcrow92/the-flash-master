@@ -38,7 +38,7 @@ export const MCP_CATALOG: CatalogServer[] = [
     id: "markitdown", label: "MarkItDown — read Office & PDF documents",
     description: "Converts Word, Excel, PowerPoint, PDF, HTML and more to Markdown so agents can read specifications, requirements and reports.",
     runtime: "pip", package: "markitdown-mcp", module: "markitdown_mcp",
-    roles: ["analyst", "jazz-analyst", "rca-analyst", "presentation-expert", "autosar-vector", "reviewer", "architect"], defaultEnabled: true,
+    roles: ["analyst", "jazz-analyst", "rca-analyst", "presentation-expert", "autosar-vector", "exam-test-agent", "reviewer", "architect"], defaultEnabled: true,
     homepage: "https://github.com/microsoft/markitdown",
   },
   {

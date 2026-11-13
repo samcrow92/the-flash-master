@@ -28,6 +28,9 @@ extraResources:
   - from: mcp-servers/winidea
     to: mcp-servers/winidea
     filter: ["**/*", "!**/__pycache__", "!**/.venv", "!**/tests"]
+  - from: mcp-servers/exam
+    to: mcp-servers/exam
+    filter: ["**/*", "!**/__pycache__", "!**/.venv", "!**/tests"]
 asar: true
 asarUnpack:
   - out/main/mcp-*.mjs

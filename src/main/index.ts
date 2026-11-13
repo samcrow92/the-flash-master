@@ -118,6 +118,7 @@ const orch = new Orchestrator({
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   extraRules: () => marketplace.instructions(),
   harnessEnv: (h) => harnessEnv(h),
+  roleEnv: (role) => mcp.roleEnv(role),
   toolsLoaded: (agentId) => bridge.toolsListed.has(agentId),
   createRole,
   // Text-mode tools for agents without MCP (Pi, or MCP blocked): the same handlers the MCP forwarder reaches.

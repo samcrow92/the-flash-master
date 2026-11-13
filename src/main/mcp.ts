@@ -1,7 +1,7 @@
 /**
  * McpBootstrap — makes sure the custom tool servers exist at startup and builds the per-session MCP list.
  *  - bundled-node   : flashmaster-core, jazz (shipped JS, run with Electron-as-Node: no Node install needed)
- *  - bundled-python : vector-autosar, winidea (copied to app data; private venv created and requirements installed once)
+ *  - bundled-python : vector-autosar, winidea, office, exam (copied to app data; private venv created and requirements installed once)
  *  - catalog        : recommended servers (Context7, MarkItDown, …) installed once into app data, attached per role
  *  - external       : user-defined servers from Settings → MCP
  * Servers are attached per ACP session (session/new mcpServers), so the user's global harness configs stay untouched.
@@ -29,6 +29,7 @@ const PY_SERVERS = [
   { id: "vector-autosar", label: "Vector / AUTOSAR tools (DBC, ARXML, CDD, CAPL, CANoe, DaVinci)" },
   { id: "winidea", label: "winIDEA debugger (isystem.connect SDK)" },
   { id: "office", label: "PowerPoint & diagrams (python-pptx, Ishikawa)" },
+  { id: "exam", label: "EXAM test automation (EXAM RESTapi: runs, Test Case Generator, Groovy)" },
 ];
 
 export class McpBootstrap {
@@ -244,12 +245,33 @@ export class McpBootstrap {
       Object.assign(env, { WINIDEA_PATH: s.winidea.installPath, WINIDEA_WORKSPACE: s.winidea.workspace });
     }
     if (id === "office") env.FLASH_CLIP_CHARS = String(s.tokens.clipOutputChars);
+    if (id === "exam") Object.assign(env, this.examEnv(), { FLASH_CLIP_CHARS: String(s.tokens.clipOutputChars) });
     if (id === "vector-autosar") {
       Object.assign(env, { CANOE_PATH: s.vector.canoePath, CANOE_VERSION: s.vector.canoeVersion, DAVINCI_CLI: s.vector.davinciCliPath,
         CAPL_INCLUDE: s.vector.caplIncludePaths, FLASH_CLIP_CHARS: String(s.tokens.clipOutputChars) });
     }
     env.PYTHONPATH = paths.join(sep);
     return env;
+  }
+
+  /** EXAM settings as the environment the exam tools read (MCP server and exam_cli.py alike). */
+  private examEnv(): Record<string, string> {
+    const e = this.settings().exam;
+    return { EXAM_HOME: e.installPath, EXAM_REST_PORT: String(e.restPort || 8085), EXAM_LICENSE_HOST: e.licenseHost,
+      EXAM_LICENSE_PORT: String(e.licensePort || ""), EXAM_MODEL: e.modelName, EXAM_TARGET_ENDPOINT: e.targetEndpoint,
+      EXAM_MODEL_CONFIG: e.modelConfigUuid, EXAM_SYSTEM_CONFIG: e.systemConfig, EXAM_REPORT_PROJECT: e.reportProject,
+      EXAM_PYTHON: e.pythonPath, EXAM_WORKSPACE: e.workspace, EXAM_JAVA_OPTS: e.javaOpts, EXAM_NOTES: join(this.p.dataDir, "exam-notes.md") };
+  }
+
+  /**
+   * Environment for the harness process of a role, so its agent can call bundled Python tools from a shell when MCP
+   * is blocked (text mode): FLASH_PYTHON runs the private venv, FLASH_EXAM_CLI is the EXAM tool command line.
+   */
+  roleEnv(role: RoleDef): Record<string, string> {
+    if (!role.tools.includes("exam")) return {};
+    const root = join(this.p.dataDir, "mcp");
+    const vpy = venvPython(join(root, ".venv"));
+    return { FLASH_PYTHON: existsSync(vpy) ? vpy : (this.python ?? "python"), FLASH_EXAM_CLI: join(root, "exam", "exam_cli.py"), ...this.examEnv() };
   }
 
   private isInstalled(id: string): boolean {

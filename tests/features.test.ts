@@ -15,7 +15,7 @@ import { DEFAULT_SETTINGS, mergeSettings, type Settings } from "../src/shared/se
 import type { AppEvent } from "../src/shared/types";
 
 const AGENTS = join(__dirname, "..", "agents");
-const TOOLS = ["flashmaster-core", "jazz", "office", "vector-autosar", "winidea"];
+const TOOLS = ["flashmaster-core", "jazz", "office", "vector-autosar", "winidea", "exam"];
 const until = async (fn: () => boolean, ms = 6000) => {
   const t = Date.now();
   while (!fn()) { if (Date.now() - t > ms) throw new Error("timeout"); await new Promise((r) => setTimeout(r, 10)); }

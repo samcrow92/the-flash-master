@@ -1,0 +1,1 @@
+# No third-party packages: the exam tools only use the Python standard library (urllib) to reach the EXAM RESTapi.

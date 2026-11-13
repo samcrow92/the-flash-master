@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **New specialist: EXAM Test Agent** (`@exam-test-agent`). It's an expert in EXAM, the UML-based HiL/SiL test automation from MicroNova used across the VW Group.
+  - **What it does:** designs test cases from requirements (DOORS Next / Jazz, or attached specs), creates them in EXAM, runs suites on a system configuration and summarises failures.
+  - **Creating test cases:** it uses the Test Case Generator (keyword test descriptions), or Groovy scripts run inside EXAM. The Groovy model API isn't public, so the agent first explores it with read-only scripts.
+  - **What it remembers:** it saves verified facts about your EXAM setup to `exam-notes.md` in the app data folder, so later sessions don't have to find them again.
+  - **New `exam` tool server (Python, no extra packages):** reaches the EXAM RESTapi plugin, using the same endpoints as MicroNova's Jenkins plugin. It can check status, start EXAM headless, load models, filter, run, wait, stop, convert reports to JUnit, give a compact results summary, generate test cases and run Groovy scripts.
+  - **Without MCP:** the same tools are available from a command line. The agent's CLI gets `FLASH_PYTHON` and `FLASH_EXAM_CLI`, so it works in text mode where MCP is blocked.
+  - **Settings → Integrations → EXAM:** install folder, RESTapi port, license server, application server URL, and default model, configuration, system configuration and report project.
 - **Click a command to see its output.** Every command or tool call an agent runs appears above its reply as a compact row: icon by kind (command, read, edit, search, web…), title, live spinner / ✓ / ✗ and duration.
   - **Expanding:** click a row to see the command line or arguments and its output, each with Copy. The output updates live while the command runs.
   - **Sources:** Copilot and OpenCode (ACP raw input, content and raw output), Pi (arguments, partial and final result) and text-mode `TOOL` calls.

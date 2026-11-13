@@ -25,6 +25,8 @@ import {
 export interface OrchestratorDeps {
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
   harnessEnv?: (harness: HarnessId) => Record<string, string>;
+  /** Extra environment per role (e.g. FLASH_EXAM_CLI for agents that call bundled tools from a shell). */
+  roleEnv?: (role: RoleDef) => Record<string, string>;
   /** Save a role an agent defined at run time (create_agent / AGENT block). keep=false: until the app restarts. */
   createRole?: (spec: AgentSpec, createdBy: string, keep: boolean) => RoleDef;
   listTools?: (set: string) => ToolInfo[];
@@ -618,7 +620,7 @@ export class Orchestrator {
       extraArgs: [ins.args.join(" "), hs?.args ?? ""].filter(Boolean).join(" "),
       executable: status?.path ?? (hs?.path || null),
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
-      env: { ...networkEnv(s), ...ins.env, ...(this.d.harnessEnv?.(live.harness) ?? {}) },
+      env: { ...networkEnv(s), ...ins.env, ...(this.d.harnessEnv?.(live.harness) ?? {}), ...(this.d.roleEnv?.(live.role) ?? {}) },
       resumeSessionId: this.d.db.getAgentSession(live.agentId),
       policy: {
         approval: s.permissions.approval, readOnly: s.permissions.readOnly, projectRoot: projectPath,

@@ -4,7 +4,7 @@
  */
 import type { CSSProperties } from "react";
 import {
-  Bot, Building2, Car, ClipboardList, CodeXml, FlaskConical, Fish, ListChecks, Presentation, ScanSearch, Swords, Bug, Zap,
+  Bot, Building2, Car, ClipboardList, ClipboardCheck, CodeXml, FlaskConical, Fish, ListChecks, Presentation, ScanSearch, Swords, Bug, Zap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -23,6 +23,7 @@ const ROLE_ICONS: Record<string, { icon: LucideIcon; hue: number }> = {
   "software-expert": { icon: CodeXml, hue: 145 },
   tester: { icon: FlaskConical, hue: 90 },
   "winidea-debugger": { icon: Bug, hue: 38 },
+  "exam-test-agent": { icon: ClipboardCheck, hue: 120 },
 };
 
 /** Role avatar: gradient badge with a line icon (built-in roles) or the role's emoji (custom roles). */
