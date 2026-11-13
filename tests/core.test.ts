@@ -189,8 +189,8 @@ describe("Jazz client", () => {
         return { status: 200, ok: true, url: finalUrl, headers: { get: (n: string) => h.get(n.toLowerCase()) ?? null }, text: async () => xml };
       };
     };
-    const cfg = { serverUrl: "https://j/ccm", projectArea: "", authType: "form" as const, username: "u", password: "right" };
-    expect(await new JazzClient(cfg, server("right")).test()).toEqual({ ok: true, detail: "Connected" });
+    const cfg = { serverUrl: "https://j/ccm", projectAreas: [], authType: "form" as const, username: "u", password: "right" };
+    expect(await new JazzClient(cfg, server("right")).test()).toEqual({ ok: true, detail: "Connected as u" });
     const bad = await new JazzClient(cfg, server("other")).test();
     expect(bad.ok).toBe(false);
     expect(bad.detail).toMatch(/login failed/);
@@ -206,13 +206,13 @@ describe("Jazz client", () => {
       if (url.endsWith("/authenticated/identity") && !loggedIn) headers.set("x-com-ibm-team-repository-web-auth-msg", "authrequired");
       return { status: 200, ok: true, headers: { get: (n: string) => headers.get(n.toLowerCase()) ?? null }, text: async () => xml };
     };
-    const j = new JazzClient({ serverUrl: "https://j/ccm/", projectArea: "Body", authType: "form", username: "u", password: "p" }, fetch);
+    const j = new JazzClient({ serverUrl: "https://j/ccm/", projectAreas: ["Body"], authType: "form", username: "u", password: "p" }, fetch);
     const items = await j.query("state/group='open'");
     expect(items[0]!.id).toBe("123");
     expect(calls[1]!.url).toBe("https://j/ccm/j_security_check");
     expect(calls[1]!.init.body).toBe("j_username=u&j_password=p");
     expect(calls[2]!.url).toBe("https://j/ccm/authenticated/identity"); // confirms the login took
-    expect(decodeURIComponent(calls[3]!.url)).toContain("[projectArea/name='Body' and state/group='open']");
+    expect(decodeURIComponent(calls[3]!.url)).toContain("[(projectArea/name='Body') and (state/group='open')]");
     expect(calls[3]!.init.headers.Cookie).toBe("JSESSIONID=abc");
     expect((await j.query("flicker")).length).toBe(1);
     expect((await j.query("nothing-matches")).length).toBe(0);

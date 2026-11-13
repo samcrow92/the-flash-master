@@ -334,6 +334,40 @@ function MarketplaceSettings(f: F) {
   </>;
 }
 
+function JazzAreas({ f }: { f: F }) {
+  const st = useStore();
+  const j = f.s.jazz;
+  const areas = j.projectAreas?.length ? j.projectAreas : j.projectArea ? [j.projectArea] : [];
+  const [add, setAdd] = useState("");
+  const [known, setKnown] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const locked = f.locked("jazz.projectAreas");
+  const save = async (next: string[]) => {
+    await f.set("jazz.projectAreas", [...new Set(next.map((x) => x.trim()).filter(Boolean))]);
+    if (j.projectArea) await f.set("jazz.projectArea", "");
+  };
+  const load = async () => {
+    setLoading(true);
+    try { setKnown(await api().jazzProjectAreas()); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } finally { setLoading(false); }
+  };
+  return <div className="col gap-s">
+    <div className="row gap wrap">
+      {areas.length === 0 && <span className="muted small">All areas</span>}
+      {areas.map((a) => <span key={a} className="chip">{a}{!locked && <button className="link" title="Remove" onClick={() => save(areas.filter((x) => x !== a))}> ✕</button>}</span>)}
+    </div>
+    {!locked && <div className="row gap">
+      <input className="grow" value={add} placeholder="Project area name" list="jazz-known-areas" onChange={(e) => setAdd(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && add.trim()) { void save([...areas, add]); setAdd(""); } }} />
+      <datalist id="jazz-known-areas">{(known ?? []).map((a) => <option key={a} value={a} />)}</datalist>
+      <button disabled={!add.trim()} onClick={() => { void save([...areas, add]); setAdd(""); }}>Add</button>
+      <button onClick={load} disabled={loading} title="Load the project areas you can see from the server">{loading ? "Loading…" : "↻ From server"}</button>
+    </div>}
+    {known && known.length > 0 && !locked && <div className="row gap wrap">
+      {known.filter((a) => !areas.includes(a)).slice(0, 40).map((a) => <button key={a} className="chip" onClick={() => save([...areas, a])}>＋ {a}</button>)}
+    </div>}
+  </div>;
+}
+
 function Integrations(f: F) {
   const st = useStore();
   const [pw, setPw] = useState("");
@@ -342,14 +376,15 @@ function Integrations(f: F) {
     <h4>IBM Jazz (EWM / RTC)</h4>
     <Row label="Enabled"><Bool f={f} path="jazz.enabled" /></Row>
     <Row label="Server URL" hint="e.g. https://jazz.company.com/ccm"><Text f={f} path="jazz.serverUrl" /></Row>
-    <Row label="Project area"><Text f={f} path="jazz.projectArea" /></Row>
-    <Row label="Authentication"><Choice f={f} path="jazz.authType" options={[["form", "Form (default for EWM)"], ["basic", "Basic"]]} /></Row>
+    <Row label="Project areas" hint="Searches cover all of these unless you narrow them in the Jazz page. Empty = every area you can see."><JazzAreas f={f} /></Row>
+    <Row label="Authentication" hint={f.s.jazz.authType === "windows" ? "Uses your Windows login (Kerberos/NTLM) — no password. Restart TheFlashMaster after changing the server URL." : "If Test reports HTTP 401, the message says which method the server expects."}>
+      <Choice f={f} path="jazz.authType" options={[["form", "Form (default for EWM)"], ["basic", "Basic"], ["windows", "Windows (integrated)"]]} /></Row>
     <Row label="User"><Text f={f} path="jazz.username" /></Row>
     <Row label="Password" hint={f.s.jazz.hasPassword ? "Stored encrypted with the OS keychain (Windows DPAPI)." : "Not set."}>
       <div className="row gap"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••" />
         <button disabled={!pw} onClick={async () => { await api().jazzSetPassword(pw); setPw(""); st.setSettings((await api().getSettings()).settings); st.toast("info", "Password saved"); }}>Save</button></div>
     </Row>
-    <Row label="Default query"><Text f={f} path="jazz.defaultQuery" placeholder="state/group='open' and owner/userId='me'" /></Row>
+    <Row label="Default query"><Text f={f} path="jazz.defaultQuery" placeholder="words or ids shown when the Jazz page opens (optional)" /></Row>
     <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().jazzTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
 
     <h4>winIDEA (iSYSTEM / TASKING)</h4>

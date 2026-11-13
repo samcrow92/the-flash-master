@@ -187,6 +187,31 @@ export interface JazzWorkItem {
   owner: string | null;
   description: string;
   url: string | null;
+  projectArea?: string;
+  priority?: string;
+  severity?: string;
+  category?: string; // "Filed against"
+  plannedFor?: string;
+  creator?: string;
+  created?: string;
+  modified?: string;
+  tags?: string;
+}
+
+export interface JazzComment {
+  author: string;
+  date: string;
+  text: string;
+}
+
+export interface JazzSearch {
+  text?: string; // words in summary/description, or ids "123, 456"
+  projectAreas?: string[]; // empty = all configured
+  state?: "open" | "closed" | "all";
+  type?: string; // e.g. Defect, Task, Story
+  owner?: "me" | "unassigned" | "";
+  raw?: string; // advanced: reportable-API filter, e.g. "priority/name='High'"
+  max?: number;
 }
 
 // ---- Events pushed main → renderer ----

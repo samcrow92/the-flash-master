@@ -68,8 +68,9 @@ export interface Settings {
   jazz: {
     enabled: boolean;
     serverUrl: string; // e.g. https://jazz.company.com/ccm
-    projectArea: string;
-    authType: "form" | "basic";
+    projectArea: string; // legacy single area (migrated into projectAreas)
+    projectAreas: string[];
+    authType: "form" | "basic" | "windows"; // windows = integrated Kerberos/NTLM sign-in, no password
     username: string;
     hasPassword: boolean; // password stored encrypted via safeStorage, never in settings
     defaultQuery: string;
@@ -145,6 +146,7 @@ export const DEFAULT_SETTINGS: Settings = {
     enabled: false,
     serverUrl: "",
     projectArea: "",
+    projectAreas: [],
     authType: "form",
     username: "",
     hasPassword: false,

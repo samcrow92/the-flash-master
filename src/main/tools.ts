@@ -101,14 +101,28 @@ export function buildTools(d: {
     // ---------------- Jazz ----------------
     {
       set: "jazz", name: "jazz_query",
-      description: "Find IBM Jazz/EWM work items. query: ids ('123,456'), a reportable-API filter (\"state/group='open' and owner/userId='jdoe'\"), or words to match in summaries.",
-      inputSchema: obj({ query: s("query"), max: { type: "number", description: "default 20" } }, ["query"]),
-      handler: async (a) => (await jazz().query(a.query, a.max ?? 20)).map((w) => ({ id: w.id, title: w.title, type: w.type, state: w.state, owner: w.owner })),
+      description: "Find IBM Jazz/EWM work items across the configured project areas. query: ids ('123,456'), a reportable-API filter (\"owner/userId='jdoe'\"), or words to match. Optional: projectArea, state open|closed|all, type, owner me|unassigned.",
+      inputSchema: obj({
+        query: s("ids, filter or words (may be empty with other filters)"), projectArea: s("limit to one project area"),
+        state: s("open (default) | closed | all"), type: s("e.g. Defect, Task"), owner: s("me | unassigned"), max: { type: "number", description: "default 20" },
+      }),
+      handler: async (a) => {
+        const q = String(a.query ?? "").trim();
+        const list = a.state || a.type || a.owner || !q
+          ? await jazz().search({ text: /[=<>]/.test(q) ? "" : q, raw: /[=<>]/.test(q) ? q : "", projectAreas: a.projectArea ? [a.projectArea] : undefined,
+            state: a.state, type: a.type, owner: a.owner, max: a.max ?? 20 })
+          : await jazz().query(q, a.max ?? 20, a.projectArea);
+        return list.map((w) => ({ id: w.id, title: w.title, type: w.type, state: w.state, owner: w.owner, area: w.projectArea, prio: w.priority }));
+      },
     },
     {
-      set: "jazz", name: "jazz_get", description: "Get one work item with its description.",
-      inputSchema: obj({ id: s("work item id") }, ["id"]),
-      handler: async (a) => jazz().get(a.id),
+      set: "jazz", name: "jazz_get", description: "Get one work item with its description; comments: true adds the discussion (last 10).",
+      inputSchema: obj({ id: s("work item id"), comments: { type: "boolean" } }, ["id"]),
+      handler: async (a) => {
+        if (!a.comments) return jazz().get(a.id);
+        const d = await jazz().detail(a.id);
+        return { ...d.item, comments: d.comments.slice(-10).map((c) => ({ ...c, text: c.text.slice(0, 1500) })) };
+      },
     },
     {
       set: "jazz", name: "jazz_update",

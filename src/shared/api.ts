@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
+  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, JazzSearch, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -75,6 +75,11 @@ export interface FlashApi {
   // jazz
   jazzQuery(query: string): Promise<JazzWorkItem[]>;
   jazzGet(id: string): Promise<JazzWorkItem>;
+  jazzSearch(q: JazzSearch): Promise<JazzWorkItem[]>;
+  jazzDetail(id: string): Promise<{ item: JazzWorkItem; comments: JazzComment[] }>;
+  jazzComment(id: string, text: string): Promise<void>;
+  jazzUpdate(id: string, attributes: Record<string, unknown>, action?: string): Promise<JazzWorkItem>;
+  jazzProjectAreas(): Promise<string[]>;
   jazzSetPassword(password: string): Promise<void>;
   jazzTest(): Promise<{ ok: boolean; detail: string }>;
 
@@ -93,7 +98,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSetPassword", "jazzTest", "getSettings",
+  "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
 

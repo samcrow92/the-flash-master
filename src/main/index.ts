@@ -99,16 +99,37 @@ let jazzKey = "";
 // uses Chromium's network stack (Windows certificate store, proxy from applyProxy()).
 const jazzSession = () => session.fromPartition("persist:jazz");
 const netFetch: FetchLike = (url, init) => jazzSession().fetch(url, { ...init, credentials: "include", redirect: "follow" } as any) as any;
+const jazzAreas = (j: { projectAreas?: string[]; projectArea?: string }) =>
+  j.projectAreas?.length ? j.projectAreas : j.projectArea ? [j.projectArea] : [];
+const jazzHost = (u: string) => { try { return new URL(u).hostname; } catch { return ""; } };
+/** Windows integrated sign-in: Chromium only sends Kerberos/NTLM credentials to allow-listed servers. */
+const allowWindowsAuth = (serverUrl: string) => {
+  const host = jazzHost(serverUrl);
+  if (!host) return;
+  try { (jazzSession() as any).allowNTLMCredentialsForDomains?.(`${host},*.${host.split(".").slice(1).join(".")}`); } catch { /* older Electron */ }
+};
+{
+  // Before app ready the command-line switches still apply (covers Negotiate delegation too).
+  const j = settings.get().jazz;
+  const host = jazzHost(j.serverUrl);
+  if (j.authType === "windows" && host) {
+    app.commandLine.appendSwitch("auth-server-allowlist", host);
+    app.commandLine.appendSwitch("auth-negotiate-delegate-allowlist", host);
+  }
+}
 const jazz = (): JazzClient | null => {
   const j = settings.get().jazz;
   if (!j.enabled || !j.serverUrl) return null;
-  const key = JSON.stringify([j.serverUrl, j.projectArea, j.authType, j.username, j.hasPassword]);
+  const areas = jazzAreas(j);
+  const key = JSON.stringify([j.serverUrl, areas, j.authType, j.username, j.hasPassword]);
   if (!jazzClient || key !== jazzKey) {
-    jazzClient = new JazzClient({ serverUrl: j.serverUrl, projectArea: j.projectArea, authType: j.authType, username: j.username, password: readJazzPassword() }, netFetch);
+    if (j.authType === "windows" && app.isReady()) allowWindowsAuth(j.serverUrl);
+    jazzClient = new JazzClient({ serverUrl: j.serverUrl, projectAreas: areas, authType: j.authType, username: j.username, password: readJazzPassword() }, netFetch);
     jazzKey = key;
   }
   return jazzClient;
 };
+const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, emitTask: (task) => emit({ type: "task.updated", task }) }));
 
@@ -369,8 +390,13 @@ const api: FlashApi = {
   allModels: async () => HARNESS_IDS.map(modelState),
   mcpStatus: async () => mcp.list(),
   mcpReinstall: async () => mcp.ensure(true),
-  jazzQuery: async (q) => { const j = jazz(); if (!j) throw new Error("Jazz is not configured"); return j.query(q); },
-  jazzGet: async (id) => { const j = jazz(); if (!j) throw new Error("Jazz is not configured"); return j.get(id); },
+  jazzQuery: async (q) => needJazz().query(q),
+  jazzGet: async (id) => needJazz().get(id),
+  jazzSearch: async (q) => needJazz().search(q),
+  jazzDetail: async (id) => needJazz().detail(id),
+  jazzComment: async (id, text) => needJazz().comment(id, text),
+  jazzUpdate: async (id, attributes, action) => needJazz().update(id, attributes, action),
+  jazzProjectAreas: async () => needJazz().listProjectAreas(),
   jazzSetPassword: async (password) => {
     if (!safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
     writeFileSync(secretFile, safeStorage.encryptString(password));
