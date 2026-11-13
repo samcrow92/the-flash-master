@@ -33,6 +33,15 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       const text = msg.params.prompt[0].text;
       const upd = (update) => send({ method: "session/update", params: { sessionId: sid, update } });
       if (text.includes("NETFAIL") && netFails < 1) { netFails++; return send({ id: msg.id, error: { code: -32603, message: "Connection error.: other side closed (UND_ERR_SOCKET)" } }); }
+      // Text-mode delegation: a coordinator without the delegate tool writes DELEGATE lines.
+      if (text.includes("## Specialist results")) {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Integrated: ${text.includes("### reviewer") ? "reviewer result received" : "nothing"}` } });
+        return reply({ stopReason: "end_turn" });
+      }
+      if (text.includes("DELEGATE <role>:")) {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Plan: one review.\n\nDELEGATE reviewer: Review brake.c\nfocus on debounce\n\nDELEGATE nosuchrole: x\n" } });
+        return reply({ stopReason: "end_turn" });
+      }
       if (text === "/usage") {
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Usage\n  Premium requests: 123 / 300 (41%)\n  Resets: Dec 1, 2026\n" } });
         return reply({ stopReason: "end_turn" });

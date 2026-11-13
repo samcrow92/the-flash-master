@@ -86,7 +86,7 @@ describe("ACP client against a fake ACP agent", () => {
 
 // ------------------------------------------------------------------ orchestrator end-to-end (mock + fake ACP)
 
-function setup(over: DeepPartial<Settings> = {}) {
+function setup(over: DeepPartial<Settings> = {}, extra: Record<string, unknown> = {}) {
   const db = new Db(":memory:");
   let settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" }, ...over } as any) as Settings;
   const harnesses = new HarnessRegistry([new MockAdapter(2), new AcpAdapter("opencode", "Fake ACP", [process.execPath], [FAKE], "")]);
@@ -95,7 +95,7 @@ function setup(over: DeepPartial<Settings> = {}) {
   const skills = loadSkills(join(__dirname, "..", "skills", "superpowers"));
   const events: AppEvent[] = [];
   const orch = new Orchestrator({ db, harnesses, settings: () => settings, roles: () => roles, skills: () => skills, emit: (e) => events.push(e),
-    mcpServersFor: () => [], homeDir: tmpdir() });
+    mcpServersFor: () => [], homeDir: tmpdir(), ...extra });
   const project = db.createProject("demo", mkdtempSync(join(tmpdir(), "proj-")));
   const chat = db.createChat({ projectId: project.id, title: "General", kind: "project", agentRole: "flashmaster" });
   return { db, orch, events, chat, project, setSettings: (s: DeepPartial<Settings>) => { settings = mergeSettings(settings, s); } };
@@ -154,6 +154,23 @@ describe("Orchestrator", () => {
     expect(db.getAgent(r2.agentId)!.harness).not.toBe("duo");
     expect(db.listMessages(chat.id, null).concat(...db.listMessages(chat.id, null).map((m) => db.listMessages(chat.id, m.id)))
       .some((m) => m.author === "system" && m.content.includes("duo is not available"))).toBe(true);
+  });
+
+  it("a coordinator without the delegate tool delegates in text mode", async () => {
+    const { db, orch, chat } = setup({}, { toolsLoaded: () => false });
+    cleanup = () => orch.stopAll();
+    db.updateChat(chat.id, { harness: "opencode" });
+    (orch as any).waitForTools = async () => false; // skip the wait
+    await orch.sendUserMessage(chat.id, "TEXTDELEGATE please", null);
+    const all = () => { const top = db.listMessages(chat.id, null); return [...new Map(top.concat(...top.map((m) => db.listMessages(chat.id, m.id))).map((m) => [m.id, m])).values()]; };
+    await until(() => all().some((m) => m.author === "agent" && m.content.startsWith("Integrated:")), 15000);
+    const msgs = all();
+    expect(msgs.some((m) => m.author === "system" && m.content.includes("delegate` tool did not load"))).toBe(true);
+    expect(msgs.some((m) => m.author === "system" && m.content.includes("Delegating: **reviewer**"))).toBe(true);
+    expect(msgs.find((m) => m.content.startsWith("Integrated:"))!.content).toContain("reviewer result received");
+    expect(msgs.filter((m) => m.author === "system" && m.content.includes("delegate` tool did not load")).length).toBe(1);
+    const reviewer = msgs.find((m) => m.role === "reviewer" && m.author === "agent")!;
+    expect(reviewer).toBeTruthy();
   });
 
   it("uses a real ACP harness when the chat selects it", async () => {

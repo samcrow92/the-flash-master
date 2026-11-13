@@ -242,6 +242,7 @@ describe("resilience", () => {
   it("warns in the chat when the harness did not load the app's tools", async () => {
     const { db, orch, chat } = setup();
     (orch as any).d.toolsLoaded = () => false;
+    (orch as any).waitForTools = async () => false; // skip the wait for the tools to be listed
     db.updateChat(chat.id, { harness: "opencode" });
     await orch.sendUserMessage(chat.id, "delegate this", null, {});
     await until(() => agentMsgs(db, chat.id)[0]?.status === "done");

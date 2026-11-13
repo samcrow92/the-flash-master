@@ -5,6 +5,8 @@
  * named with @mention. Delegated specialists run as thread replies under the delegating message, so the
  * user sees them without the coordinator's context ever containing their transcript.
  */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
@@ -16,7 +18,7 @@ import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness
 import { prepareInstructions } from "./harness/instructions";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
-  resultForParent,
+  parseTextDelegations, resultForParent, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
 export interface OrchestratorDeps {
@@ -58,6 +60,9 @@ interface Live {
   redirect: { input: string; attachments: Attachment[]; msgIds: string[] } | null; // steering by interrupt: next turn input
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
   warnedTools?: boolean;
+  /** The coordinator's `delegate` tool didn't load: it delegates by writing DELEGATE lines, which the app carries out. */
+  textDelegation?: boolean;
+  lastReplyId?: string | null;
   depth: number;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
@@ -68,6 +73,19 @@ interface Live {
 }
 
 const MAX_CONCURRENT_FALLBACK = 4;
+const MAX_TEXT_ROUNDS = 6;
+
+/** Copilot CLI logs "N MCP servers were blocked by policy" when the organisation's MCP policy is off. */
+function copilotMcpBlocked(homeDir: string): boolean {
+  try {
+    const dir = join(homeDir, ".copilot", "logs");
+    const newest = readdirSync(dir).filter((f) => f.endsWith(".log")).map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t).slice(0, 3);
+    return newest.some(({ f }) => {
+      const buf = readFileSync(join(dir, f), "utf8");
+      return /MCP servers? (?:were |was )?blocked by policy|Non-default MCP servers will be blocked|is_mcp_enabled"?\s*:\s*false/i.test(buf.slice(-400000));
+    });
+  } catch { return false; }
+}
 
 export class Orchestrator {
   private live = new Map<string, Live>();
@@ -149,7 +167,7 @@ export class Orchestrator {
     const chat = this.mustChat(parent.chatId);
     const brief = buildBrief({ goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, parentRole: parent.role.name });
     // Specialist output appears as a thread under the coordinator's current reply.
-    const threadRoot = parent.threadRoot ?? parent.currentMessageId;
+    const threadRoot = parent.threadRoot ?? parent.currentMessageId ?? parent.lastReplyId ?? null;
     const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
     const live = this.ensureLive(chat, threadRoot, role, parent.depth + 1, `${parentAgentId}>${role.name}${want ? `@${want}` : ""}`, parentAgentId, brief,
       want ? { harness: want, model: a.model || null } : undefined);
@@ -333,7 +351,9 @@ export class Orchestrator {
   private async turn(t: { chat: Chat; threadRoot: string | null; role: RoleDef; input: string; attachments?: Attachment[]; skills: SkillDef[];
     depth: number; brief: string | null; taskId?: string; liveKey?: string; msgIds?: string[]; deliver?: boolean;
     /** A specialist the coordinator is blocked waiting on runs in the coordinator's slot (else both could wait on each other forever). */
-    borrowSlot?: boolean }): Promise<void> {
+    borrowSlot?: boolean;
+    /** Round of text delegation this turn belongs to (results fed back to the coordinator), to stop runaway loops. */
+    textRound?: number }): Promise<void> {
     const s = this.d.settings();
     const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth);
     if (!live) return;
@@ -358,11 +378,14 @@ export class Orchestrator {
     const reply = this.d.db.addMessage({ chatId: t.chat.id, parentId: t.threadRoot, author: "agent", agentId: live.agentId,
       role: t.role.name, content: "", status: "streaming" });
     live.currentMessageId = reply.id;
+    live.lastReplyId = reply.id;
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
     let text = "";
+    let finalStatus = "";
+    let switchedToText = false;
     let lastFlush = Date.now();
     const project = t.chat.projectId ? this.d.db.getProject(t.chat.projectId) : null;
     let promptText: string;
@@ -376,6 +399,13 @@ export class Orchestrator {
         if (Date.now() - lastFlush > 500) { lastFlush = Date.now(); this.d.db.updateMessage(reply.id, { content: text }); }
       };
       if (firstTurn) live.session = await this.openSession(live, project?.path ?? null, t.chat);
+      // Coordinator: Pi has no MCP, so text mode right away; other harnesses get a few seconds to list the tools,
+      // and are checked again after the first reply (some list them only when the first prompt arrives).
+      let toolsPending = false;
+      if (firstTurn && this.coordinates(live, s) && !live.textDelegation) {
+        if (live.harness === "pi") this.enterTextDelegation(live, t);
+        else toolsPending = !(await this.waitForTools(live, 5000));
+      }
       // On a (re)started session send a compact history instead of a transcript.
       let summary: string | null = null;
       let recent: Message[] = [];
@@ -396,7 +426,7 @@ export class Orchestrator {
       const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
       promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
         brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
-        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? ""].filter((x) => x.trim()).join("\n\n") });
+        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : ""].filter((x) => x.trim()).join("\n\n") });
       this.setStatus(live, "running", "Thinking…");
       // Autopilot is read per turn, so toggling it applies to the very next message.
       const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
@@ -416,7 +446,8 @@ export class Orchestrator {
       }
       this.d.db.updateMessage(reply.id, { content: text });
       // The harness was given our MCP servers but none of them reached the app: tools did not load.
-      if (firstTurn && this.d.toolsLoaded && live.harness !== "pi" && live.harness !== "mock" && !this.d.toolsLoaded(live.agentId) && !live.warnedTools) {
+      if (toolsPending && !(await this.waitForTools(live, 3000))) { this.enterTextDelegation(live, t); switchedToText = true; }
+      if (firstTurn && this.d.toolsLoaded && live.harness !== "pi" && live.harness !== "mock" && !this.d.toolsLoaded(live.agentId) && !live.warnedTools && !live.textDelegation) {
         live.warnedTools = true;
         this.system(t.chat.id, t.threadRoot, `⚠️ TheFlashMaster's tools (delegation, tasks, artifacts) did not load in **${live.harness}** for ${t.role.title}, so it cannot hand work to specialists. `
           + "Check **Settings → MCP → Test tool servers**; the error there tells what blocks them.", "warn");
@@ -428,6 +459,7 @@ export class Orchestrator {
       live.sessionTokens += usage.tokensIn + usage.tokensOut;
       const redirected = !!live.redirect && !live.stopped;
       const status = live.stopped ? "stopped" : redirected ? "done" : res.stopReason === "error" ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
+      finalStatus = redirected ? "redirected" : status;
       if (redirected) text += "\n\n_↪ Redirected by your steering message._";
       else if (res.error) text += `\n\n⚠️ ${res.error}`;
       const final = this.d.db.updateMessage(reply.id, { content: text || (status === "paused" ? "_(paused)_" : "_(no output)_"),
@@ -470,17 +502,27 @@ export class Orchestrator {
       live.currentMessageId = null;
       if (!borrowed) this.releaseSlot();
     }
+    if (switchedToText && finalStatus === "done" && !live.stopped && !live.paused && !parseTextDelegations(text).length) {
+      // The first reply was written without the delegate tool: have the coordinator re-plan with DELEGATE lines.
+      void this.turn({ ...t, input: `${TEXT_DELEGATION_RULES}\n\nRe-plan the user's last request now and delegate it with DELEGATE lines.`,
+        attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: 1 });
+      return;
+    }
+    if (live.textDelegation && finalStatus === "done" && !live.stopped && !live.paused && !live.queue.length) {
+      const reqs = parseTextDelegations(text);
+      if (reqs.length) { void this.runTextDelegations(live, t, reqs); return; }
+    }
     if (live.redirect && !live.stopped) {
       const r = live.redirect;
       live.redirect = null;
       void this.turn({ ...t, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
-        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false });
+        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false, textRound: 0 });
       return;
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);
       void this.turn({ ...t, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
-        taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true, borrowSlot: false });
+        taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true, borrowSlot: false, textRound: 0 });
     }
   }
 
@@ -593,6 +635,59 @@ export class Orchestrator {
     this.byAgent.set(agent.id, l);
     this.emitAgent(agent);
     return l;
+  }
+
+  /** Agents expected to hand work to specialists: the coordinator (and its custom copies at depth 0). */
+  private coordinates(live: Live, s: Settings): boolean {
+    return live.depth === 0 && live.harness !== "mock" && s.agents.delegationDepth > 0 && (live.role.name === "flashmaster" || /delegate/i.test(live.role.description ?? ""));
+  }
+
+  private enterTextDelegation(live: Live, t: { chat: Chat; threadRoot: string | null; role: RoleDef }): void {
+    live.textDelegation = true;
+    if (live.warnedTools) return;
+    live.warnedTools = true;
+    const blocked = live.harness === "copilot" && copilotMcpBlocked(this.d.homeDir);
+    this.system(t.chat.id, t.threadRoot, `⚠️ ${t.role.title}'s \`delegate\` tool did not load in **${live.harness}**`
+      + (live.harness === "pi" ? " (Pi has no MCP support)" : blocked ? ": Copilot reports **MCP servers blocked by policy**. Your organisation's *MCP servers in Copilot* policy is off; ask your GitHub admin to enable it" : "")
+      + ". Delegation runs in text mode instead: the coordinator writes `DELEGATE` lines and TheFlashMaster starts the specialists."
+      + (blocked || live.harness === "pi" ? "" : " Check **Settings → MCP → Test tool servers** for the cause."), "warn");
+  }
+
+  /** Harnesses start their MCP servers alongside the session: give them a moment to list the app's tools. */
+  private async waitForTools(live: Live, ms: number): Promise<boolean> {
+    if (live.harness === "pi") return false; // Pi has no MCP support
+    if (!this.d.toolsLoaded) return true;
+    const t0 = Date.now();
+    while (!this.d.toolsLoaded(live.agentId)) {
+      if (Date.now() - t0 > ms || live.stopped) return false;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return true;
+  }
+
+  /** Carry out DELEGATE lines from a coordinator in text mode, then feed the results back to it. */
+  private async runTextDelegations(live: Live, t: Parameters<Orchestrator["turn"]>[0], reqs: TextDelegation[]): Promise<void> {
+    const round = (t.textRound ?? 0) + 1;
+    const known = new Set(this.d.roles().map((r) => r.name));
+    if (round > MAX_TEXT_ROUNDS) {
+      this.system(t.chat.id, t.threadRoot, `⚠️ Stopped after ${MAX_TEXT_ROUNDS} delegation rounds. Send a message to continue.`, "warn");
+      return;
+    }
+    const runnable = reqs.filter((r) => known.has(r.role) && r.role !== live.role.name);
+    if (runnable.length) this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}`).join(", ")}`);
+    const results = await Promise.all(reqs.map(async (r) => {
+      if (!known.has(r.role) || r.role === live.role.name) return `### ${r.role}
+Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.name).join(", ")}.`;
+      try {
+        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, wait: true, timeoutSec: 1800 });
+        return `### ${r.role}${x.harness ? ` (${x.harness})` : ""}
+${x.result ?? `status: ${x.status}`}`;
+      } catch (e) { return `### ${r.role}
+Failed: ${String((e as Error)?.message ?? e)}`; }
+    }));
+    if (live.stopped || !this.live.has(live.key)) return;
+    void this.turn({ ...t, input: `## Specialist results\n${results.join("\n\n")}\n\nIntegrate these results and answer the user, or delegate follow-ups the same way.`,
+      attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: round });
   }
 
   /** Record a progress event for the flow chart and notify the UI. */

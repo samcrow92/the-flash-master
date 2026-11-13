@@ -184,3 +184,31 @@ export function budgetState(used: number, limit: number, warnPct: number): Budge
   if (used >= (limit * warnPct) / 100) return "warn";
   return "ok";
 }
+
+export interface TextDelegation { role: string; harness?: string; goal: string }
+
+/** Instructions for a coordinator whose `delegate` tool didn't load (MCP blocked by policy, Pi without MCP…). */
+export const TEXT_DELEGATION_RULES = `## Delegation without tools
+Your \`delegate\` tool is not available in this session, so delegate in plain text instead. Write one block per sub-task,
+starting at the beginning of a line:
+DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
+DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, pi or duo, only when the user asked for one)
+A brief may continue on the following lines until a blank line. Then end your reply. TheFlashMaster runs those specialists
+in parallel and sends you their results in the next message; integrate them, or delegate follow-ups the same way.
+Don't do the work yourself, and don't call tools to do it.`;
+
+/** DELEGATE lines written by a coordinator in text mode (outside code fences). */
+export function parseTextDelegations(text: string): TextDelegation[] {
+  const out: TextDelegation[] = [];
+  let cur: TextDelegation | null = null;
+  let fence = false;
+  for (const raw of text.split(/\r?\n/)) {
+    if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
+    if (fence) continue;
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
+    if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), goal: m[3]!.trim() }; out.push(cur); continue; }
+    if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
+    if (cur) cur.goal = `${cur.goal}\n${raw.trim()}`.trim();
+  }
+  return out.filter((d) => d.goal);
+}
