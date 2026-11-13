@@ -145,6 +145,14 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await click("Using TheFlashMaster", ".docs-nav button");
       await sleep(700);
       await shot(join(demo, "18-docs-use.png"));
+      await click("Agents & when", ".docs-nav button");
+      await sleep(500);
+      await click("Code Reviewer", ".docs-nav button.sub");
+      await sleep(700);
+      await shot(join(demo, "18b-docs-agent-chat-button.png"));
+      await click("Chat with", ".agent-hero-chat");
+      await sleep(1200);
+      await shot(join(demo, "18c-agent-chat-opened.png"));
       // Artifacts panel + diff viewer (mock harness produces a sample edit)
       if (!(await js<boolean>(`!!document.querySelector('.chat-link.active')`))) {
         if (!(await js<boolean>(`!!document.querySelector('.chat-link')`))) await click("brake-ecu", ".project-name");

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
+import { pickAgentChat } from "./agentChat";
 
 export const api = () => window.flash.api;
 
@@ -58,6 +59,8 @@ interface State {
   init(): Promise<void>;
   setView(v: View): void;
   openChat(chatId: string): Promise<void>;
+  /** Open an agent's chat: where it works now, else its latest chat in the current project, else a new one. */
+  chatWithAgent(role: string): Promise<void>;
   openThread(chatId: string, rootId: string): Promise<void>;
   closeThread(rootId: string): void;
   toggleThread(chatId: string, rootId: string): void;
@@ -169,6 +172,22 @@ export const useStore = create<State>((set, get) => ({
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
     set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
+  },
+
+  async chatWithAgent(role) {
+    const st = get();
+    const t = pickAgentChat(role, { agents: st.agents, chats: st.chats, projectIds: st.projects.map((p) => p.id),
+      currentProjectId: st.currentProjectId, masterChatId: st.masterChatId });
+    if (t.kind === "no-project") { st.toast("warn", "Add a project folder first — specialists work inside a project."); return; }
+    if (t.kind === "open") {
+      await st.openChat(t.chatId);
+      if (t.agentId) st.openFlow(t.chatId, t.agentId);
+      return;
+    }
+    const r = st.roles.find((x) => x.name === role);
+    const c = await api().createChat({ projectId: t.projectId, agentRole: role, title: r?.title ?? role });
+    st.upsertChat(c);
+    await st.openChat(c.id);
   },
 
   async openThread(chatId, rootId) {
