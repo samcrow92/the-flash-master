@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ClipboardList as ClipboardListIcon } from "../components/icons";
 import type { JazzComment, JazzSearch, JazzWorkItem } from "@shared/types";
 import { api, useStore } from "../store";
 
@@ -68,7 +69,7 @@ export function JazzView() {
   if (!enabled) {
     return (
       <div className="page">
-        <header className="page-header"><h2>📌 Jazz work items</h2></header>
+        <header className="page-header"><h2><ClipboardListIcon size={20} className="h-icon" /> Jazz work items</h2></header>
         <div className="empty">
           IBM Jazz (EWM/RTC) is not configured.
           <div><button className="primary" onClick={() => st.setView({ kind: "settings", tab: "integrations" })}>Configure Jazz</button></div>
@@ -82,7 +83,7 @@ export function JazzView() {
   return (
     <div className="page jazz-page">
       <header className="page-header">
-        <h2>📌 Jazz work items</h2>
+        <h2><ClipboardListIcon size={20} className="h-icon" /> Jazz work items</h2>
         <button className="ghost" onClick={() => st.setView({ kind: "settings", tab: "integrations" })} title="Jazz settings">⚙</button>
       </header>
 

@@ -138,3 +138,37 @@ describe("autopilot and drive modes", () => {
     expect(pickOption(opt, "xhigh")).toBeNull();
   });
 });
+
+describe("chat management", () => {
+  it("archives, pins and renames chats persistently", () => {
+    const { db, chat } = setup();
+    db.updateChat(chat.id, { pinned: true, title: "Brake ECU review" });
+    expect(db.getChat(chat.id)).toMatchObject({ pinned: true, archived: false, title: "Brake ECU review" });
+    db.updateChat(chat.id, { archived: true, pinned: false });
+    expect(db.listChats(chat.projectId)[0]).toMatchObject({ archived: true, pinned: false });
+  });
+
+  it("reset context closes the chat's sessions, adds a divider and sends no earlier history", async () => {
+    const { db, orch, chat, events } = setup();
+    await orch.sendUserMessage(chat.id, "first topic", null, {});
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    expect([...(orch as any).live.values()].some((l: any) => l.chatId === chat.id)).toBe(true);
+    const marker = orch.resetContext(chat.id);
+    expect(marker).toMatchObject({ author: "system", marker: "context-reset" });
+    expect(events.some((e) => e.type === "message.created" && e.message.id === marker.id)).toBe(true);
+    expect([...(orch as any).live.values()].some((l: any) => l.chatId === chat.id)).toBe(false);
+    expect(db.getChatSummary(chat.id).upto).toBe(marker.seq);
+    // the next session's history starts after the boundary
+    expect(db.history(chat.id, null, db.getChatSummary(chat.id).upto).map((m) => m.content)).toEqual([]);
+    expect(db.listMessages(chat.id, null).find((m) => m.id === marker.id)?.marker).toBe("context-reset");
+    await orch.stopAll();
+  });
+
+  it("refuses to reset while an agent is working", async () => {
+    const { orch, chat } = setup();
+    void orch.sendUserMessage(chat.id, "work", null, {});
+    await until(() => [...(orch as any).live.values()].some((l: any) => l.busy));
+    expect(() => orch.resetContext(chat.id)).toThrow(/stop it first/);
+    await orch.stopAll();
+  });
+});

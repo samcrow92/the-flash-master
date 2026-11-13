@@ -1,6 +1,21 @@
 # Changelog
 
 ## Unreleased
+- **Chat management:**
+  - **Right-click menus** on chats: rename, pin to top, reset context, copy as Markdown, archive/restore, delete. The same menu opens from the "…" button and the chat header.
+  - Right-click menu on projects: new chat, rename, open folder, show archived, remove.
+  - Chats can be renamed by double-click, F2, or the ✎ in the header. Archived chats are hidden behind "Show archived".
+- **Reset context:** a ↺ button next to the chat box. The chat's agent sessions are closed and not resumed, and a divider marks the reset. Earlier messages stay visible but are no longer sent, which saves tokens when the topic changes.
+- **Documentation section:**
+  - Install Copilot CLI from the official GitHub release downloads (x64/ARM64), then pick copilot.exe. No winget, npm or terminal.
+  - Sign in through "Open Copilot CLI" and `/login`, or with an encrypted fine-grained token (Copilot Requests permission).
+  - A live setup checklist, a full user guide and troubleshooting.
+  - Common unzip locations of copilot.exe are found automatically.
+- **Copilot usage bar:** now always shows its state (checking, unavailable with the reason, or the numbers). It checks when a chat opens if the data is stale, finds Copilot even if it was set up after start, and reads more output formats.
+- **New look:**
+  - Lucide line icons throughout, and gradient role badges with drawn icons for the built-in specialists.
+  - Motion: animated brand mark and splash, view and message entrances, context-menu pop, toast slide, a rewind spin on context reset, a flying Autopilot plane, a theme-toggle spin and smooth chevrons.
+  - Honours the Windows "reduce motion" setting.
 - **Recommended MCP servers** (Settings → MCP), installed automatically and attached per agent role so tool definitions don't bloat every context:
   - **Context7** (current library docs), **Sequential Thinking** and **MarkItDown** (read Word/Excel/PowerPoint/PDF) are on by default.
   - **Fetch**, **Git**, **Memory** and **Playwright** are one click away.

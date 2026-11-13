@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Settings as SettingsIcon } from "../components/icons";
 import type { DriveMode, HarnessId, HarnessStatus } from "@shared/types";
 import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
@@ -31,7 +32,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
 
   return (
     <div className="page settings">
-      <header className="page-header"><h2>⚙️ Settings</h2>{st.locked.length > 0 && <span className="pill">🔒 Some settings are managed by your organisation</span>}</header>
+      <header className="page-header"><h2><SettingsIcon size={20} className="h-icon" /> Settings</h2>{st.locked.length > 0 && <span className="pill">🔒 Some settings are managed by your organisation</span>}</header>
       <div className="settings-layout">
         <nav className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</nav>
         <div className="tab-body">

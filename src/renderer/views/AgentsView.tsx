@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Bot as BotIcon } from "../components/icons";
 import { api, ago, fmtTokens, roleOf, useStore } from "../store";
 
 export function AgentsView() {
@@ -16,7 +17,7 @@ export function AgentsView() {
   return (
     <div className="page">
       <header className="page-header">
-        <h2>🛰️ Agents overview</h2>
+        <h2><BotIcon size={20} className="h-icon" /> Agents overview</h2>
         <div className="row gap">
           <span className="pill green">{running} running</span>
           <span className="pill amber">{paused} paused</span>

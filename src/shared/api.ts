@@ -17,7 +17,12 @@ export interface FlashApi {
   listChats(projectId: string | null): Promise<Chat[]>;
   getMasterChat(): Promise<Chat>;
   createChat(input: { projectId: string | null; title?: string; agentRole?: string }): Promise<Chat>;
-  updateChat(id: string, patch: Partial<Pick<Chat, "title" | "agentRole" | "harness" | "model" | "superpowers" | "mode" | "autopilot">>): Promise<Chat>;
+  updateChat(id: string, patch: Partial<Pick<Chat, "title" | "agentRole" | "harness" | "model" | "superpowers" | "mode" | "autopilot" | "archived" | "pinned">>): Promise<Chat>;
+  /** Fresh start for the agents of a chat: closes their sessions; earlier messages stay visible but are no longer sent. */
+  resetContext(chatId: string): Promise<Message>;
+  exportChat(chatId: string): Promise<string>; // Markdown transcript
+  renameProject(id: string, name: string): Promise<void>;
+  openProjectFolder(id: string): Promise<void>;
   deleteChat(id: string): Promise<void>;
 
   // messages
@@ -61,6 +66,15 @@ export interface FlashApi {
 
   // harnesses / mcp
   detectHarnesses(): Promise<HarnessStatus[]>;
+  /** Pick the harness executable (e.g. the downloaded copilot.exe) and re-detect. */
+  pickHarnessExecutable(harness: HarnessId): Promise<HarnessStatus | null>;
+  /** Open the harness CLI in its own window (e.g. to type /login in Copilot CLI). */
+  launchHarness(harness: HarnessId): Promise<{ ok: boolean; detail: string }>;
+  /** Found + signed in? Signed in = the harness answered with its model list. */
+  checkHarness(harness: HarnessId): Promise<{ found: boolean; path: string | null; version: string | null; signedIn: boolean; detail: string }>;
+  /** GitHub token for Copilot CLI (GH_TOKEN), stored encrypted; empty string removes it. */
+  setCopilotToken(token: string): Promise<{ tokenSet: boolean }>;
+  copilotTokenSet(): Promise<boolean>;
   marketplaceList(refresh?: boolean): Promise<{ listings: MarketplaceListing[]; installed: InstalledPlugin[]; updates: { id: string; from: string; to: string }[] }>;
   marketplaceInstall(sourceId: string, pluginId: string): Promise<InstalledPlugin>;
   marketplaceUninstall(pluginId: string): Promise<void>;
@@ -99,10 +113,10 @@ export interface FlashApi {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "toggleReaction", "listAgents", "startAgent",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "toggleReaction", "listAgents", "startAgent",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",

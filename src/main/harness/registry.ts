@@ -12,8 +12,8 @@ export class HarnessRegistry {
 
   constructor(extra: HarnessAdapter[] = []) {
     const defaults: HarnessAdapter[] = [
-      new AcpAdapter("copilot", "GitHub Copilot CLI", ["copilot"], ["--acp"],
-        "Install GitHub Copilot CLI (npm i -g @github/copilot) and run `copilot` once to sign in."),
+      new AcpAdapter("copilot", "GitHub Copilot CLI", ["copilot", ...copilotZipLocations()], ["--acp"],
+        "Copilot CLI not found — see Documentation → Install Copilot CLI (official download from GitHub), then choose copilot.exe."),
       new AcpAdapter("opencode", "OpenCode", ["opencode"], ["acp"],
         "Install OpenCode (npm i -g opencode-ai) and run `opencode auth login` once."),
       new PiAdapter(),
@@ -55,4 +55,17 @@ export class HarnessRegistry {
     for (const id of ["copilot", "opencode", "pi", "duo"] as HarnessId[]) if (ok(id)) return id;
     return "mock";
   }
+}
+
+/** Where people usually unzip the official copilot-win32-*.zip download (checked after PATH). */
+function copilotZipLocations(): string[] {
+  if (process.platform !== "win32") return [];
+  const home = process.env.USERPROFILE ?? "";
+  const local = process.env.LOCALAPPDATA ?? "";
+  return [
+    `${local}\\Programs\\copilot\\copilot.exe`,
+    `${home}\\Documents\\Tools\\copilot\\copilot.exe`,
+    `${home}\\Tools\\copilot\\copilot.exe`,
+    ...["x64", "arm64"].flatMap((a) => [`${home}\\Downloads\\copilot-win32-${a}\\copilot.exe`, `${home}\\Downloads\\copilot-win32-${a}\\copilot-win32-${a}\\copilot.exe`]),
+  ].filter((p) => !p.startsWith("\\"));
 }

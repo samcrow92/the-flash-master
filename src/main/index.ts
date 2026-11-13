@@ -82,6 +82,7 @@ const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   extraRules: () => marketplace.instructions(),
+  harnessEnv: (h) => harnessEnv(h),
   attachmentRoots: () => attachmentRoots(),
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
@@ -90,6 +91,17 @@ const orch = new Orchestrator({
     saveModels();
   },
 });
+
+// ---------------- Copilot token (optional sign-in without /login), encrypted with safeStorage ----------------
+const copilotSecret = join(dataDir, "copilot.secret");
+const readCopilotToken = (): string => {
+  try { return existsSync(copilotSecret) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(copilotSecret)) : ""; } catch { return ""; }
+};
+const harnessEnv = (h: HarnessId): Record<string, string> => {
+  if (h !== "copilot") return {};
+  const t = readCopilotToken();
+  return t ? { GH_TOKEN: t } : {};
+};
 
 // ---------------- Jazz (password encrypted with the OS keychain via safeStorage) ----------------
 const secretFile = join(dataDir, "jazz.secret");
@@ -235,7 +247,7 @@ function refreshModels(h: HarnessId): Promise<HarnessModels> {
   }
   set({ ...modelState(h), loading: true, error: null });
   const s = settings.get();
-  const p = adapter.listModels({ executable: st?.path ?? (s.harnesses[h]?.path || null), cwd: homedir(), env: networkEnv(s), extraArgs: s.harnesses[h]?.args ?? "" })
+  const p = adapter.listModels({ executable: st?.path ?? (s.harnesses[h]?.path || null), cwd: homedir(), env: { ...networkEnv(s), ...harnessEnv(h) }, extraArgs: s.harnesses[h]?.args ?? "" })
     .then((models) => set({ harness: h, models, fetchedAt: Date.now(), error: models.length ? null : "the harness did not report any models — type a model id", loading: false }))
     .catch((e) => set({ ...modelState(h), loading: false, error: String(e?.message ?? e) }))
     .finally(() => { inflight.delete(h); saveModels(); });
@@ -251,13 +263,19 @@ const setUsage = (u: CopilotUsage) => { copilotUsage = u; emit({ type: "copilotU
 function refreshCopilotUsage(): Promise<CopilotUsage | null> {
   if (usageInflight) return usageInflight;
   const s = settings.get();
-  const st = harnesses.cached("copilot");
+  usageInflight = (async () => {
+    const st = harnesses.cached("copilot")?.available ? harnesses.cached("copilot") : (await harnesses.detectAll(s)).find((h) => h.id === "copilot");
+    return st;
+  })().then((st) => runUsage(s, st)).finally(() => { usageInflight = null; });
+  return usageInflight;
+}
+function runUsage(s: ReturnType<typeof settings.get>, st: ReturnType<typeof harnesses.cached>): Promise<CopilotUsage | null> {
   if (!st?.available) {
     return Promise.resolve(setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: "Copilot CLI not found" }));
   }
-  if (copilotUsage) setUsage({ ...copilotUsage, loading: true });
+  setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), loading: true, error: copilotUsage?.ok ? copilotUsage.error : null });
   const adapter = harnesses.get("copilot") as AcpAdapter;
-  usageInflight = adapter.runCommand({ executable: st.path ?? (s.harnesses.copilot.path || null), cwd: homedir(), env: networkEnv(s), extraArgs: s.harnesses.copilot.args ?? "" },
+  return adapter.runCommand({ executable: st.path ?? (s.harnesses.copilot.path || null), cwd: homedir(), env: { ...networkEnv(s), ...harnessEnv("copilot") }, extraArgs: s.harnesses.copilot.args ?? "" },
     "usage", s.usage.onlyIfAdvertised)
     .then((r) => {
       if (!r.advertised && s.usage.onlyIfAdvertised) {
@@ -268,10 +286,8 @@ function refreshCopilotUsage(): Promise<CopilotUsage | null> {
     })
     .catch((e) => setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: String(e?.message ?? e) }))
     .finally(() => {
-      usageInflight = null;
       try { writeFileSync(usageFile, JSON.stringify({ ...copilotUsage, loading: false })); } catch { /* best effort */ }
     });
-  return usageInflight;
 }
 let usageTimer: ReturnType<typeof setInterval> | null = null;
 const scheduleUsage = () => {
@@ -366,6 +382,15 @@ const api: FlashApi = {
     return c;
   },
   deleteChat: async (id) => { await orch.stopChat(id); db.deleteChat(id); },
+  resetContext: async (chatId) => orch.resetContext(chatId),
+  exportChat: async (chatId) => {
+    const c = db.getChat(chatId);
+    const msgs = db.history(chatId, null).filter((m) => !m.marker);
+    const who = (m: (typeof msgs)[number]) => (m.author === "user" ? "You" : m.author === "system" ? "System" : roles.find((r) => r.name === m.role)?.title ?? m.role ?? "Agent");
+    return [`# ${c?.title ?? "Chat"}`, "", ...msgs.map((m) => `### ${who(m)} — ${new Date(m.createdAt).toLocaleString()}\n\n${m.content}\n`)].join("\n");
+  },
+  renameProject: async (id, name) => { if (name.trim()) db.renameProject(id, name.trim()); },
+  openProjectFolder: async (id) => { const p = db.getProject(id); if (p) await shell.openPath(p.path); },
   listMessages: async (chatId, parentId) => orch.withLiveText(db.listMessages(chatId, parentId)),
   sendMessage: async (i) => orch.sendUserMessage(i.chatId, i.content, i.parentId ?? null, { attachments: i.attachments, whileBusy: i.whileBusy }),
   saveAttachment: async (i) => storeAttachment(i.chatId, i.name, i.mime, (t) => writeFileSync(t, Buffer.from(i.dataBase64, "base64"))),
@@ -443,6 +468,46 @@ const api: FlashApi = {
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   copilotUsage: async (refresh) => (refresh ? refreshCopilotUsage() : copilotUsage),
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
+  pickHarnessExecutable: async (h) => {
+    const r = await dialog.showOpenDialog(win!, {
+      title: `Choose the ${h} program`, properties: ["openFile"],
+      filters: process.platform === "win32" ? [{ name: "Programs", extensions: ["exe", "cmd", "bat"] }] : [],
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    settings.update({ harnesses: { [h]: { path: r.filePaths[0] } } } as any);
+    const list = await harnesses.detectAll(settings.get());
+    return list.find((x) => x.id === h) ?? null;
+  },
+  launchHarness: async (h) => {
+    const st = (await harnesses.detectAll(settings.get())).find((x) => x.id === h);
+    if (!st?.available || !st.path) return { ok: false, detail: "Not found yet — choose the program first." };
+    if (process.platform === "win32") {
+      const { spawn } = await import("node:child_process");
+      // Own console window, started in the user's home folder (Copilot asks to trust the folder it starts in).
+      const child = spawn("cmd.exe", ["/c", `start "Copilot CLI" /D "${homedir()}" "${st.path}"`], {
+        detached: true, stdio: "ignore", windowsVerbatimArguments: true, env: { ...process.env, ...networkEnv(settings.get()) },
+      });
+      child.unref();
+      return { ok: true, detail: "Copilot CLI opened in a new window." };
+    }
+    const err = await shell.openPath(st.path);
+    return err ? { ok: false, detail: err } : { ok: true, detail: "Opened." };
+  },
+  checkHarness: async (h) => {
+    const st = (await harnesses.detectAll(settings.get())).find((x) => x.id === h);
+    if (!st?.available) return { found: false, path: null, version: null, signedIn: false, detail: st?.detail ?? "Not found" };
+    const m = await refreshModels(h);
+    const signedIn = m.models.length > 0 && !m.error;
+    return { found: true, path: st.path, version: st.version, signedIn,
+      detail: signedIn ? `Signed in — ${m.models.length} models available` : (m.error ?? "Not signed in") };
+  },
+  setCopilotToken: async (token) => {
+    if (!token.trim()) { if (existsSync(copilotSecret)) unlinkSync(copilotSecret); return { tokenSet: false }; }
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
+    writeFileSync(copilotSecret, safeStorage.encryptString(token.trim()));
+    return { tokenSet: true };
+  },
+  copilotTokenSet: async () => existsSync(copilotSecret),
   marketplaceList: async (refresh) => {
     if (refresh || !marketplace.cached().length) await marketplace.refresh(mpSources());
     return mpState();

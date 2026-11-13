@@ -81,7 +81,7 @@ Download from [Releases](../../releases):
 
 Then:
 
-1. Install and sign in to at least one harness once in a terminal, e.g. `npm i -g @github/copilot`, then run `copilot`.
+1. Install GitHub Copilot CLI from the official download on [github.com/github/copilot-cli/releases](https://github.com/github/copilot-cli/releases) and sign in. The in-app **Documentation** page walks through both steps without a terminal.
 2. Start TheFlashMaster. **Settings → Harnesses** shows what was detected.
 3. Click **＋** next to *Projects*, pick a folder, and start chatting.
 4. Optional: install **Python 3.10+** for the AUTOSAR/Vector and winIDEA tools. They install automatically on start (**Settings → MCP servers**).

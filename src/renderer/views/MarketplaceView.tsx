@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Puzzle as PuzzleIcon } from "../components/icons";
 import type { InstalledPlugin, MarketplaceListing, PluginEntry, PluginKind } from "@shared/types";
 import { api, useStore } from "../store";
 
@@ -49,7 +50,7 @@ export function MarketplaceView() {
   if (!sources.length) {
     return (
       <div className="page">
-        <header className="page-header"><h2>🧩 Marketplace</h2></header>
+        <header className="page-header"><h2><PuzzleIcon size={20} className="h-icon" /> Marketplace</h2></header>
         <div className="empty">
           <div>No marketplace configured yet. Each department can host its own catalogue of agents, workflows and instructions on a local server.</div>
           <button className="primary" onClick={() => st.setView({ kind: "settings", tab: "marketplace" })}>Add a marketplace</button>
@@ -61,7 +62,7 @@ export function MarketplaceView() {
   return (
     <div className="page">
       <header className="page-header">
-        <h2>🧩 Marketplace</h2>
+        <h2><PuzzleIcon size={20} className="h-icon" /> Marketplace</h2>
         <div className="row gap">
           {(data?.updates.length ?? 0) > 0 && (
             <button className="primary" disabled={!!busy} onClick={() => act("update-all", () => api().marketplaceUpdateAll(), "Plugins updated")}>⬆ Update all ({data!.updates.length})</button>

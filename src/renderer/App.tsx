@@ -11,6 +11,9 @@ import { JazzView } from "./views/JazzView";
 import { SettingsView } from "./views/SettingsView";
 import { FlowPage } from "./views/FlowView";
 import { MarketplaceView } from "./views/MarketplaceView";
+import { DocsView } from "./views/DocsView";
+import { ContextMenuHost } from "./components/ContextMenu";
+import { Zap } from "./components/icons";
 
 export function App() {
   const { ready, view, toasts, init, apply, toast } = useStore();
@@ -22,7 +25,7 @@ export function App() {
     return off;
   }, [init, apply]);
 
-  if (!ready) return <div className="splash"><div className="logo-big">⚡</div><div>TheFlashMaster</div></div>;
+  if (!ready) return <div className="splash"><div className="logo-big"><Zap size={56} strokeWidth={1.6} /></div><div className="splash-title">TheFlashMaster</div><div className="splash-bar"><i /></div></div>;
 
   return (
     <div className="app"
@@ -37,7 +40,7 @@ export function App() {
       }}>
       {dragging && <div className="drop-hint">Drop agent .md files to import them</div>}
       <Sidebar />
-      <main className="main">
+      <main className="main" key={view.kind === "chat" ? "chat" : view.kind}>
         {view.kind === "chat" && <ChatView key={view.chatId} chatId={view.chatId} />}
         {view.kind === "agents" && <AgentsView />}
         {view.kind === "dashboard" && <DashboardView />}
@@ -46,7 +49,9 @@ export function App() {
         {view.kind === "settings" && <SettingsView initialTab={view.tab} />}
         {view.kind === "flow" && <FlowPage key={view.agentId} agentId={view.agentId} />}
         {view.kind === "marketplace" && <MarketplaceView />}
+        {view.kind === "docs" && <DocsView initialPage={view.page} />}
       </main>
+      <ContextMenuHost />
       <div className="toasts">
         {toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}
       </div>

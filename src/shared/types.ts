@@ -40,6 +40,8 @@ export interface Chat {
   superpowers: boolean;
   mode: DriveMode | null; // LOCAL / ECO / COMFORT / SPORT model profile, null = chat harness/model
   autopilot: boolean; // auto-approve tool calls and tell agents not to stop for feedback
+  archived: boolean;
+  pinned: boolean;
   createdAt: number;
 }
 
@@ -59,6 +61,7 @@ export interface Message {
   seq: number; // server-assigned order: the UI always sorts by this
   attachments: Attachment[];
   steer: boolean; // sent as a steering message into a running turn
+  marker?: "context-reset"; // divider rows (not sent to agents)
   reactions: string[];
   replyCount: number;
 }

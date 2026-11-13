@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SquareKanban as SquareKanbanIcon } from "../components/icons";
 import type { Task, TaskStatus } from "@shared/types";
 import { TASK_STATUSES } from "@shared/types";
 import { api, ago, roleOf, useStore } from "../store";
@@ -24,7 +25,7 @@ export function TasksView() {
   return (
     <div className="page">
       <header className="page-header">
-        <h2>🗂️ Tasks</h2>
+        <h2><SquareKanbanIcon size={20} className="h-icon" /> Tasks</h2>
         <div className="row gap">
           <input placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
           <select value={project} onChange={(e) => setProject(e.target.value)}>

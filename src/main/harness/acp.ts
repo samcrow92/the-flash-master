@@ -244,6 +244,11 @@ export class AcpSession implements HarnessSession {
       case "tool_call_update":
         this.o.onEvent({ type: "tool", title: u.title ?? u.toolCallId ?? "tool", status: u.status ?? "pending", kind: asKind(u.kind) });
         break;
+      default: {
+        const t = u.content?.text ?? (Array.isArray(u.content) ? u.content.map((c: Json) => c?.text ?? c?.content?.text ?? "").join("") : "");
+        if (typeof t === "string" && t) this.o.onEvent({ type: "log", text: t });
+        break;
+      }
       case "plan":
         this.o.onEvent({ type: "plan", entries: (u.entries ?? []).map((e: Json) => ({ title: String(e.content ?? ""),
           status: ["pending", "in_progress", "completed", "failed"].includes(e.status) ? e.status : "pending" })) });
@@ -326,10 +331,12 @@ export class AcpAdapter implements HarnessAdapter {
    */
   async runCommand(p: ProbeOptions, command: string, onlyIfAdvertised: boolean): Promise<{ advertised: boolean; commands: string[]; text: string }> {
     let text = "";
+    let thought = "";
     const s = new AcpSession(p.executable ?? this.candidates[0]!, [...this.baseArgs, ...splitArgs(p.extraArgs)], {
       cwd: p.cwd, model: null, extraArgs: "", executable: p.executable, mcpServers: [], env: p.env, resumeSessionId: null,
       policy: { approval: "ask", readOnly: true, blocked: [], projectRoot: null },
-      onEvent: (e) => { if (e.type === "text") text += e.text; }, askPermission: async () => false,
+      onEvent: (e) => { if (e.type === "text" || e.type === "log") text += e.text; else if (e.type === "thought" && !text) thought += e.text; },
+      askPermission: async () => false,
     });
     try {
       await withTimeout(s.init(), 45000, `${this.label} did not start within 45s`);
@@ -338,7 +345,7 @@ export class AcpAdapter implements HarnessAdapter {
       if (!advertised && onlyIfAdvertised) return { advertised, commands, text: "" };
       const r = await withTimeout(s.prompt(`/${command}`), 60000, `/${command} did not answer within 60s`);
       if (r.stopReason === "error") throw new Error(r.error ?? `/${command} failed`);
-      return { advertised, commands, text };
+      return { advertised, commands, text: text || thought };
     } finally {
       s.close();
     }

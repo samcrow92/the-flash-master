@@ -37,6 +37,9 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE chats ADD COLUMN mode TEXT;
    ALTER TABLE chats ADD COLUMN autopilot INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE messages ADD COLUMN meta TEXT;`,
+  // v4: archive / pin chats
+  `ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 type Row = Record<string, any>;
@@ -99,6 +102,9 @@ export class Db {
     this.run("INSERT INTO projects VALUES(?,?,?,?)", p.id, p.name, p.path, p.createdAt);
     return p;
   }
+  renameProject(id: string, name: string): void {
+    this.run("UPDATE projects SET name=? WHERE id=?", name, id);
+  }
   removeProject(id: string): void {
     this.run("DELETE FROM projects WHERE id=?", id);
   }
@@ -122,7 +128,7 @@ export class Db {
   createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string }): Chat {
     const c: Chat = {
       id: newId(), projectId: i.projectId, title: i.title, kind: i.kind, agentRole: i.agentRole,
-      harness: null, model: null, superpowers: false, mode: null, autopilot: false, createdAt: now(),
+      harness: null, model: null, superpowers: false, mode: null, autopilot: false, archived: false, pinned: false, createdAt: now(),
     };
     this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
       c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.createdAt);
@@ -132,12 +138,16 @@ export class Db {
     const c = this.getChat(id);
     if (!c) throw new Error(`chat ${id} not found`);
     const n = { ...c, ...patch };
-    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, autopilot=? WHERE id=?",
-      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.autopilot ? 1 : 0, id);
+    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, autopilot=?, archived=?, pinned=? WHERE id=?",
+      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.autopilot ? 1 : 0, n.archived ? 1 : 0, n.pinned ? 1 : 0, id);
     return n;
   }
   deleteChat(id: string): void {
     this.run("DELETE FROM chats WHERE id=?", id);
+  }
+  /** Highest message seq of a chat (context-reset boundary). */
+  lastSeq(chatId: string): number {
+    return Number(this.get("SELECT MAX(seq) AS s FROM messages WHERE chat_id=?", chatId)?.s ?? 0);
   }
   getChatSummary(id: string): { summary: string | null; upto: number } {
     const r = this.get("SELECT summary, summary_upto FROM chats WHERE id=?", id);
@@ -166,10 +176,10 @@ export class Db {
     return r ? this.hydrate(r) : null;
   }
   addMessage(i: { chatId: string; parentId?: string | null; author: Message["author"]; content: string; agentId?: string | null;
-    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean }): Message {
+    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"] }): Message {
     const id = newId();
     this.seq += 1;
-    const meta = i.attachments?.length || i.steer ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer }) : null;
+    const meta = i.attachments?.length || i.steer || i.marker ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}) }) : null;
     this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now(), meta);
     return this.getMessage(id)!;
@@ -193,12 +203,12 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
-    let meta: { attachments?: Attachment[]; steer?: boolean } = {};
+    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"] } = {};
     try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
-      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer,
+      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}),
       reactions: this.reactions(r.id), replyCount,
     };
   }
@@ -226,7 +236,7 @@ export class Db {
     const sql = `SELECT * FROM agents ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY started_at DESC LIMIT 500`;
     return this.all(sql, ...p).map(toAgent);
   }
-  updateAgent(id: string, patch: { status?: AgentStatus; sessionId?: string; resultSummary?: string; lastActivity?: string;
+  updateAgent(id: string, patch: { status?: AgentStatus; sessionId?: string | null; resultSummary?: string; lastActivity?: string;
     ended?: boolean }): AgentRun {
     const sets: string[] = [];
     const p: any[] = [];
@@ -374,7 +384,8 @@ export class Db {
 const toProject = (r: Row): Project => ({ id: r.id, name: r.name, path: r.path, createdAt: Number(r.created_at) });
 const toChat = (r: Row): Chat => ({
   id: r.id, projectId: r.project_id ?? null, title: r.title, kind: r.kind, agentRole: r.agent_role, harness: r.harness ?? null,
-  model: r.model ?? null, superpowers: !!r.superpowers, mode: r.mode ?? null, autopilot: !!r.autopilot, createdAt: Number(r.created_at),
+  model: r.model ?? null, superpowers: !!r.superpowers, mode: r.mode ?? null, autopilot: !!r.autopilot,
+  archived: !!r.archived, pinned: !!r.pinned, createdAt: Number(r.created_at),
 });
 const toAgent = (r: Row): AgentRun => ({
   id: r.id, projectId: r.project_id ?? null, chatId: r.chat_id ?? null, role: r.role, harness: r.harness, model: r.model ?? null,

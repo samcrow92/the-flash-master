@@ -17,6 +17,8 @@ import {
 } from "./context";
 
 export interface OrchestratorDeps {
+  /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
+  harnessEnv?: (harness: HarnessId) => Record<string, string>;
   onModels?: (harness: HarnessId, models: import("@shared/types").ModelInfo[]) => void;
   log?: (level: "error" | "warn" | "info" | "debug", msg: string) => void;
   db: Db;
@@ -237,6 +239,25 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * Reset context: every agent session of the chat is closed and forgotten (no resume), the rolling summary is cleared
+   * and a boundary is set, so the next turn starts clean. Messages stay visible in the chat; a divider marks the reset.
+   */
+  resetContext(chatId: string): Message {
+    const lives = [...this.live.values()].filter((l) => l.chatId === chatId);
+    if (lives.some((l) => l.busy)) throw new Error("An agent is still working in this chat — stop it first, then reset the context.");
+    for (const l of lives) {
+      l.session?.close();
+      this.live.delete(l.key);
+      this.byAgent.delete(l.agentId);
+      this.emitAgent(this.d.db.updateAgent(l.agentId, { status: "done", ended: true, sessionId: null, lastActivity: "Context reset" }));
+    }
+    const m = this.d.db.addMessage({ chatId, author: "system", content: "Context reset — agents start fresh from here.", marker: "context-reset" });
+    this.d.db.setChatSummary(chatId, "", m.seq);
+    this.d.emit({ type: "message.created", message: m });
+    return m;
+  }
+
   /** Reactions double as approvals for pending permission requests (✅ allow / ❌ deny). */
   onReaction(messageId: string, emoji: string, reactions: string[]): void {
     const resolve = this.pendingPermissions.get(messageId);
@@ -296,10 +317,10 @@ export class Orchestrator {
       let recent: Message[] = [];
       if (firstTurn && !t.brief) {
         const cs = this.d.db.getChatSummary(t.chat.id);
-        const hist = this.d.db.history(t.chat.id, t.threadRoot, cs.upto).filter((m) => m.id !== reply.id && m.status !== "streaming");
+        const hist = this.d.db.history(t.chat.id, t.threadRoot, cs.upto).filter((m) => m.id !== reply.id && m.status !== "streaming" && !m.marker);
         hist.pop(); // the user message we are answering is sent as the request
         const plan = planCompaction(hist, s.tokens.compactAfterTokens, s.tokens.keepRecentTurns);
-        summary = cs.summary;
+        summary = cs.summary || null;
         if (plan.compact) {
           summary = extractiveSummary(cs.summary, plan.summarise);
           const lastSeq = hist[hist.length - plan.keep.length - 1]?.seq ?? cs.upto;
@@ -401,7 +422,7 @@ export class Orchestrator {
       extraArgs: [ins.args.join(" "), hs?.args ?? ""].filter(Boolean).join(" "),
       executable: status?.path ?? (hs?.path || null),
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
-      env: { ...networkEnv(s), ...ins.env },
+      env: { ...networkEnv(s), ...ins.env, ...(this.d.harnessEnv?.(live.harness) ?? {}) },
       resumeSessionId: this.d.db.getAgentSession(live.agentId),
       policy: {
         approval: s.permissions.approval, readOnly: s.permissions.readOnly, projectRoot: projectPath,

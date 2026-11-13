@@ -1,13 +1,15 @@
 import { useMemo, useRef, useState } from "react";
 import type { Attachment, Chat, DriveMode } from "@shared/types";
 import { DRIVE_MODES } from "@shared/types";
+import type { ReactNode } from "react";
 import { api, useStore } from "../store";
+import { AtSign, Flag, Home, Hourglass, Leaf, Paperclip, Plane, RotateCcw, Send, Settings, Slash, Sofa, Sparkles, CornerDownRight, X } from "./icons";
 
-const MODE_META: Record<DriveMode, { label: string; icon: string; hint: string }> = {
-  local: { label: "LOCAL", icon: "🏠", hint: "On-prem / local model" },
-  eco: { label: "ECO", icon: "🍃", hint: "Cheapest capable model" },
-  comfort: { label: "COMFORT", icon: "🛋️", hint: "Balanced quality and cost" },
-  sport: { label: "SPORT", icon: "🏁", hint: "Most capable model" },
+const MODE_META: Record<DriveMode, { label: string; icon: ReactNode; hint: string }> = {
+  local: { label: "LOCAL", icon: <Home size={13} />, hint: "On-prem / local model" },
+  eco: { label: "ECO", icon: <Leaf size={13} />, hint: "Cheapest capable model" },
+  comfort: { label: "COMFORT", icon: <Sofa size={13} />, hint: "Balanced quality and cost" },
+  sport: { label: "SPORT", icon: <Flag size={13} />, hint: "Most capable model" },
 };
 
 const toBase64 = (f: File) => new Promise<string>((res, rej) => {
@@ -25,6 +27,12 @@ export function Composer({ chat, parentId, placeholder, busy, compact }: { chat:
   const [atts, setAtts] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(0);
   const [whileBusy, setWhileBusy] = useState<"queue" | "steer">(settings?.chat.defaultSendWhileBusy ?? "steer");
+  const [resetting, setResetting] = useState(false);
+  const resetContext = async () => {
+    setResetting(true);
+    try { await api().resetContext(chat.id); } catch (e: any) { useStore.getState().toast("warn", String(e?.message ?? e)); }
+    setTimeout(() => setResetting(false), 700);
+  };
   const [dragOver, setDragOver] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
 
@@ -90,7 +98,7 @@ export function Composer({ chat, parentId, placeholder, busy, compact }: { chat:
               <span key={a.id} className="att-chip" title={`${a.name} · ${(a.size / 1024).toFixed(0)} KB`}>
                 {a.thumb ? <img src={a.thumb} alt="" /> : <span className="att-icon">📄</span>}
                 <span className="att-name">{a.name}</span>
-                <button onClick={() => setAtts((x) => x.filter((y) => y.id !== a.id))} title="Remove">✕</button>
+                <button onClick={() => setAtts((x) => x.filter((y) => y.id !== a.id))} title="Remove"><X size={12} /></button>
               </span>
             ))}
             {uploading > 0 && <span className="muted small">Uploading {uploading}…</span>}
@@ -107,24 +115,27 @@ export function Composer({ chat, parentId, placeholder, busy, compact }: { chat:
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
           }} />
         <div className="composer-bar">
-          <button className="cb-btn" title="Attach files or images (you can also paste or drop them)" onClick={async () => setAtts([...atts, ...(await api().pickAttachments(chat.id))])}>📎</button>
-          <button className="cb-btn" title="Route to a specialist" onClick={() => { setText((t) => (t.startsWith("@") ? t : `@${t}`)); ta.current?.focus(); }}>@</button>
-          <button className="cb-btn" title="Commands and workflows" onClick={() => { setText((t) => (t.startsWith("/") ? t : `/${t}`)); ta.current?.focus(); }}>/</button>
+          <button className="cb-btn" title="Attach files or images (you can also paste or drop them)" onClick={async () => setAtts([...atts, ...(await api().pickAttachments(chat.id))])}><Paperclip size={16} /></button>
+          <button className="cb-btn" title="Route to a specialist" onClick={() => { setText((t) => (t.startsWith("@") ? t : `@${t}`)); ta.current?.focus(); }}><AtSign size={16} /></button>
+          <button className="cb-btn" title="Commands and workflows" onClick={() => { setText((t) => (t.startsWith("/") ? t : `/${t}`)); ta.current?.focus(); }}><Slash size={15} /></button>
           {!compact && <>
             <span className="cb-sep" />
-            <button className={`cb-toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}>⚡ Superpowers</button>
+            <button className={`cb-toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}><Sparkles size={14} /> Superpowers</button>
             <button className={`cb-toggle autopilot ${chat.autopilot ? "on" : ""}`} title="Autopilot: approve all tool calls automatically and let agents work without asking for feedback (blocked commands and read-only mode still apply)"
-              onClick={() => patchChat({ autopilot: !chat.autopilot })}>🛩 Autopilot {chat.autopilot ? "on" : "off"}</button>
+              onClick={() => patchChat({ autopilot: !chat.autopilot })}><Plane size={14} className="autopilot-plane" /> Autopilot {chat.autopilot ? "on" : "off"}</button>
           </>}
+          {!compact && <button className={`cb-btn reset-ctx ${resetting ? "spin" : ""}`} disabled={busy}
+            title={busy ? "Stop the running agent to reset the context" : "Reset context — agents in this chat start fresh (messages stay visible)"}
+            onClick={resetContext}><RotateCcw size={15} /></button>}
           {busy && (
             <div className="seg small-seg" title="What sending does while the agent is still working">
-              <button className={whileBusy === "steer" ? "on" : ""} onClick={() => setWhileBusy("steer")}>↪ Steer</button>
-              <button className={whileBusy === "queue" ? "on" : ""} onClick={() => setWhileBusy("queue")}>⏳ Queue</button>
+              <button className={whileBusy === "steer" ? "on" : ""} onClick={() => setWhileBusy("steer")}><CornerDownRight size={13} /> Steer</button>
+              <button className={whileBusy === "queue" ? "on" : ""} onClick={() => setWhileBusy("queue")}><Hourglass size={13} /> Queue</button>
             </div>
           )}
           <span className="grow" />
           {text && <span className="muted small" title="Estimated tokens of this message">~{draftTokens} tok</span>}
-          <button className="primary send" onClick={() => send()} disabled={!text.trim() && !atts.length}>{busy ? (whileBusy === "steer" ? "Steer ↪" : "Queue ⏳") : "Send ⏎"}</button>
+          <button className="primary send" onClick={() => send()} disabled={!text.trim() && !atts.length}>{busy ? (whileBusy === "steer" ? <>Steer <CornerDownRight size={14} /></> : <>Queue <Hourglass size={14} /></>) : <>Send <Send size={14} /></>}</button>
         </div>
       </div>
       {!compact && <ModeBar chat={chat} onChange={(mode) => patchChat({ mode })} />}
@@ -151,7 +162,7 @@ function ModeBar({ chat, onChange }: { chat: Chat; onChange: (m: DriveMode | nul
           </button>
         );
       })}
-      <button className="mode-gear" title="Configure modes" onClick={() => st.setView({ kind: "settings", tab: "modes" })}>⚙</button>
+      <button className="mode-gear" title="Configure modes" onClick={() => st.setView({ kind: "settings", tab: "modes" })}><Settings size={15} /></button>
     </div>
   );
 }

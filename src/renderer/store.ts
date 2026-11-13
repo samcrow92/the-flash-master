@@ -12,7 +12,8 @@ export type View =
   | { kind: "jazz" }
   | { kind: "settings"; tab?: string }
   | { kind: "flow"; agentId: string }
-  | { kind: "marketplace" };
+  | { kind: "marketplace" }
+  | { kind: "docs"; page?: string };
 
 export interface Toast {
   id: number;

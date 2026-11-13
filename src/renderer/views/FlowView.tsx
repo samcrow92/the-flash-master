@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Compass as CompassIcon } from "../components/icons";
 import type { AgentEvent, AgentFlow, AgentRun, PlanStep } from "@shared/types";
 import { ago, api, fmtTokens, roleOf, useStore } from "../store";
 
@@ -156,7 +157,7 @@ export function FlowPage({ agentId }: { agentId: string }) {
   return (
     <div className="page">
       <header className="page-header">
-        <h2>🧭 Agent progress</h2>
+        <h2><CompassIcon size={20} className="h-icon" /> Agent progress</h2>
         <div className="row gap">
           {a?.chatId && <button onClick={() => st.openChat(a.chatId!)}>Open chat ↗</button>}
           <button onClick={() => st.setView({ kind: "agents" })}>← Agents</button>

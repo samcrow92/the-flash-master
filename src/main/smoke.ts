@@ -104,6 +104,30 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await click("Settings", ".sidebar button");
         await sleep(600);
       }
+      // New UI: right-click menu, context reset divider, documentation
+      if (!(await js<boolean>(`!!document.querySelector('.chat-link')`))) await click("brake-ecu", ".project-name");
+      await sleep(200);
+      await js(`(()=>{const el=[...document.querySelectorAll('.chat-link')].find(e=>e.textContent.includes('General'));el?.click();})()`);
+      await sleep(800);
+      await js(`(()=>{const b=document.querySelector('.reset-ctx');b&&!b.disabled&&b.click();})()`);
+      await sleep(900);
+      await js(`(()=>{const el=document.querySelector('.chat-link.active')||document.querySelector('.chat-link');if(!el)return;const r=el.getBoundingClientRect();el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.left+60,clientY:r.top+10}));})()`);
+      await sleep(400);
+      await shot(join(demo, "14-context-menu-reset.png"));
+      await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
+      await sleep(200);
+      await click("Documentation", ".sidebar button");
+      await sleep(1500);
+      await shot(join(demo, "15-docs-start.png"));
+      await click("Install Copilot CLI", ".docs-nav button");
+      await sleep(700);
+      await shot(join(demo, "16-docs-install.png"));
+      await click("Sign in to Copilot", ".docs-nav button");
+      await sleep(700);
+      await shot(join(demo, "17-docs-login.png"));
+      await click("Using TheFlashMaster", ".docs-nav button");
+      await sleep(700);
+      await shot(join(demo, "18-docs-use.png"));
       const ssoUrl = process.env.FLASH_SMOKE_JAZZ_SSO_URL;
       if (ssoUrl) {
         await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(ssoUrl)}, authType: "browser" } }).then(()=>{})`);

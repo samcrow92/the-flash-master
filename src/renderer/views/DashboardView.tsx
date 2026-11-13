@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LayoutDashboard as LayoutDashboardIcon } from "../components/icons";
 import type { UsageSummary } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
 
@@ -23,7 +24,7 @@ export function DashboardView() {
   return (
     <div className="page">
       <header className="page-header">
-        <h2>📊 Dashboard</h2>
+        <h2><LayoutDashboardIcon size={20} className="h-icon" /> Dashboard</h2>
         <div className="seg">
           {[1, 7, 30, 90].map((d) => <button key={d} className={days === d ? "on" : ""} onClick={() => setDays(d)}>{d === 1 ? "Today" : `${d}d`}</button>)}
         </div>

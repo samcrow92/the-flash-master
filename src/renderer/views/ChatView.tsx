@@ -7,6 +7,8 @@ import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
 import { UsageMeter } from "../components/UsageMeter";
 import { Composer } from "../components/Composer";
+import { openMenu } from "../components/ContextMenu";
+import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Smile, Square, Trash2, User, Info, X, Zap } from "../components/icons";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -41,8 +43,9 @@ export function ChatView({ chatId }: { chatId: string }) {
                 onBlur={(e) => { setEditingTitle(false); if (e.target.value.trim()) void update({ title: e.target.value.trim() }); }}
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
             ) : (
-              <h2 onDoubleClick={() => !isMaster && setEditingTitle(true)} title={isMaster ? "" : "Double-click to rename"}>
-                {isMaster ? "⚡ TheFlashMaster — master chat" : chat.title}
+              <h2 className="chat-h2" onDoubleClick={() => !isMaster && setEditingTitle(true)} title={isMaster ? "" : "Double-click to rename"}>
+                {isMaster ? <><Zap size={18} className="h2-bolt" /> TheFlashMaster — master chat</> : chat.title}
+                {!isMaster && <button className="title-edit" title="Rename chat" onClick={() => setEditingTitle(true)}><Pencil size={14} /></button>}
               </h2>
             )}
             <div className="muted small">{project ? project.path : isMaster ? "Coordinator across all projects" : "No project"}</div>
@@ -51,7 +54,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             <label className="ctl" title="Default agent for this chat (override per message with @role)">
               <span>Agent</span>
               <select value={chat.agentRole} onChange={(e) => update({ agentRole: e.target.value })}>
-                {st.roles.map((r) => <option key={r.name} value={r.name}>{r.icon} {r.title}</option>)}
+                {st.roles.map((r) => <option key={r.name} value={r.name}>{r.title}</option>)}
               </select>
             </label>
             <label className="ctl" title="Harness used for new agent sessions in this chat">
@@ -68,16 +71,22 @@ export function ChatView({ chatId }: { chatId: string }) {
             </label>
             {chat.mode && <span className={`pill mode-pill mode-${chat.mode}`} title="Drive mode overrides the harness/model below">{chat.mode.toUpperCase()}</span>}
             <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
-              onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}>🧭 Progress</button>
-            {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}>■ Stop</button>}
-            {!isMaster && (
-              <button className="ghost" title="Delete chat" onClick={async () => {
-                if (!confirm(`Delete chat "${chat.title}"?`)) return;
-                await api().deleteChat(chatId);
-                st.removeChat(chat);
-                if (st.masterChatId) void st.openChat(st.masterChatId);
-              }}>🗑</button>
-            )}
+              onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={15} /> Progress</button>
+            {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={13} fill="currentColor" /> Stop</button>}
+            <button className="ghost icon-only" title="More actions" onClick={(e) => openMenu(e, [
+              ...(!isMaster ? [{ label: "Rename", icon: <Pencil size={15} />, onClick: () => setEditingTitle(true) },
+                { label: chat.pinned ? "Unpin" : "Pin to top", icon: chat.pinned ? <PinOff size={15} /> : <Pin size={15} />, onClick: () => update({ pinned: !chat.pinned }) }] : []),
+              { label: "Reset context", icon: <RotateCcw size={15} />, disabled: busy, onClick: () => api().resetContext(chatId).catch((er) => st.toast("warn", String(er?.message ?? er))) },
+              { label: "Copy as Markdown", icon: <Copy size={15} />, onClick: async () => { await navigator.clipboard.writeText(await api().exportChat(chatId)); st.toast("info", "Chat copied as Markdown"); } },
+              ...(!isMaster ? [{ separator: true, label: "" },
+                { label: "Archive", icon: <Archive size={15} />, onClick: async () => { st.upsertChat(await api().updateChat(chatId, { archived: true, pinned: false })); if (st.masterChatId) void st.openChat(st.masterChatId); } },
+                { label: "Delete", icon: <Trash2 size={15} />, danger: true, onClick: async () => {
+                  if (!confirm(`Delete chat "${chat.title}"?`)) return;
+                  await api().deleteChat(chatId);
+                  st.removeChat(chat);
+                  if (st.masterChatId) void st.openChat(st.masterChatId);
+                } }] : []),
+            ], true)}><MoreHorizontal size={17} /></button>
           </div>
         </header>
 
@@ -86,12 +95,12 @@ export function ChatView({ chatId }: { chatId: string }) {
             {chatAgents.map((a) => (
               <span key={a.id} className={`agent-chip st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
                 <button className="chip-main" onClick={() => st.openFlow(chatId, a.id)}>
-                  {roleOf(a.role)?.icon} {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
+                  <RoleIcon role={a.role} emoji={roleOf(a.role)?.icon} size={16} /> {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
                   {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}
                 </button>
-                {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause">⏸</button>}
-                {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume">▶</button>}
-                <button onClick={() => api().stopAgent(a.id)} title="Stop">■</button>
+                {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
+                {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume"><Play size={12} /></button>}
+                <button onClick={() => api().stopAgent(a.id)} title="Stop"><Square size={11} fill="currentColor" /></button>
               </span>
             ))}
           </div>
@@ -131,12 +140,18 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
   const showTokens = useStore((s) => s.settings?.tokens.showTokenCounts);
   const [picker, setPicker] = useState(false);
   const who = m.author === "user" ? "You" : m.author === "system" ? "System" : role?.title ?? m.role ?? "Agent";
-  const icon = m.author === "user" ? "🧑" : m.author === "system" ? "ℹ️" : role?.icon ?? "🤖";
   const react = (e: string) => { setPicker(false); void api().toggleReaction(m.id, e); };
+
+  if (m.marker === "context-reset") {
+    return <div className="ctx-divider" title={new Date(m.createdAt).toLocaleString()}><span><RotateCcw size={13} /> Context reset — agents start fresh from here</span></div>;
+  }
+  const avatar = m.author === "user" ? <span className="role-badge user"><User size={15} /></span>
+    : m.author === "system" ? <span className="role-badge sys"><Info size={15} /></span>
+    : <RoleIcon role={m.role} emoji={role?.icon} size={32} />;
 
   return (
     <div className={`msg msg-${m.author} ${m.status === "error" ? "msg-error" : ""}`}>
-      <div className={`avatar ${m.status === "streaming" ? "avatar-working" : ""}`}><span>{icon}</span></div>
+      <div className={`avatar ${m.status === "streaming" ? "avatar-working" : ""}`}>{avatar}</div>
       <div className="msg-body">
         <div className="msg-head">
           <span className="who">{who}</span>
@@ -148,13 +163,13 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
           )}
         </div>
         <div className="msg-content">
-          {m.steer && <span className="steer-badge" title="Sent while the agent was working, to steer it">↪ steering</span>}
+          {m.steer && <span className="steer-badge" title="Sent while the agent was working, to steer it"><CornerUpLeft size={11} /> steering</span>}
           {m.author === "user" ? <div className="plain">{m.content}</div> : <Markdown text={m.content || (m.status === "streaming" ? "" : "")} />}
           {m.attachments.length > 0 && (
             <div className="msg-atts">
               {m.attachments.map((a) => (
                 <button key={a.id} className={`msg-att ${a.thumb ? "img" : ""}`} title={`${a.name} — click to open`} onClick={() => void api().openAttachment(a.path)}>
-                  {a.thumb ? <img src={a.thumb} alt={a.name} /> : <><span>📄</span><span className="att-name">{a.name}</span><span className="muted small">{(a.size / 1024).toFixed(0)} KB</span></>}
+                  {a.thumb ? <img src={a.thumb} alt={a.name} /> : <><FileText size={16} /><span className="att-name">{a.name}</span><span className="muted small">{(a.size / 1024).toFixed(0)} KB</span></>}
                 </button>
               ))}
             </div>
@@ -166,13 +181,13 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
         <div className="msg-footer">
           {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title="Toggle reaction">{r}</button>)}
           <div className="msg-actions">
-            <button onClick={() => setPicker((p) => !p)} title="React">☺</button>
-            {!inThread && onReply && <button onClick={onReply} title="Reply in thread">↩ Reply</button>}
-            <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy">⧉</button>
+            <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={14} /></button>
+            {!inThread && onReply && <button onClick={onReply} title="Reply in thread"><CornerUpLeft size={13} /> Reply</button>}
+            <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={13} /></button>
           </div>
           {picker && <div className="emoji-picker">{EMOJIS.map((e) => <button key={e} onClick={() => react(e)}>{e}</button>)}</div>}
           {!inThread && m.replyCount > 0 && onReply && (
-            <button className="reply-count" onClick={onReply}>💬 {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}</button>
+            <button className="reply-count" onClick={onReply}><MessageCircle size={13} /> {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}</button>
           )}
         </div>
       </div>
@@ -189,7 +204,7 @@ function ThreadPanel() {
     <aside className="thread">
       <header className="thread-header">
         <strong>Thread</strong>
-        <button className="ghost" onClick={st.closeThread}>✕</button>
+        <button className="ghost icon-only" title="Close thread" onClick={st.closeThread}><X size={16} /></button>
       </header>
       <div className="messages" ref={ref}>
         {t.messages.map((m, i) => (
