@@ -50,9 +50,9 @@
   },
   "flashmaster": {
     "updates": {
-      "url": "",
+      "url": "https://forvia-hella.ghe.com/marianmarcel-abagiu/the-flash-master",
       "channel": "stable",
-      "_comment": "Set url to the GitHub repository whose releases carry latest.json, e.g. https://github.company.com/team/the-flash-master (github.com and GitHub Enterprise Server), or a web folder with latest.json."
+      "_comment": "Set url to the GitHub repository whose releases carry latest.json, e.g. https://github.company.com/team/the-flash-master (github.com, GitHub Enterprise Server, <name>.ghe.com), or a web folder with latest.json."
     }
   }
 }
