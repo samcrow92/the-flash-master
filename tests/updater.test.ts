@@ -30,6 +30,8 @@ describe("update source parsing", () => {
     expect(parseFeed("https://github.com/acme/the-flash-master.git")).toMatchObject({ kind: "github", api: "https://api.github.com", web: "https://github.com/acme/the-flash-master" });
     expect(parseFeed("https://github.hella.com/ele/the-flash-master/")).toMatchObject({ kind: "github", api: "https://github.hella.com/api/v3", owner: "ele", repo: "the-flash-master" });
     expect(parseFeed("https://files.corp/apps/flash/latest.json")).toEqual({ kind: "folder", base: "https://files.corp/apps/flash" });
+    expect(parseFeed("https://forvia-hella.ghe.com/marianmarcel-abagiu/the-flash-master")).toMatchObject({ kind: "github",
+      api: "https://api.forvia-hella.ghe.com", web: "https://forvia-hella.ghe.com/marianmarcel-abagiu/the-flash-master", owner: "marianmarcel-abagiu", repo: "the-flash-master" });
     expect(parseFeed("")).toBeNull();
   });
 });

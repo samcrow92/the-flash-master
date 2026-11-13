@@ -96,7 +96,7 @@ export function parseProxy(value: string, bypass = ""): ParsedProxy | null {
 /** Errors where the proxy setup itself (not the server) is the problem, and another proxy mode may work. */
 export function isProxySetupError(e: unknown): boolean {
   const s = String((e as { message?: string })?.message ?? e);
-  return /ERR_NO_SUPPORTED_PROXIES|ERR_MANDATORY_PROXY_CONFIGURATION_FAILED|ERR_PROXY_CONNECTION_FAILED|ERR_PAC_SCRIPT_FAILED|ERR_PAC_NOT_IN_DHCP/i.test(s);
+  return /ERR_NO_SUPPORTED_PROXIES|ERR_MANDATORY_PROXY_CONFIGURATION_FAILED|ERR_PROXY_CONNECTION_FAILED|ERR_PAC_SCRIPT_FAILED|ERR_PAC_NOT_IN_DHCP|ERR_TUNNEL_CONNECTION_FAILED/i.test(s);
 }
 
 /** Modes to try, in order, after `primary` failed with a proxy setup error. */
@@ -116,6 +116,8 @@ export function explainProxyError(e: unknown, resolved?: string): string {
   const s = String((e as { message?: string })?.message ?? e);
   if (/ERR_NO_SUPPORTED_PROXIES/i.test(s))
     return `The proxy configuration gives no proxy the app can use${resolved ? ` (resolved to "${resolved}")` : ""}. Set Settings → Network → HTTP(S) proxy to host:port (e.g. proxy.company.com:8080), or ask IT for the PAC file URL and enter it there.`;
+  if (/ERR_TUNNEL_CONNECTION_FAILED/i.test(s))
+    return `The proxy${resolved ? ` (${resolved})` : ""} refused to connect to this server. For company-internal servers add the host to Settings → Network → No proxy (e.g. .hella.com); otherwise the proxy may need a sign-in or block this address.`;
   if (/ERR_PROXY_CONNECTION_FAILED/i.test(s)) return `The proxy${resolved ? ` (${resolved})` : ""} can't be reached. Check Settings → Network → HTTP(S) proxy.`;
   if (/PAC/i.test(s)) return "The proxy auto-configuration (PAC) script couldn't be loaded. Enter the proxy directly in Settings → Network.";
   return s;

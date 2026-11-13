@@ -30,10 +30,13 @@ export function parseFeed(url: string): { kind: "github"; web: string; api: stri
   let p: URL;
   try { p = new URL(u); } catch { return null; }
   const parts = p.pathname.split("/").filter(Boolean);
-  const looksGithub = /github/i.test(p.hostname) && parts.length >= 2 && !/\.json$/i.test(p.pathname);
+  // github.com, GitHub Enterprise Server (github.company.com) and GitHub Enterprise Cloud with data residency (<name>.ghe.com).
+  const ghe = /\.ghe\.com$/i.test(p.hostname);
+  const looksGithub = (/github/i.test(p.hostname) || ghe) && parts.length >= 2 && !/\.json$/i.test(p.pathname);
   if (looksGithub) {
     const [owner, repo] = parts;
-    const api = p.hostname === "github.com" || p.hostname === "www.github.com" ? "https://api.github.com" : `${p.origin}/api/v3`;
+    const api = p.hostname === "github.com" || p.hostname === "www.github.com" ? "https://api.github.com"
+      : ghe ? `https://api.${p.hostname.replace(/^api\./i, "")}` : `${p.origin}/api/v3`;
     return { kind: "github", web: `${p.origin}/${owner}/${repo}`, api, owner: owner!, repo: repo! };
   }
   return { kind: "folder", base: /\.json$/i.test(p.pathname) ? u.slice(0, u.lastIndexOf("/")) : u };
@@ -74,9 +77,11 @@ export class Updater {
     if (hours > 0) this.timer = setInterval(() => void run(), hours * 3600000);
   }
 
-  private headers(json: boolean): Record<string, string> {
+  /** api = GitHub REST API; web = a release download link or web folder (GitHub's web answers HTTP 406 to "Accept: application/json"). */
+  private headers(kind: boolean | "api" | "web"): Record<string, string> {
     const t = this.d.feed().token;
-    return { ...(t ? { Authorization: `token ${t}` } : {}), Accept: json ? "application/json" : "application/octet-stream", "User-Agent": "TheFlashMaster-updater" };
+    const accept = kind === "api" ? "application/vnd.github+json" : kind === "web" ? "*/*" : kind ? "application/json" : "application/octet-stream";
+    return { ...(t ? { Authorization: `token ${t}` } : {}), Accept: accept, "User-Agent": "TheFlashMaster-updater" };
   }
 
   /** Find the newest release manifest. */
@@ -103,9 +108,10 @@ export class Updater {
   }
 
   private async getJson(url: string, api: boolean): Promise<any> {
-    const r = await this.d.fetch(url, { headers: this.headers(true) });
+    const r = await this.d.fetch(url, { headers: this.headers(api ? "api" : "web") });
     const body = await r.text();
-    if (!r.ok) throw new Error(`HTTP ${r.status} for ${url.replace(/\?.*$/, "")}${r.status === 404 && !api ? " — no release with latest.json, or the repository needs sign-in" : ""}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status} for ${url.replace(/\?.*$/, "")}${r.status === 404 && !api ? " — no release with latest.json, or the repository needs sign-in" : ""}`
+      + (r.status === 406 && !api ? " — this looks like a GitHub repository page, not a folder with latest.json; use the repository URL (https://host/owner/repo)" : ""));
     if (isLoginPage(r, body)) throw new Error("The repository needs sign-in — click “Sign in to GitHub” or set a token");
     try { return JSON.parse(body); } catch { throw new Error(`Not JSON at ${url} (sign-in page?)`); }
   }

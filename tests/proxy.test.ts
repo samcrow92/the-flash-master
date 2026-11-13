@@ -57,6 +57,7 @@ d("fallbacks and errors", () => {
   it("detects proxy setup errors", () => {
     expect(isProxySetupError(new Error("net::ERR_NO_SUPPORTED_PROXIES"))).toBe(true);
     expect(isProxySetupError("net::ERR_PROXY_CONNECTION_FAILED")).toBe(true);
+    expect(isProxySetupError(new Error("net::ERR_TUNNEL_CONNECTION_FAILED"))).toBe(true);
     expect(isProxySetupError(new Error("net::ERR_NAME_NOT_RESOLVED"))).toBe(false);
   });
   it("explains ERR_NO_SUPPORTED_PROXIES", () => {
