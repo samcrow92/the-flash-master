@@ -38,6 +38,8 @@ jobs:
           # Optional enterprise code signing: add these repository secrets to sign the executables.
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Update manifest (latest.json for the in-app updater)
+        run: node scripts/release-manifest.mjs
       - name: Checksums
         shell: pwsh
         run: Get-ChildItem release/*.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Out-File -Encoding ascii release/SHA256SUMS.txt
@@ -46,6 +48,7 @@ jobs:
           name: TheFlashMaster-windows-x64
           path: |
             release/*.exe
+            release/latest.json
             release/SHA256SUMS.txt
       - name: Publish GitHub Release
         shell: bash
@@ -56,4 +59,4 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [[ "$GITHUB_REF" != refs/tags/* ]]; then TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"; EXTRA="--draft --prerelease --target ${GITHUB_SHA}"; fi
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "TheFlashMaster ${TAG#v}" --generate-notes $EXTRA
-          gh release upload "$TAG" release/*.exe release/SHA256SUMS.txt --clobber
+          gh release upload "$TAG" release/*.exe release/latest.json release/SHA256SUMS.txt --clobber

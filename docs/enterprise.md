@@ -100,3 +100,7 @@ If a request returns HTTP 401, TheFlashMaster reads the server's `WWW-Authentica
 ```
 
 npm packages are installed into `%APPDATA%/TheFlashMaster/mcp/npm/<id>` and run with Electron-as-Node, so Node.js is only needed once, for the download. Context7 and Fetch call the internet through the configured proxy. Disable them if that is not allowed.
+
+## Updates
+
+`updates.feedUrl` overrides the repository's update source (package.json → `flashmaster.updates.url`), and `updates.channel` / `updates.autoDownload` can be preset or locked. See [updates.md](updates.md).

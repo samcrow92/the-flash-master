@@ -17,10 +17,11 @@
     "test": "vitest run",
     "test:py": "node scripts/run-pytest.mjs",
     "ci": "node scripts/ci.mjs",
-    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never && node scripts/release-manifest.mjs",
     "predev": "node scripts/ensure-electron.mjs",
     "prebuild": "node scripts/ensure-electron.mjs",
-    "predist:win": "node scripts/ensure-electron.mjs"
+    "predist:win": "node scripts/ensure-electron.mjs",
+    "release:manifest": "node scripts/release-manifest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -46,5 +47,12 @@
   },
   "engines": {
     "node": ">=22.13"
+  },
+  "flashmaster": {
+    "updates": {
+      "url": "",
+      "channel": "stable",
+      "_comment": "Set url to the GitHub repository whose releases carry latest.json, e.g. https://github.company.com/team/the-flash-master (github.com and GitHub Enterprise Server), or a web folder with latest.json."
+    }
   }
 }

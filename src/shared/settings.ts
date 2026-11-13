@@ -41,6 +41,13 @@ export interface Settings {
     keepProjectInstructions: boolean; // in clean mode, still load the project's AGENTS.md / instruction files
     houseRules: string; // extra rules sent to every agent (your workflow/setup)
   };
+  updates: {
+    autoCheck: boolean; // check at startup and every few hours
+    autoDownload: boolean; // download in the background; installing always asks
+    channel: "stable" | "beta"; // beta = include pre-releases
+    feedUrl: string; // override of the repository's update source (package.json → flashmaster.updates.url)
+    hasToken: boolean; // a read-only GitHub token is stored (encrypted)
+  };
   usage: {
     copilotMeter: boolean; // show Copilot premium-request usage (from Copilot's /usage) under the chat box
     refreshMinutes: number; // 0 = only manual refresh
@@ -139,6 +146,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
+  updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true },
   tokens: {
     dailyBudget: 0,

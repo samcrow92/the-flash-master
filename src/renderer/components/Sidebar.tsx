@@ -6,7 +6,7 @@ import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
 import {
   Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
-  Moon, MoreHorizontal, Pause, Pencil, Pin, PinOff, Plus, Puzzle, RoleIcon, RotateCcw, Settings, SquareKanban, Sun, Trash2, Zap,
+  Download, Moon, MoreHorizontal, Pause, Pencil, Pin, PinOff, Plus, Puzzle, RoleIcon, RotateCcw, Settings, SquareKanban, Sun, Trash2, Zap,
 } from "./icons";
 
 const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
@@ -190,6 +190,13 @@ export function Sidebar() {
       </div>
 
       {importing && <AgentImportDialog onClose={() => setImporting(false)} />}
+      {st.update && ["available", "downloading", "ready"].includes(st.update.status) && (
+        <button className={`update-pill ${st.update.status}`} onClick={() => st.update?.status === "ready" ? api().updateInstall() : st.setView({ kind: "settings", tab: "about" })}
+          title={st.update.status === "ready" ? "Restart TheFlashMaster and install the update" : "Open update details"}>
+          <Download size={14} />
+          <span>{st.update.status === "ready" ? `Restart to update to ${st.update.latest}` : st.update.status === "downloading" ? `Downloading ${st.update.latest}… ${st.update.progress ?? 0}%` : `Update ${st.update.latest} available`}</span>
+        </button>
+      )}
       <div className="sidebar-footer row">
         <button className="profile-btn" title={`${st.settings?.profile.name || "Your profile"} — change name and picture`}
           onClick={() => st.setView({ kind: "settings", tab: "general" })}><UserAvatar size={26} /></button>

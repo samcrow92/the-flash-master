@@ -234,6 +234,20 @@ export interface Requirement {
 export interface RmModuleData { module: RmModule; fetchedAt: number; requirements: Requirement[]; config: string }
 export interface RmHit { id: string; module: string; moduleTitle: string; section: string; type: string; text: string; score: number }
 
+export interface UpdateState {
+  status: "idle" | "disabled" | "checking" | "up-to-date" | "available" | "downloading" | "ready" | "error";
+  current: string;
+  latest?: string;
+  notes?: string;
+  progress?: number;
+  size?: number;
+  error?: string;
+  needsSignIn?: boolean;
+  checkedAt?: number;
+  mode: "installer" | "portable" | "dev";
+  feed: string;
+}
+
 export interface CopilotUsage {
   ok: boolean;
   fetchedAt: number;
@@ -280,6 +294,7 @@ export type AppEvent =
   | { type: "models.updated"; models: HarnessModels }
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "artifacts.changed"; chatId: string }
+  | { type: "update.state"; state: UpdateState }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
 

@@ -51,7 +51,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
           {tab === "network" && <Network {...f} />}
           {tab === "data" && <Data {...f} />}
           {tab === "advanced" && <Advanced {...f} />}
-          {tab === "about" && <About />}
+          {tab === "about" && <About f={f} />}
         </div>
       </div>
     </div>
@@ -653,11 +653,56 @@ function Advanced(f: F) {
   </>;
 }
 
-function About() {
+function Updates({ f }: { f: F }) {
+  const st = useStore();
+  const u = st.update;
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
+  const statusText: Record<string, string> = {
+    idle: "Not checked yet", disabled: "No update source configured", checking: "Checking…", "up-to-date": "You have the latest version",
+    available: `Version ${u?.latest} is available`, downloading: `Downloading ${u?.latest}…`, ready: `Version ${u?.latest} is ready to install`, error: "Update check failed",
+  };
+  return <>
+    <h4>Updates</h4>
+    <div className="panel update-panel">
+      <div className="row between">
+        <div>
+          <strong>{statusText[u?.status ?? "idle"]}</strong>
+          <div className="muted small">Installed {u?.current ?? "?"} · {u?.mode === "portable" ? "portable exe" : u?.mode === "installer" ? "installed version" : "running from source (no install)"}
+            {u?.checkedAt ? ` · checked ${new Date(u.checkedAt).toLocaleString()}` : ""}</div>
+        </div>
+        <div className="row gap">
+          <button disabled={busy || u?.status === "checking" || u?.status === "downloading"} onClick={() => run(() => api().updateCheck())}>↻ Check now</button>
+          {u?.status === "available" && <button className="primary" disabled={busy} onClick={() => run(() => api().updateDownload())}>Download</button>}
+          {u?.status === "ready" && <button className="primary" onClick={() => api().updateInstall()}>Restart & install</button>}
+        </div>
+      </div>
+      {u?.status === "downloading" && <div className="usage-bar big"><div className="usage-fill ok" style={{ width: `${u.progress ?? 5}%` }} /></div>}
+      {u?.notes && (u.status === "available" || u.status === "ready") && <div className="small pre muted">{u.notes}</div>}
+      {u?.error && <div className="warn-note small">{u.error}</div>}
+      {u?.needsSignIn && <div className="row gap"><button className="primary" onClick={() => run(async () => { const r = await api().updateSignIn(); st.toast(r.ok ? "info" : "error", r.detail); })}>Sign in to GitHub</button>
+        <span className="muted small">The repository is private or internal — sign in once (company SSO works), or set a token below.</span></div>}
+      <div className="muted small">Source: <code>{u?.feed || "not set"}</code></div>
+    </div>
+    <Row label="Check automatically" hint="At start and every 6 hours."><Bool f={f} path="updates.autoCheck" /></Row>
+    <Row label="Download in the background" hint="Installing always asks first."><Bool f={f} path="updates.autoDownload" /></Row>
+    <Row label="Channel"><Choice f={f} path="updates.channel" options={[["stable", "Stable releases"], ["beta", "Include pre-releases"]]} /></Row>
+    <Row label="Update source (override)" hint="Normally set in the repository (package.json → flashmaster.updates.url). A GitHub repository URL (github.com or GitHub Enterprise) or a web folder containing latest.json.">
+      <Text f={f} path="updates.feedUrl" placeholder="https://github.company.com/team/the-flash-master" /></Row>
+    <Row label="GitHub token (optional)" hint={f.s.updates.hasToken ? "A token is stored (encrypted). Paste a new one to replace it, or save empty to remove." : "Only for private repositories when sign-in is not possible: a read-only token (fine-grained: Contents read)."}>
+      <div className="row gap"><input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={f.s.updates.hasToken ? "••••••" : "ghp_… / github_pat_…"} />
+        <button onClick={() => run(async () => { await api().updateSetToken(token); setToken(""); st.setSettings((await api().getSettings()).settings); })}>Save</button></div>
+    </Row>
+  </>;
+}
+
+function About({ f }: { f: F }) {
   const [info, setInfo] = useState<{ version: string; dataDir: string; platform: string } | null>(null);
   useEffect(() => { void api().appInfo().then(setInfo); }, []);
   return <div>
     <h3>⚡ TheFlashMaster {info?.version}</h3>
+    <Updates f={f} />
     <p className="muted">Desktop orchestrator for AI coding agents on locally authenticated harnesses (GitHub Copilot CLI, OpenCode, Pi, GitLab Duo).</p>
     <p className="small">Data folder: <code>{info?.dataDir}</code><br />Platform: {info?.platform}</p>
     <p className="small muted">Enterprise policy: place <code>%PROGRAMDATA%\TheFlashMaster\policy.json</code> with <code>{"{ \"settings\": {…}, \"lock\": [\"network\", …] }"}</code> to preset and lock settings.</p>

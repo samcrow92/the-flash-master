@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message,
+  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -127,6 +127,14 @@ export interface FlashApi {
   updateSettings(patch: DeepPartial<Settings>): Promise<Settings>;
   resetSettings(): Promise<Settings>;
   exportData(): Promise<string | null>;
+  // updates
+  updateState(): Promise<UpdateState>;
+  updateCheck(): Promise<UpdateState>;
+  updateDownload(): Promise<UpdateState>;
+  updateInstall(): Promise<void>;
+  /** Sign in to the repository's GitHub (company SSO) in a window, for private/internal repositories. */
+  updateSignIn(): Promise<{ ok: boolean; detail: string }>;
+  updateSetToken(token: string): Promise<void>;
   appInfo(): Promise<{ version: string; dataDir: string; platform: string }>;
 }
 
@@ -138,7 +146,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
-  "updateSettings", "resetSettings", "exportData", "appInfo",
+  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "appInfo",
 ];
 
 export interface FlashBridge {

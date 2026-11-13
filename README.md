@@ -51,6 +51,7 @@ The app calls no model API itself and stores no model credentials. There's no lo
 - **Task board** in SQLite: kanban with priorities, an assignee agent and Jazz links. **Run with agent** starts the assigned specialist with the task as its brief.
 - **IBM Jazz (EWM/RTC):** search work items across several project areas (pick the area right in the Jazz page), view details and discussion, comment, edit and run workflow actions, analyse an item with an agent, create tasks from items, and let agents query, update or comment through MCP tools. Form, Basic or Windows (integrated) sign-in, with clear HTTP 401 guidance.
 - **Recommended MCP servers:** Context7, Sequential Thinking, MarkItDown (on by default), plus Fetch, Git, Memory and Playwright. Installed automatically and attached per role (Settings → MCP).
+- **Self-update** from your repository's releases (github.com, GitHub Enterprise or an internal web folder) — configure once in `package.json`, see [docs/updates.md](docs/updates.md).
 - **Copilot usage meter:** premium requests from Copilot's own `/usage`, shown as a bar under the chat box, with a detailed view in Settings → Usage.
 - **Superpowers workflow on demand:** off by default.
   - Toggle it per chat (`/superpowers`), or load one phase: `/brainstorm`, `/plan`, `/execute`, `/tdd`, `/debug`, `/review`, `/verify`.

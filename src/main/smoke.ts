@@ -175,6 +175,16 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       const tall = await js<number>(`document.querySelector('.chat .messages').scrollHeight`);
       log("info", `smoke-scroll: distance-to-bottom=${gap} contentHeight=${tall}`);
       await shot(join(demo, "30-chat-opened-at-latest.png"));
+      // Updates (FLASH_UPDATE_URL points at a local feed in the demo)
+      if (process.env.FLASH_UPDATE_URL) {
+        await js(`window.flash.api.updateCheck().then(()=>{})`);
+        await sleep(1200);
+        await click("Settings", ".sidebar button");
+        await sleep(400);
+        await click("About", ".tabs button");
+        await sleep(700);
+        await shot(join(demo, "31-updates.png"));
+      }
       // Profile: initials first, then a generated picture
       await click("Settings", ".sidebar button");
       await sleep(400);

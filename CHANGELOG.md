@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **Self-update from your repository's releases:**
+  - **Source:** set once in `package.json` (`flashmaster.updates.url`): a github.com or GitHub Enterprise repository, or a web folder. Settings and policy can override it.
+  - **Releases** carry `latest.json`, written by `scripts/release-manifest.mjs`, now part of `npm run dist:win` and the release workflow.
+  - **Download:** in the background, with SHA-256 verification.
+  - **Install:** the installer runs silently and restarts the app; the portable exe swaps itself in place.
+  - **Private repositories:** sign in once in an app window (SSO), or use a read-only token (encrypted).
+  - **UI:** stable and pre-release channels, a sidebar pill ("Restart to update"), and Settings → About with status, progress and notes.
 - **Delegation reliability (TheFlashMaster → specialists):**
   - The app's tool servers now get the essential environment (PATH, SystemRoot, TEMP, proxy…) and the bridge settings as arguments, so they work even when a harness starts them with only the variables we pass. On Windows, without SystemRoot a process cannot open sockets.
   - The forwarder uses `node:http` without the 5-minute `fetch` timeout, so long specialist runs no longer drop.

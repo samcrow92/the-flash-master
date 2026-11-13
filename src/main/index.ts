@@ -17,6 +17,7 @@ import { JazzClient, type FetchLike } from "./jazz";
 import { parseCopilotUsage } from "./copilot-usage";
 import { Requirements, parseRmLink } from "./requirements";
 import { SecretStore } from "./secrets";
+import { Updater, parseFeed } from "./updater";
 import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
@@ -332,6 +333,48 @@ const scheduleUsage = () => {
   usageTimer = setInterval(() => void refreshCopilotUsage(), Math.max(5, u.refreshMinutes) * 60000);
 };
 
+// ---------------- app updates (repository releases with latest.json) ----------------
+const updatesSession = () => session.fromPartition("persist:updates");
+const updateSecret = join(dataDir, "updates.secret");
+/** Update source: setting/policy override, else the repository's package.json (flashmaster.updates.url). */
+const repoUpdates = (() => { try { return JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8"))?.flashmaster?.updates ?? {}; } catch { return {}; } })();
+const updateFeed = () => {
+  const u = settings.get().updates;
+  return { url: (u.feedUrl || process.env.FLASH_UPDATE_URL || repoUpdates.url || "").trim(), channel: (u.channel || repoUpdates.channel || "stable") as "stable" | "beta", token: secrets.get(updateSecret) };
+};
+const updater = new Updater({
+  fetch: (url, init) => updatesSession().fetch(url, { ...init, redirect: "follow", credentials: "include" } as any) as any,
+  version: app.getVersion(),
+  mode: !app.isPackaged ? "dev" : process.env.PORTABLE_EXECUTABLE_FILE ? "portable" : "installer",
+  portablePath: process.env.PORTABLE_EXECUTABLE_FILE,
+  dataDir, feed: updateFeed,
+  emit: (state) => emit({ type: "update.state", state }),
+  spawnDetached: (cmd, args) => {
+    void import("node:child_process").then(({ spawn }) => spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: false }).unref());
+  },
+  quit: () => setTimeout(() => app.quit(), 300),
+});
+/** Sign in to GitHub (Enterprise) in a window; cookies stay in the updates session. */
+function updateSignIn(): Promise<{ ok: boolean; detail: string }> {
+  const f = parseFeed(updateFeed().url);
+  if (!f || f.kind !== "github") return Promise.resolve({ ok: false, detail: "The update source is not a GitHub repository" });
+  return new Promise((resolve) => {
+    const w = new BrowserWindow({ width: 1000, height: 780, parent: win ?? undefined, title: "Sign in to GitHub", autoHideMenuBar: true,
+      webPreferences: { session: updatesSession(), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    let done = false;
+    const finish = async (ok: boolean, detail: string) => {
+      if (done) return;
+      done = true;
+      if (!w.isDestroyed()) w.close();
+      resolve({ ok, detail });
+      if (ok) void updater.check();
+    };
+    w.webContents.on("did-navigate", (_e, url) => { if (url.startsWith(f.web) && !/\/login|\/session|saml|sso/i.test(url)) void finish(true, "Signed in"); });
+    w.on("closed", () => void finish(true, "Window closed"));
+    void w.loadURL(`${f.web}/releases`);
+  });
+}
+
 // ---------------- marketplace ----------------
 const marketplace = new Marketplace({
   dataDir, rolesDir: userRolesDir, skillsDir: userSkillsDir,
@@ -646,6 +689,12 @@ const api: FlashApi = {
     writeFileSync(r.filePath, JSON.stringify({ settings: settings.get(), data: db.exportAll() }, null, 2));
     return r.filePath;
   },
+  updateState: async () => updater.state,
+  updateCheck: async () => updater.check(),
+  updateDownload: async () => updater.download(),
+  updateInstall: async () => updater.install(),
+  updateSignIn: async () => updateSignIn(),
+  updateSetToken: async (token) => { await secrets.set(updateSecret, token.trim()); settings.update({ updates: { hasToken: !!token.trim() } }); void updater.check(); },
   appInfo: async () => ({ version: app.getVersion(), dataDir, platform: `${process.platform}-${process.arch}` }),
 };
 
@@ -693,20 +742,23 @@ async function applyProxy(): Promise<void> {
     const cfg = { proxyRules: proxy.replace(/^https?:\/\//, "").replace(/\/$/, ""), proxyBypassRules: bypass };
     await session.defaultSession.setProxy(cfg);
     await jazzSession().setProxy(cfg);
+    await updatesSession().setProxy(cfg);
     log("info", `proxy: ${proxy.replace(/\/\/[^@/]*@/, "//***@")} (${n.proxy ? "settings" : "environment"})`);
   } else {
     await session.defaultSession.setProxy({ mode: "system" });
     await jazzSession().setProxy({ mode: "system" });
+    await updatesSession().setProxy({ mode: "system" });
   }
 }
 settings.onChange(() => void applyProxy());
 
 app.whenReady().then(async () => {
-  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret)]);
+  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret)]);
   await applyProxy();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
   createWindow();
+  if (settings.get().updates.autoCheck) updater.schedule(6, () => settings.get().updates.autoDownload);
   // Detect harnesses, then discover models of the available ones in the background (cache refreshed daily).
   void harnesses.detectAll(settings.get()).then((list) => {
     for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
