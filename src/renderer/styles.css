@@ -167,7 +167,7 @@ code.inline-code.copied { box-shadow: 0 0 0 1px var(--green); background: color-
 .table td.actions { white-space: nowrap; } .table td.actions button { padding: 2px 8px; margin-right: 3px; }
 .activity { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status { font-size: 11.5px; padding: 1px 8px; border-radius: 10px; background: var(--bg3); white-space: nowrap; }
-.st-running { color: var(--green); } .st-paused { color: var(--amber); } .st-error { color: var(--red); } .st-idle, .st-done { color: var(--blue); } .st-stopped { color: var(--muted); }
+.st-running { color: var(--green); } .st-paused, .st-interrupted { color: var(--amber); } .st-error { color: var(--red); } .st-idle, .st-done { color: var(--blue); } .st-stopped { color: var(--muted); }
 .warn-badge { display: inline-grid; place-content: center; width: 15px; height: 15px; border-radius: 50%; background: var(--amber); color: #000; font-size: 10px; font-weight: 700; margin-left: 5px; }
 .warn-note { border-left: 3px solid var(--amber); padding: 6px 10px; background: var(--bg3); border-radius: 6px; font-size: 12.5px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
@@ -294,7 +294,7 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 .branch-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 6px; }
 .branch-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
 .branch-node { text-align: left; display: grid; gap: 2px; border-left: 3px solid var(--line); }
-.branch-node.st-running { border-left-color: var(--green); } .branch-node.st-paused { border-left-color: var(--amber); }
+.branch-node.st-running { border-left-color: var(--green); } .branch-node.st-paused, .branch-node.st-interrupted { border-left-color: var(--amber); }
 .branch-node.st-error, .branch-node.st-stopped { border-left-color: var(--red); } .branch-node.st-idle, .branch-node.st-done { border-left-color: var(--blue); }
 .timeline h4 { margin: 4px 0 6px; }
 .tl-row { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 8px; align-items: center; font-size: 12.5px; padding: 3px 0; border-bottom: 1px solid var(--line); }

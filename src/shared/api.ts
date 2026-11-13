@@ -38,6 +38,10 @@ export interface FlashApi {
   // agents
   listAgents(filter?: { projectId?: string | null; activeOnly?: boolean }): Promise<AgentRun[]>;
   startAgent(input: { projectId: string | null; role: string; brief: string }): Promise<AgentRun>;
+  /** Resume an agent that was working when the app closed (status "interrupted"). */
+  resumeInterrupted(id: string): Promise<AgentRun>;
+  /** Resume every interrupted agent; returns how many started. */
+  resumeAllInterrupted(): Promise<number>;
   pauseAgent(id: string): Promise<void>;
   resumeAgent(id: string): Promise<void>;
   stopAgent(id: string): Promise<void>;
@@ -157,7 +161,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "toggleReaction", "listAgents", "startAgent",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "toggleReaction", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

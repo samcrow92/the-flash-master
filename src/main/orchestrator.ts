@@ -19,7 +19,7 @@ import { prepareInstructions } from "./harness/instructions";
 import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
-  parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
+  parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
 export interface OrchestratorDeps {
@@ -77,6 +77,12 @@ interface Live {
   /** TheFlashMaster's tools weren't confirmed loaded (Pi, MCP blocked…): the agent may call them as TOOL lines. */
   textTools?: boolean;
   depth: number;
+  /** Last time the harness sent anything (text, tool update, plan…) during a turn; drives the stuck-agent watchdog. */
+  lastOutputAt?: number;
+  /** The watchdog already warned about this silence (cleared when output resumes). */
+  stuckSince?: number | null;
+  /** Waiting for the user to answer a permission request: silence is expected. */
+  awaitingApproval?: boolean;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
   lastResult: string | null;
@@ -114,6 +120,8 @@ function copilotMcpBlocked(homeDir: string): boolean {
     });
   } catch { return false; }
 }
+
+const SAID_LABEL: Record<Exclude<ResultStatus, "done">, string> = { needs_decision: "Needs your decision", blocked: "Blocked", failed: "Reported a failure" };
 
 export class Orchestrator {
   private live = new Map<string, Live>();
@@ -274,7 +282,7 @@ export class Orchestrator {
     const l = this.byAgent.get(agentId);
     if (!l) {
       const a = this.d.db.getAgent(agentId);
-      if (a && ["idle", "running", "paused"].includes(a.status)) this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true }));
+      if (a && ["idle", "running", "paused", "interrupted"].includes(a.status)) this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true }));
       return;
     }
     l.queue = [];
@@ -287,6 +295,99 @@ export class Orchestrator {
     this.byAgent.delete(agentId);
     this.finishWaiters(l, "stopped by user");
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true, lastActivity: "Stopped" }));
+  }
+
+  /**
+   * Stuck-agent watchdog, called every 30 s by the app. A working agent that has sent nothing for
+   * `agents.stuckAfterMinutes` gets one warning in its chat, its progress flow and a notice; it keeps running, and
+   * the warning clears as soon as output resumes. Agents waiting for an approval or for a busy specialist are not stuck.
+   */
+  checkStuck(now = Date.now()): string[] {
+    const mins = this.d.settings().agents.stuckAfterMinutes;
+    if (!mins || mins <= 0) return [];
+    const flagged: string[] = [];
+    for (const l of this.live.values()) {
+      if (!l.busy || l.paused || l.stopped || l.awaitingApproval || l.stuckSince || !l.currentMessageId || !l.lastOutputAt) continue;
+      if (now - l.lastOutputAt < mins * 60_000) continue;
+      const waitingOnSpecialist = [...this.live.values()].some((c) => c.busy && c.key.startsWith(`${l.agentId}>`));
+      if (waitingOnSpecialist) continue;
+      l.stuckSince = now;
+      const quiet = Math.round((now - l.lastOutputAt) / 60_000);
+      this.setStatus(l, "running", `⏳ No output for ${quiet} min: may be stuck`);
+      this.flow(l.agentId, { kind: "status", label: `no output for ${quiet} min`, status: "stuck" });
+      this.system(l.chatId, l.threadRoot, `⏳ **${l.role.icon} ${l.role.title}** has sent nothing for ${quiet} min. `
+        + "It is still running: keep waiting, send a message to steer it, or stop it.", "warn");
+      flagged.push(l.agentId);
+    }
+    return flagged;
+  }
+
+  private noteOutput(l: Live): void {
+    l.lastOutputAt = Date.now();
+    if (!l.stuckSince) return;
+    const quiet = Math.round((l.lastOutputAt - l.stuckSince) / 60_000);
+    l.stuckSince = null;
+    this.flow(l.agentId, { kind: "status", label: "output resumed", status: "running" });
+    this.setStatus(l, "running", quiet > 0 ? "Working again after a long silence" : "Working again");
+  }
+
+  /** After a restart: tell each affected chat which agents were interrupted and that they can be resumed. */
+  announceInterrupted(agents: AgentRun[]): void {
+    const byChat = new Map<string, AgentRun[]>();
+    for (const a of agents) if (a.chatId) byChat.set(a.chatId, [...(byChat.get(a.chatId) ?? []), a]);
+    for (const [chatId, list] of byChat) {
+      if (!this.d.db.getChat(chatId)) continue;
+      const names = list.map((a) => { const r = this.d.roles().find((x) => x.name === a.role); return r ? `${r.icon} ${r.title}` : a.role; });
+      this.system(chatId, null, `⏸ The app closed while ${names.join(", ")} ${list.length === 1 ? "was" : "were"} working. `
+        + "Resume from the agent chip above the composer or from the Agents page; nothing was lost.", "warn");
+    }
+  }
+
+  /**
+   * Resume an agent the app interrupted by closing. Its harness session is gone, so it starts a fresh one with its
+   * original brief and a note to check what is already done before continuing.
+   */
+  resumeInterrupted(agentId: string): AgentRun {
+    const a = this.d.db.getAgent(agentId);
+    if (!a || a.status !== "interrupted") throw new Error("this agent isn't waiting to be resumed");
+    const chat = a.chatId ? this.d.db.getChat(a.chatId) : null;
+    if (!chat) { this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped" })); throw new Error("its chat was deleted"); }
+    const role = this.role(a.role);
+    let depth = 0;
+    for (let p = a.parentAgentId; p && depth < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) depth++;
+    const threadRoot = this.d.db.lastThreadOf(agentId);
+    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
+    if (this.live.has(key)) {
+      this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", lastActivity: "Superseded: the same agent is already running again" }));
+      throw new Error(`${role.title} is already running again in this chat`);
+    }
+    const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
+    const l: Live = { key, agentId, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [] };
+    this.live.set(key, l);
+    this.byAgent.set(agentId, l);
+    this.emitAgent(this.d.db.updateAgent(agentId, { status: "idle", ended: false, lastActivity: "Resuming after the app restarted" }));
+    this.flow(agentId, { kind: "status", label: "resumed after restart", status: "running" });
+    const kids = this.d.db.childAgents(agentId).filter((c) => c.status !== "stopped");
+    const input = [
+      "The app was closed while you were working on this, and it has just been reopened. Your earlier session is gone.",
+      "Check what is already done (files, the task board, your specialists' results) and continue where you left off. Don't redo finished work.",
+      kids.length ? `Specialists you started earlier (use get_result with these ids instead of delegating again): ${kids.map((c) => `${c.role} ${c.id} (${c.status})`).join("; ")}.` : "",
+    ].filter(Boolean).join("\n");
+    void this.turn({ chat, threadRoot, role, input, skills: [], depth, brief: a.parentAgentId ? a.brief : null, liveKey: key })
+      .catch((e) => this.system(chat.id, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
+    return this.d.db.getAgent(agentId)!;
+  }
+
+  /** Resume every interrupted agent, specialists before the agents that delegated to them. */
+  resumeAllInterrupted(): number {
+    const list = this.d.db.listInterrupted();
+    const depthOf = (a: AgentRun) => { let d = 0; for (let p = a.parentAgentId; p && d < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) d++; return d; };
+    let n = 0;
+    for (const a of list.sort((x, y) => depthOf(y) - depthOf(x))) {
+      try { this.resumeInterrupted(a.id); n++; } catch { /* superseded or chat deleted: already marked stopped */ }
+    }
+    return n;
   }
 
   async stopChat(chatId: string): Promise<void> {
@@ -430,6 +531,8 @@ export class Orchestrator {
     live.tools = new Map();
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
+    live.lastOutputAt = Date.now();
+    live.stuckSince = null;
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
     let text = "";
@@ -538,12 +641,17 @@ export class Orchestrator {
       const compact = resultForParent(text, t.role.maxResultTokens);
       live.lastResult = compact;
       const resultLine = /summary:\s*(.+)/.exec(compact)?.[1] ?? compact.replace(/\s+/g, " ");
+      // What the agent itself says about how it ended (status line of its <result> block).
+      const said = status === "done" ? (parseResult(text).status ?? "done") : "done";
+      const asks = said !== "done" ? (parseResult(text).question ?? resultLine) : null;
       this.flow(live.agentId, status === "error" ? { kind: "error", label: (res.error ?? "error").slice(0, 160) }
+        : said !== "done" ? { kind: "status", label: `${SAID_LABEL[said]}: ${asks!.slice(0, 150)}`, status: said }
         : { kind: status === "done" ? "result" : "status", label: status === "done" ? resultLine.slice(0, 160) : status, status });
       this.emitAgent(this.d.db.updateAgent(live.agentId, { status: status === "done" ? "idle" : status, resultSummary: compact.slice(0, 4000),
-        lastActivity: status === "done" ? "Waiting for input" : status, ended: status === "stopped" }));
+        lastActivity: status === "done" ? (said !== "done" ? `${SAID_LABEL[said]}: ${asks}` : "Waiting for input") : status, ended: status === "stopped" }));
+      if (said !== "done") this.surfaceSaid(live, t.chat.id, t.threadRoot, said, asks!);
       if (t.taskId) {
-        const task = this.d.db.updateTask(t.taskId, { status: status === "error" ? "blocked" : "review" });
+        const task = this.d.db.updateTask(t.taskId, { status: status === "error" || said !== "done" ? "blocked" : "review" });
         this.d.emit({ type: "task.updated", task });
       }
       this.finishWaiters(live, compact);
@@ -628,6 +736,7 @@ export class Orchestrator {
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
       },
       onEvent: (e) => {
+        this.noteOutput(live);
         if (live.awaiting.length && (e.type === "text" || e.type === "tool" || e.type === "thought")) this.markSeen(live, false);
         if (e.type === "steer_ack") this.markSeen(live, true);
         if (e.type === "text") live.sink?.(e.text);
@@ -658,10 +767,13 @@ export class Orchestrator {
       role: live.role.name, content: `🔐 **${live.role.title}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
     this.setStatus(live, "running", "Waiting for your approval");
+    live.awaitingApproval = true;
     this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "waiting" });
     this.d.emit({ type: "notice", level: "warn", text: `${live.role.title} is waiting for approval` });
     return new Promise((resolve) => {
       this.pendingPermissions.set(msg.id, (allow) => {
+        live.awaitingApproval = false;
+        live.lastOutputAt = Date.now();
         this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: allow ? "allowed" : "denied" });
         resolve(allow);
       });
@@ -875,6 +987,17 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
 
   private finishWaiters(l: Live, result: string): void {
     for (const w of l.waiters.splice(0)) w(result);
+  }
+
+  /**
+   * A specialist reported that it needs a decision, is blocked, or failed. Its delegating agent gets this in the
+   * result as usual; the user also sees it right away in the thread and as a notice, without waiting for the coordinator.
+   */
+  private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string): void {
+    const icon = said === "needs_decision" ? "❓" : said === "blocked" ? "⛔" : "⚠️";
+    const who = `${l.role.icon} ${l.role.title}`;
+    if (l.depth > 0) this.system(chatId, threadRoot, `${icon} **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}`);
+    this.d.emit({ type: "notice", level: said === "failed" ? "error" : "warn", text: `${who} ${SAID_LABEL[said].toLowerCase()}: ${asks}`.replace(/[*`]/g, "").slice(0, 140) });
   }
 
   private setStatus(l: Live, status: AgentRun["status"], activity: string): void {

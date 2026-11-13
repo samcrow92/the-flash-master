@@ -62,7 +62,7 @@ log("info", `starting TheFlashMaster ${app.getVersion()}`);
 const db = new Db(join(dataDir, "flashmaster.db"));
 db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
 settings.onChange((st) => { db.defaultAutopilot = st.general.autopilotDefault !== false; });
-db.reapOrphans();
+const interruptedAtStart = db.interruptOrphans();
 db.applyRetention(settings.get().data.retentionDays);
 
 let roles: RoleDef[] = [];
@@ -135,6 +135,10 @@ const orch = new Orchestrator({
     saveModels();
   },
 });
+// Agents that were working when the app last closed: tell their chats they can be resumed.
+orch.announceInterrupted(interruptedAtStart);
+// Stuck-agent watchdog: warns (once per silence) about working agents that have sent nothing for a while.
+setInterval(() => orch.checkStuck(), 30_000).unref();
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {
@@ -558,6 +562,8 @@ const api: FlashApi = {
   startAgent: async (i) => orch.startAgent(i.projectId, i.role, i.brief),
   pauseAgent: async (id) => orch.pause(id),
   resumeAgent: async (id) => orch.resume(id),
+  resumeInterrupted: async (id) => orch.resumeInterrupted(id),
+  resumeAllInterrupted: async () => orch.resumeAllInterrupted(),
   stopAgent: async (id) => orch.stop(id),
   stopAll: async () => orch.stopAll(),
   getAgentFlow: async (agentId) => {
