@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, safeStorage, shell, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, safeStorage, session, shell, Notification } from "electron";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -238,7 +238,31 @@ function createWindow(): void {
 
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 
+/**
+ * Proxy: Settings → Network wins; otherwise the standard https_proxy/http_proxy/no_proxy environment variables
+ * (how most enterprise machines are configured); otherwise the Windows system proxy. Applied to Electron's network
+ * stack (Jazz). Harness, MCP and pip processes inherit the environment and get the setting via networkEnv().
+ */
+function envProxy(): { proxy: string; noProxy: string } {
+  const e = process.env;
+  return { proxy: e.https_proxy || e.HTTPS_PROXY || e.http_proxy || e.HTTP_PROXY || "", noProxy: e.no_proxy || e.NO_PROXY || "" };
+}
+async function applyProxy(): Promise<void> {
+  const n = settings.get().network;
+  const fromEnv = envProxy();
+  const proxy = n.proxy || fromEnv.proxy;
+  const bypass = [n.noProxy || fromEnv.noProxy, "<local>"].filter(Boolean).join(",");
+  if (proxy) {
+    await session.defaultSession.setProxy({ proxyRules: proxy.replace(/^https?:\/\//, "").replace(/\/$/, ""), proxyBypassRules: bypass });
+    log("info", `proxy: ${proxy.replace(/\/\/[^@/]*@/, "//***@")} (${n.proxy ? "settings" : "environment"})`);
+  } else {
+    await session.defaultSession.setProxy({ mode: "system" });
+  }
+}
+settings.onChange(() => void applyProxy());
+
 app.whenReady().then(async () => {
+  await applyProxy();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
   createWindow();

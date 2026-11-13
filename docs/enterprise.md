@@ -28,6 +28,13 @@ Locked keys are greyed out in Settings and ignored if written. If `lock` is omit
 
 ## Network
 
+**Default: environment variables.** If `https_proxy` / `http_proxy` / `no_proxy` are set (the usual enterprise setup), TheFlashMaster uses them everywhere, with nothing to configure:
+- the Electron binary download during `npm run dev` / build
+- harness processes, MCP servers and pip (inherited)
+- the app's own network stack for Jazz (applied at startup)
+
+Without them it falls back to the Windows system proxy. `127.0.0.1` / `localhost` are always bypassed for the app's internal bridge. A value in Settings → Network overrides the environment.
+
 - The proxy, no-proxy list and CA bundle are passed to the harness processes (`HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`), to the MCP servers and to pip.
 - Jazz requests go through Electron's network stack, which uses the **system proxy and the Windows certificate store**.
 - **Offline mode** skips MCP installs at startup.

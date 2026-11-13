@@ -125,7 +125,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   winidea: { installPath: "", workspace: "", sdkPath: "" },
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
-  network: { proxy: "", noProxy: "localhost,127.0.0.1", caBundlePath: "", offline: false },
+  network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
   data: { retentionDays: 0 },
   advanced: { logLevel: "info", devTools: false, showMockHarness: true },
 };

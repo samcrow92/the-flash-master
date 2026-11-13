@@ -502,8 +502,12 @@ const FALLBACK_ROLE: RoleDef = {
 
 export function networkEnv(s: Settings): Record<string, string> {
   const env: Record<string, string> = {};
+  // The MCP servers reach the app over 127.0.0.1: make sure an inherited corporate proxy never intercepts that.
+  const inherited = process.env.no_proxy || process.env.NO_PROXY || "";
+  const local = "localhost,127.0.0.1";
+  const np = [s.network.noProxy || inherited, local].filter(Boolean).join(",");
+  Object.assign(env, { NO_PROXY: np, no_proxy: np });
   if (s.network.proxy) Object.assign(env, { HTTPS_PROXY: s.network.proxy, HTTP_PROXY: s.network.proxy, https_proxy: s.network.proxy, http_proxy: s.network.proxy });
-  if (s.network.noProxy) Object.assign(env, { NO_PROXY: s.network.noProxy, no_proxy: s.network.noProxy });
   if (s.network.caBundlePath) Object.assign(env, { NODE_EXTRA_CA_CERTS: s.network.caBundlePath, SSL_CERT_FILE: s.network.caBundlePath, REQUESTS_CA_BUNDLE: s.network.caBundlePath });
   return env;
 }

@@ -250,9 +250,9 @@ function Integrations(f: F) {
 
 function Network(f: F) {
   return <>
-    <p className="muted">Applied to harness processes, MCP servers and pip. Jazz requests use the system proxy and the Windows certificate store.</p>
-    <Row label="HTTP(S) proxy"><Text f={f} path="network.proxy" placeholder="http://proxy.company.com:8080" /></Row>
-    <Row label="No proxy"><Text f={f} path="network.noProxy" /></Row>
+    <p className="muted">Leave the proxy empty to use your <code>https_proxy</code> / <code>http_proxy</code> / <code>no_proxy</code> environment variables (or, without them, the Windows system proxy). A value here overrides them for harnesses, MCP servers, pip and Jazz.</p>
+    <Row label="HTTP(S) proxy" hint="Blank = environment variables / system proxy."><Text f={f} path="network.proxy" placeholder="from environment" /></Row>
+    <Row label="No proxy" hint="Blank = no_proxy environment variable. localhost is always bypassed."><Text f={f} path="network.noProxy" placeholder="from environment" /></Row>
     <Row label="Custom CA bundle (PEM)" hint="For TLS-inspecting corporate proxies."><Text f={f} path="network.caBundlePath" /></Row>
     <Row label="Offline mode" hint="Skip anything that needs the network (MCP installs)."><Bool f={f} path="network.offline" /></Row>
   </>;
