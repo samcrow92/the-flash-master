@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
+  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
 } from "@shared/types";
 
 const MIGRATIONS: string[] = [
@@ -40,6 +40,10 @@ const MIGRATIONS: string[] = [
   // v4: archive / pin chats
   `ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`,
+  // v5: files changed by agents (diff viewer)
+  `CREATE TABLE file_changes(id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, agent_id TEXT, role TEXT, path TEXT NOT NULL,
+     old_text TEXT, new_text TEXT NOT NULL, added INTEGER NOT NULL DEFAULT 0, removed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+   CREATE INDEX file_changes_chat ON file_changes(chat_id, created_at);`,
 ];
 
 type Row = Record<string, any>;
@@ -353,6 +357,27 @@ export class Db {
     this.run("DELETE FROM tasks WHERE id=?", id);
   }
 
+  // ---------- file changes ----------
+  addFileChange(i: { chatId: string; agentId: string | null; role: string | null; path: string; oldText: string | null; newText: string; added: number; removed: number }): string {
+    const id = newId().slice(0, 12);
+    this.run("INSERT INTO file_changes VALUES(?,?,?,?,?,?,?,?,?,?)", id, i.chatId, i.agentId, i.role, i.path, i.oldText, i.newText, i.added, i.removed, now());
+    return id;
+  }
+  updateFileChange(id: string, newText: string, added: number, removed: number): void {
+    this.run("UPDATE file_changes SET new_text=?, added=?, removed=?, created_at=? WHERE id=?", newText, added, removed, now(), id);
+  }
+  getFileChange(id: string): FileChange | null {
+    const r = this.get("SELECT * FROM file_changes WHERE id=?", id);
+    return r ? { ...toChange(r), oldText: (r.old_text as string | null) ?? "", newText: r.new_text as string } : null;
+  }
+  listFileChanges(chatId: string): FileChange[] {
+    return this.all("SELECT id, chat_id, agent_id, role, path, added, removed, created_at, old_text IS NULL AS is_new, length(new_text)=0 AS deleted FROM file_changes WHERE chat_id=? ORDER BY created_at DESC", chatId).map(toChange);
+  }
+  listChatArtifacts(chatId: string): (Omit<Artifact, "content"> & { role: string | null })[] {
+    return this.all(`SELECT a.id, a.agent_id, a.kind, a.title, a.bytes, a.created_at, g.role FROM artifacts a JOIN agents g ON g.id=a.agent_id
+      WHERE g.chat_id=? ORDER BY a.created_at DESC`, chatId).map((r) => ({ id: r.id, agentId: r.agent_id, kind: r.kind, title: r.title, bytes: Number(r.bytes), createdAt: Number(r.created_at), role: r.role ?? null }));
+  }
+
   // ---------- artifacts ----------
   addArtifact(i: { agentId: string | null; kind: string; title: string; content: string }): Artifact {
     const a: Artifact = { id: newId().slice(0, 8), agentId: i.agentId, kind: i.kind, title: i.title, content: i.content,
@@ -376,11 +401,16 @@ export class Db {
   }
   exportAll(): Record<string, Row[]> {
     const out: Record<string, Row[]> = {};
-    for (const t of ["projects", "chats", "messages", "reactions", "agents", "agent_events", "tasks", "usage", "artifacts"]) out[t] = this.all(`SELECT * FROM ${t}`);
+    for (const t of ["projects", "chats", "messages", "reactions", "agents", "agent_events", "tasks", "usage", "artifacts", "file_changes"]) out[t] = this.all(`SELECT * FROM ${t}`);
     return out;
   }
 }
 
+const toChange = (r: Row): FileChange => ({
+  id: r.id, chatId: r.chat_id, agentId: r.agent_id ?? null, role: r.role ?? null, path: r.path, createdAt: Number(r.created_at),
+  added: Number(r.added), removed: Number(r.removed), isNew: r.is_new !== undefined ? !!r.is_new : r.old_text == null,
+  deleted: r.deleted !== undefined ? !!r.deleted : String(r.new_text ?? "").length === 0,
+});
 const toProject = (r: Row): Project => ({ id: r.id, name: r.name, path: r.path, createdAt: Number(r.created_at) });
 const toChat = (r: Row): Chat => ({
   id: r.id, projectId: r.project_id ?? null, title: r.title, kind: r.kind, agentRole: r.agent_role, harness: r.harness ?? null,

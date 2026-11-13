@@ -130,6 +130,7 @@ const asKind = (k: unknown): ToolKind => (KINDS.includes(k as ToolKind) ? (k as 
 export class AcpSession implements HarnessSession {
   sessionId: string | null = null;
   models: ModelInfo[] = [];
+  private seenDiffs = new Set<string>();
   /** Slash commands the agent advertised (available_commands_update), without the leading "/". */
   commands: string[] = [];
   private commandWaiters: (() => void)[] = [];
@@ -242,7 +243,15 @@ export class AcpSession implements HarnessSession {
         break;
       case "tool_call":
       case "tool_call_update":
-        this.o.onEvent({ type: "tool", title: u.title ?? u.toolCallId ?? "tool", status: u.status ?? "pending", kind: asKind(u.kind) });
+        if (u.title || u.status || u.sessionUpdate === "tool_call") this.o.onEvent({ type: "tool", title: u.title ?? u.toolCallId ?? "tool", status: u.status ?? "pending", kind: asKind(u.kind) });
+        // File edits come as diff content (ACP ToolCallContent "diff": path, oldText, newText)
+        for (const c of Array.isArray(u.content) ? u.content : []) {
+          if (c?.type !== "diff" || typeof c.path !== "string" || typeof c.newText !== "string") continue;
+          const key = `${u.toolCallId}|${c.path}|${c.newText.length}`;
+          if (this.seenDiffs.has(key)) continue;
+          this.seenDiffs.add(key);
+          this.o.onEvent({ type: "diff", path: c.path, oldText: typeof c.oldText === "string" ? c.oldText : null, newText: c.newText });
+        }
         break;
       default: {
         const t = u.content?.text ?? (Array.isArray(u.content) ? u.content.map((c: Json) => c?.text ?? c?.content?.text ?? "").join("") : "");
@@ -286,7 +295,9 @@ export class AcpSession implements HarnessSession {
         if (this.o.policy.readOnly) throw new Error("read-only mode is on");
         if (!insideRoot(root, p.path)) throw new Error("path outside project folder");
         await mkdir(dirname(p.path), { recursive: true });
+        const before = await readFile(p.path, "utf8").catch(() => null);
         await writeFile(p.path, p.content, "utf8");
+        if (before !== p.content) this.o.onEvent({ type: "diff", path: p.path, oldText: before, newText: p.content });
         return null;
       }
       default:

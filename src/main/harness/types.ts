@@ -21,7 +21,8 @@ export type HarnessEvent =
   | { type: "thought"; text: string }
   | { type: "tool"; title: string; status: string; kind: ToolKind }
   | { type: "plan"; entries: { title: string; status: "pending" | "in_progress" | "completed" | "failed" }[] }
-  | { type: "log"; text: string };
+  | { type: "log"; text: string }
+  | { type: "diff"; path: string; oldText: string | null; newText: string };
 
 export interface TurnResult {
   stopReason: "end_turn" | "cancelled" | "max_tokens" | "refusal" | "error" | string;

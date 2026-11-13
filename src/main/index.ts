@@ -93,6 +93,19 @@ const orch = new Orchestrator({
   },
 });
 
+// ---------------- git helpers (read-only, for the diff viewer) ----------------
+const chatProject = (chatId: string): string | null => {
+  const c = db.getChat(chatId);
+  return c?.projectId ? db.getProject(c.projectId)?.path ?? null : null;
+};
+const git = async (cwd: string, args: string[]): Promise<{ code: number | null; out: string }> => {
+  const { execFile } = await import("node:child_process");
+  return new Promise((resolve) => {
+    execFile("git", ["-c", "core.quotepath=off", ...args], { cwd, maxBuffer: 32 * 1024 * 1024, windowsHide: true, encoding: "utf8" },
+      (err, stdout, stderr) => resolve({ code: err ? ((err as any).code ?? 1) : 0, out: err ? `${stdout}${stderr}` : stdout }));
+  });
+};
+
 // ---------------- Copilot token (optional sign-in without /login), encrypted with safeStorage ----------------
 const copilotSecret = join(dataDir, "copilot.secret");
 const readCopilotToken = (): string => {
@@ -208,7 +221,8 @@ const rmApi = (): JazzClient | null => {
 const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config);
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
-bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects, emitTask: (task) => emit({ type: "task.updated", task }) }));
+bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects,
+  onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }) }));
 
 // ---------------- chat attachments ----------------
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
@@ -484,6 +498,40 @@ const api: FlashApi = {
     return orch.runTask(t, role);
   },
   getArtifact: async (id) => db.getArtifact(id),
+  chatArtifacts: async (chatId) => {
+    const c = db.getChat(chatId);
+    const p = c?.projectId ? db.getProject(c.projectId) : null;
+    return { changes: db.listFileChanges(chatId), artifacts: db.listChatArtifacts(chatId), project: p?.path ?? null };
+  },
+  getFileChange: async (id) => db.getFileChange(id),
+  gitChanges: async (chatId) => {
+    const root = chatProject(chatId);
+    if (!root) return { ok: false, detail: "This chat has no project folder", files: [] };
+    const r = await git(root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+    if (r.code !== 0) return { ok: false, detail: /not a git repository/i.test(r.out) ? "The project folder is not a git repository" : r.out.trim().slice(0, 300) || "git not available", files: [] };
+    const files = r.out.split(/\r?\n/).filter((l) => l.length > 3).map((l) => {
+      const st = l.slice(0, 2).trim() || "M";
+      let path = l.slice(3);
+      if (path.includes(" -> ")) path = path.split(" -> ").pop()!;
+      return { path: path.replace(/^"|"$/g, ""), status: st === "??" ? "new" : st.includes("D") ? "deleted" : st.includes("A") ? "added" : st.includes("R") ? "renamed" : "modified" };
+    });
+    return { ok: true, files: files.slice(0, 500) };
+  },
+  gitFileDiff: async (chatId, path) => {
+    const root = chatProject(chatId);
+    if (!root) throw new Error("This chat has no project folder");
+    const abs = join(root, path);
+    if (!abs.startsWith(root)) throw new Error("path outside the project");
+    const head = await git(root, ["show", `HEAD:${path.replace(/\\/g, "/")}`]);
+    const newText = existsSync(abs) ? readFileSync(abs, "utf8") : "";
+    return { oldText: head.code === 0 ? head.out : "", newText };
+  },
+  saveTextFile: async (defaultName, content) => {
+    const r = await dialog.showSaveDialog(win!, { defaultPath: join(app.getPath("downloads"), basename(defaultName)) });
+    if (r.canceled || !r.filePath) return null;
+    writeFileSync(r.filePath, content, "utf8");
+    return r.filePath;
+  },
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   copilotUsage: async (refresh) => (refresh ? refreshCopilotUsage() : copilotUsage),
   detectHarnesses: async () => harnesses.detectAll(settings.get()),

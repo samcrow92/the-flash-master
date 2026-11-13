@@ -32,6 +32,8 @@ interface State {
   messages: Record<string, Message[]>; // chatId → main-thread messages
   thread: { chatId: string; rootId: string; messages: Message[] } | null;
   flowPanel: { chatId: string; agentId: string | null } | null;
+  artifactsPanel: string | null; // chat id whose artifacts panel is open
+  artifactsRev: Record<string, number>;
   openFlow(chatId: string, agentId: string | null): void;
   agents: Record<string, AgentRun>;
   tasks: Record<string, Task>;
@@ -94,6 +96,8 @@ export const useStore = create<State>((set, get) => ({
   messages: {},
   thread: null,
   flowPanel: null,
+  artifactsPanel: null,
+  artifactsRev: {},
   agents: {},
   tasks: {},
   roles: [],
@@ -133,7 +137,8 @@ export const useStore = create<State>((set, get) => ({
 
   async openChat(chatId) {
     const chat = get().chatById[chatId];
-    set({ view: { kind: "chat", chatId }, thread: null, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
+    set({ view: { kind: "chat", chatId }, thread: null, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
+      artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
     set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
@@ -141,11 +146,11 @@ export const useStore = create<State>((set, get) => ({
 
   async openThread(chatId, rootId) {
     const msgs = await api().listMessages(chatId, rootId);
-    set((st) => ({ thread: { chatId, rootId, messages: mergeLoaded(msgs, st.thread?.rootId === rootId ? st.thread.messages : undefined) }, flowPanel: null }));
+    set((st) => ({ thread: { chatId, rootId, messages: mergeLoaded(msgs, st.thread?.rootId === rootId ? st.thread.messages : undefined) }, flowPanel: null, artifactsPanel: null }));
   },
 
   openFlow(chatId, agentId) {
-    set({ flowPanel: { chatId, agentId }, thread: null });
+    set({ flowPanel: { chatId, agentId }, thread: null, artifactsPanel: null });
   },
 
   closeThread() {
@@ -251,6 +256,9 @@ export const useStore = create<State>((set, get) => ({
         break;
       case "models.updated":
         st.setModels(e.models);
+        break;
+      case "artifacts.changed":
+        set((s2) => ({ artifactsRev: { ...s2.artifactsRev, [e.chatId]: (s2.artifactsRev[e.chatId] ?? 0) + 1 } }));
         break;
       case "copilotUsage.updated":
         set({ copilotUsage: e.usage });

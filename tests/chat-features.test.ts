@@ -172,3 +172,23 @@ describe("chat management", () => {
     await orch.stopAll();
   });
 });
+
+describe("files changed by agents", () => {
+  it("records ACP diff content once and writes through the client with before/after", async () => {
+    const { db, orch, chat, events } = setup({ permissions: { approval: "auto-all" } } as any);
+    db.updateChat(chat.id, { harness: "opencode" });
+    const proj = db.getProject(chat.projectId!)!.path;
+    const f = join(proj, "notes.txt");
+    writeFileSync(f, "hello v1\n");
+    await orch.sendUserMessage(chat.id, `EDITDIFF and WRITEFILE:${f}`, null, {});
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    const changes = db.listFileChanges(chat.id);
+    expect(changes.map((c) => c.path).sort()).toEqual(["/proj/src/a.c", "notes.txt"]);
+    const a = changes.find((c) => c.path === "/proj/src/a.c")!;
+    expect(a).toMatchObject({ added: 2, removed: 1, isNew: false });
+    const n = db.getFileChange(changes.find((c) => c.path === "notes.txt")!.id)!;
+    expect(n).toMatchObject({ oldText: "hello v1\n", newText: "hello v2\n" });
+    expect(events.some((e) => e.type === "artifacts.changed" && e.chatId === chat.id)).toBe(true);
+    await orch.stopAll();
+  });
+});

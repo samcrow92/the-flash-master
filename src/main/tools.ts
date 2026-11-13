@@ -13,7 +13,7 @@ const s = (description: string) => ({ type: "string", description });
 /** Tools exposed to agents through the flashmaster-core and jazz MCP servers. Results are kept compact on purpose. */
 export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void;
-  requirements?: Requirements; rmProjects?: () => string[];
+  requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -91,7 +91,11 @@ export function buildTools(d: {
     {
       set: "core", name: "save_artifact", description: "Store large material (logs, reports, full analyses) and get a short id to reference instead of pasting it.",
       inputSchema: obj({ title: s("title"), content: s("full content"), kind: s("report | log | diff | data") }, ["title", "content"]),
-      handler: async (a, c) => ({ id: d.db.addArtifact({ agentId: c.agentId || null, kind: a.kind ?? "report", title: a.title, content: a.content }).id }),
+      handler: async (a, c) => {
+        const id = d.db.addArtifact({ agentId: c.agentId || null, kind: a.kind ?? "report", title: a.title, content: a.content }).id;
+        if (c.agentId) d.onArtifact?.(c.agentId);
+        return { id };
+      },
     },
     {
       set: "core", name: "fetch_artifact", description: "Read a stored artifact (optionally a slice). Fetch only what you need.",

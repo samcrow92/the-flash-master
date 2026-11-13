@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Chat artifacts & diff viewer:** an **Artifacts** button in every chat opens a panel with four tabs:
+  - **Changes:** every file agents created or edited, captured from ACP `diff` tool content and from writes through the app. One entry per file per turn, with a +/− stat.
+  - **Git:** uncommitted changes in the project folder, HEAD vs. working copy.
+  - **Saved:** reports agents stored with `save_artifact`.
+  - **Code:** code blocks from replies.
+  - **Viewer:** side-by-side or unified diff with line numbers, word-level highlights, wrap and full-file toggles. Download the file, a `.patch`, or all changes of the chat as one patch.
 - **IBM DOORS Next requirements** (Jazz Requirements Management):
   - **Sign-in:** uses the same Jazz sign-in (form, Basic, Windows or browser SSO). The `/rm` server is derived from the Jazz URL. There are an optional project filter and an optional configuration (stream/baseline/GC) for configuration-managed projects.
   - **Data:** projects come from the OSLC RM catalog. Modules and their contents (document order, sections, types, attributes, links) come from the read-only Reportable REST API, with paging. Contents are cached on disk.

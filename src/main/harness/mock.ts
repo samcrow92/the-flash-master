@@ -40,6 +40,9 @@ export class MockSession implements HarnessSession {
           "Implementation": ["Filter off-by-one (ruled out)"], "Verification & Validation": ["HIL misses cold start (confirmed)"],
           "Process": ["Late change without impact analysis"], "Tools & Environment": ["Cold chamber unavailable"] } }),
         "```", ""] : []),
+      ...(/\b(fix|implement|change|edit|debounce)\b/i.test(request) ? [
+        "Proposed change (mock) — also shown in **Artifacts → Changes**:", "",
+        "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
       "<result>",
       `summary: Mock run for "${request.trim().slice(0, 60)}" completed.`,
       "findings:",
@@ -61,6 +64,11 @@ export class MockSession implements HarnessSession {
       if (this.cancelled || this.closed) return { stopReason: "cancelled", usage: { tokensIn: estimateTokens(text), tokensOut: 0 } };
       this.o.onEvent({ type: "text", text: word });
       if (this.delayMs) await new Promise((r) => setTimeout(r, this.delayMs));
+    }
+    if (/\b(fix|implement|change|edit|debounce)\b/i.test(request)) {
+      this.o.onEvent({ type: "tool", title: "Edit brake_light.c", status: "completed", kind: "edit" });
+      this.o.onEvent({ type: "diff", path: "src/brake_light.c", oldText: MOCK_OLD, newText: MOCK_NEW });
+      this.o.onEvent({ type: "diff", path: "test/test_brake_light.can", oldText: null, newText: MOCK_TEST });
     }
     this.o.onEvent({ type: "plan", entries: plan(steps.length) });
     return { stopReason: "end_turn", usage: { tokensIn: estimateTokens(text), tokensOut: estimateTokens(reply) } };
@@ -93,3 +101,52 @@ export class MockAdapter implements HarnessAdapter {
     return new MockSession(o, this.delayMs);
   }
 }
+
+// Sample edit for the offline demo (Artifacts → Changes / diff viewer)
+const MOCK_OLD = `#include "brake_light.h"
+
+#define BRAKE_ON_DELAY_MS   50u
+
+static uint8 lampState = 0u;
+
+void BrakeLight_MainFunction(void)
+{
+    boolean pedal = Rte_Read_BrakePedalSw();
+    if (pedal) {
+        lampState = 1u;
+    } else {
+        lampState = 0u;
+    }
+    Rte_Write_BrakeLampOut(lampState);
+}
+`;
+const MOCK_NEW = `#include "brake_light.h"
+
+#define BRAKE_ON_DELAY_MS   50u
+#define DEBOUNCE_MS         10u   /* SRS 1102: suppress contact bounce */
+
+static uint8 lampState = 0u;
+static uint8 debounceCnt = 0u;
+
+void BrakeLight_MainFunction(void)
+{
+    boolean pedal = Rte_Read_BrakePedalSw();
+    if (pedal) {
+        if (debounceCnt < DEBOUNCE_MS) { debounceCnt++; }
+    } else {
+        debounceCnt = 0u;
+    }
+    lampState = (debounceCnt >= DEBOUNCE_MS) ? 1u : 0u;
+    Rte_Write_BrakeLampOut(lampState);
+}
+`;
+const MOCK_TEST = `/* CAPL test: brake light debounce (SRS 1102) */
+testcase TC_BrakeLight_Debounce()
+{
+  setSignal(BrakePedalSw, 1);
+  testWaitForTimeout(5);
+  testAssert(getSignal(BrakeLampOut) == 0, "lamp stays off during bounce");
+  testWaitForTimeout(10);
+  testAssert(getSignal(BrakeLampOut) == 1, "lamp on after debounce");
+}
+`;

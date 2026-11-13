@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, useStore } from "../store";
 import {
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
-  KeyRound, LifeBuoy, ListChecks, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
+  KeyRound, LifeBuoy, ListChecks, Package, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
   CornerDownRight, Leaf,
 } from "../components/icons";
 
@@ -192,6 +192,7 @@ function Use() {
       <Item icon={<RotateCcw size={18} />} title="Reset context">The ↺ button next to the chat box gives the agents a fresh start: earlier messages stay visible but are no longer sent. Saves tokens when the topic changes.</Item>
       <Item icon={<Paperclip size={18} />} title="Attachments">Attach, paste or drop images and files; agents can read them.</Item>
       <Item icon={<Sparkles size={18} />} title="Superpowers">On demand, a disciplined workflow: brainstorm → plan → test-driven implementation → review → verify.</Item>
+      <Item icon={<Package size={18} />} title="Artifacts & diffs">The <b>Artifacts</b> button in a chat lists every file the agents changed (with a side-by-side or unified diff), the project’s uncommitted git changes, saved reports and code blocks. Download single files, patches or everything as one .patch.</Item>
       <Item icon={<Compass size={18} />} title="Progress">The Progress panel shows each agent’s plan, delegations and approvals as a flow chart.</Item>
       <Item icon={<Bot size={18} />} title="Agents overview">See every running agent, pause, resume or stop it.</Item>
       <Item icon={<SquareKanban size={18} />} title="Tasks">A simple board; “Run with agent” hands a task to its assigned specialist.</Item>

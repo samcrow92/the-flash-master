@@ -9,7 +9,8 @@ import { UsageMeter } from "../components/UsageMeter";
 import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
-import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Smile, Square, Trash2, Info, X, Zap } from "../components/icons";
+import { ArtifactsPanel } from "./ArtifactsPanel";
+import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Square, Trash2, Info, X, Zap } from "../components/icons";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -31,11 +32,15 @@ export function ChatView({ chatId }: { chatId: string }) {
 
   if (!chat) return <div className="empty">Chat not found.</div>;
 
+  // Briefly highlight the Artifacts button when agents produce something new
+  const artRev = useStore((s) => s.artifactsRev[chatId] ?? 0);
+  const [artPulse, setArtPulse] = useState(false);
+  useEffect(() => { if (!artRev) return; setArtPulse(true); const t = setTimeout(() => setArtPulse(false), 1800); return () => clearTimeout(t); }, [artRev]);
   const update = async (patch: Partial<typeof chat>) => st.upsertChat(await api().updateChat(chatId, patch));
   const isMaster = chat.kind === "master";
 
   return (
-    <div className={`chat-layout ${st.thread || st.flowPanel?.chatId === chatId ? "with-thread" : ""}`}>
+    <div className={`chat-layout ${st.thread || st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
       <section className="chat">
         <header className="chat-header">
           <div className="chat-title-block">
@@ -73,6 +78,8 @@ export function ChatView({ chatId }: { chatId: string }) {
             {chat.mode && <span className={`pill mode-pill mode-${chat.mode}`} title="Drive mode overrides the harness/model below">{chat.mode.toUpperCase()}</span>}
             <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
               onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={15} /> Progress</button>
+            <button className={`${st.artifactsPanel === chatId ? "toggle on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Files changed, saved artifacts and code from this chat — download and diff"
+              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, thread: null, flowPanel: null })}><Package size={15} /> Artifacts</button>
             {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={13} fill="currentColor" /> Stop</button>}
             <button className="ghost icon-only" title="More actions" onClick={(e) => openMenu(e, [
               ...(!isMaster ? [{ label: "Rename", icon: <Pencil size={15} />, onClick: () => setEditingTitle(true) },
@@ -115,6 +122,7 @@ export function ChatView({ chatId }: { chatId: string }) {
         <UsageMeter />
       </section>
       {st.thread && st.thread.chatId === chatId && <ThreadPanel />}
+      {!st.thread && st.artifactsPanel === chatId && <ArtifactsPanel chatId={chatId} onClose={() => useStore.setState({ artifactsPanel: null })} />}
       {!st.thread && st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
     </div>
   );

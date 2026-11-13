@@ -201,6 +201,18 @@ export interface JazzWorkItem {
   tags?: string;
 }
 
+/** A file an agent created or changed (net change per turn; texts loaded on demand). */
+export interface FileChange {
+  id: string; chatId: string; agentId: string | null; role: string | null; path: string; createdAt: number;
+  added: number; removed: number; isNew: boolean; deleted: boolean;
+  oldText?: string; newText?: string;
+}
+export interface ChatArtifacts {
+  changes: FileChange[];
+  artifacts: (Omit<Artifact, "content"> & { role: string | null })[];
+  project: string | null; // project folder, for git changes
+}
+
 /** IBM DOORS Next (Jazz Requirements Management) */
 export interface RmProject { id: string; title: string }
 export interface RmModule { uri: string; uuid: string; identifier: string; title: string; projectId: string; modified?: string }
@@ -264,6 +276,7 @@ export type AppEvent =
   | { type: "flow.updated"; agentId: string }
   | { type: "models.updated"; models: HarnessModels }
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
+  | { type: "artifacts.changed"; chatId: string }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
 

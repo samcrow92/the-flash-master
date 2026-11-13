@@ -616,3 +616,57 @@ p .doc-link, .doc-note .doc-link { padding: 0 4px; border: none; background: non
 .rm-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; animation: msg-in .25s ease-out; }
 .rm-actions button { display: inline-flex; align-items: center; gap: 5px; }
 .empty svg { margin: 0 auto 6px; display: block; }
+
+/* ===================== artifacts panel & diff viewer ===================== */
+.artifacts-panel { display: flex; flex-direction: column; min-height: 0; }
+.art-tabs { margin: 8px 12px; display: grid; grid-template-columns: repeat(4, 1fr); }
+.art-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 12px; padding: 5px 4px; }
+.art-tabs b { font-size: 10.5px; background: var(--bg3); border-radius: 8px; padding: 0 5px; }
+.art-list { overflow: auto; padding: 0 10px 12px; display: grid; gap: 4px; align-content: start; }
+.art-empty { padding: 18px 6px; text-align: center; line-height: 1.5; }
+.art-all { justify-self: end; display: inline-flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+.art-item { display: flex; align-items: center; gap: 9px; text-align: left; width: 100%; padding: 8px 9px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg2);
+  transition: border-color .15s, transform .15s; animation: msg-in .22s ease-out both; }
+.art-item:hover { border-color: var(--accent); transform: translateX(-2px); }
+.art-item .ic { flex: none; color: var(--muted); } .art-item .ic.new { color: var(--green); } .art-item .ic.del { color: var(--red); } .art-item .ic.mod { color: var(--blue); }
+.art-main { flex: 1; min-width: 0; display: grid; }
+.art-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.art-meta { display: grid; justify-items: end; gap: 2px; }
+.art-item.snippet { padding: 0 6px 0 0; }
+.art-open { flex: 1; display: flex; align-items: center; gap: 9px; background: none; border: none; padding: 8px 9px; text-align: left; min-width: 0; }
+.chip.st-new, .chip.st-added { color: var(--green); } .chip.st-deleted { color: var(--red); } .chip.st-modified, .chip.st-renamed { color: var(--blue); }
+.art-pulse { animation: glow 1s ease-in-out 2; border-color: var(--accent) !important; }
+.diffstat { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-family: var(--mono, ui-monospace, monospace); }
+.diffstat .plus { color: var(--green); } .diffstat .minus { color: var(--red); }
+.diffstat .blocks { display: inline-flex; gap: 1px; } .diffstat .blocks i { width: 6px; height: 6px; border-radius: 1px; background: var(--bg3); }
+.diffstat .blocks i.g { background: var(--green); } .diffstat .blocks i.r { background: var(--red); }
+
+.viewer-back { z-index: 900; animation: fade-in .15s ease-out; }
+@keyframes fade-in { from { opacity: 0; } }
+.viewer { position: absolute; inset: 28px 36px; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,.7); animation: viewer-in .22s cubic-bezier(.2,.9,.3,1.1); }
+@keyframes viewer-in { from { opacity: 0; transform: translateY(12px) scale(.985); } }
+.viewer-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.viewer-head button { display: inline-flex; align-items: center; gap: 5px; }
+.viewer-head .on { color: var(--accent); }
+.viewer-body { flex: 1; overflow: auto; }
+.viewer-code { margin: 0; padding: 14px 18px; font-size: 12.5px; line-height: 1.5; white-space: pre; }
+.viewer-md { padding: 16px 24px; max-width: 980px; }
+.diff { font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace); font-size: 12.5px; line-height: 1.5; }
+.diff-empty { padding: 30px; text-align: center; }
+.diff-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.diff-table td { padding: 0 8px; vertical-align: top; }
+.diff-table .ln { width: 52px; text-align: right; color: var(--muted); user-select: none; opacity: .7; font-size: 11.5px; }
+.diff-table .sg { width: 18px; text-align: center; user-select: none; color: var(--muted); }
+.diff-table .code { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.diff.wrap .diff-table .code { white-space: pre-wrap; word-break: break-all; }
+.diff-table tr.add td, .diff-table td.code.add { background: color-mix(in srgb, var(--green) 13%, transparent); }
+.diff-table tr.del td, .diff-table td.code.del { background: color-mix(in srgb, var(--red) 13%, transparent); }
+.diff-table tr.add .sg { color: var(--green); } .diff-table tr.del .sg { color: var(--red); }
+.diff-table.split td.code.left { border-right: 1px solid var(--line); }
+.diff-table.split td.none { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--line) 45%, transparent) 6px 7px); }
+.diff-table.split .ln { width: 46px; }
+mark.wd { background: color-mix(in srgb, var(--red) 38%, transparent); color: inherit; border-radius: 2px; }
+mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: inherit; border-radius: 2px; }
+.diff-gap { padding: 3px 12px; font-size: 11.5px; color: var(--muted); background: var(--bg2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

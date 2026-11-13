@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message,
+  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -61,6 +61,14 @@ export interface FlashApi {
 
   // artifacts / usage
   getArtifact(id: string): Promise<Artifact | null>;
+  /** Files changed by agents in this chat, saved artifacts, and the project folder. */
+  chatArtifacts(chatId: string): Promise<ChatArtifacts>;
+  getFileChange(id: string): Promise<FileChange | null>;
+  /** Uncommitted changes in the chat's project folder (git status), and one file's HEAD vs working copy. */
+  gitChanges(chatId: string): Promise<{ ok: boolean; detail?: string; files: { path: string; status: string }[] }>;
+  gitFileDiff(chatId: string, path: string): Promise<{ oldText: string; newText: string }>;
+  /** Save text to a file the user picks (download). */
+  saveTextFile(defaultName: string, content: string): Promise<string | null>;
   usageSummary(days: number): Promise<UsageSummary>;
   copilotUsage(refresh: boolean): Promise<CopilotUsage | null>;
 
@@ -123,7 +131,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "toggleReaction", "listAgents", "startAgent",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",

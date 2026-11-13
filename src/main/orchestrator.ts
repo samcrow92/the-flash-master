@@ -7,6 +7,7 @@
  */
 import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
 import type { Settings } from "@shared/settings";
+import { diffLines } from "@shared/diff";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
@@ -49,6 +50,7 @@ interface Live {
   paused: boolean;
   queue: { input: string; attachments: Attachment[] }[];
   redirect: { input: string; attachments: Attachment[] } | null; // steering by interrupt: next turn input
+  turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
   depth: number;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
@@ -258,6 +260,19 @@ export class Orchestrator {
     return m;
   }
 
+  /** A file changed by an agent: one record per path and turn (first old text, latest new text). */
+  private recordChange(live: Live, projectPath: string | null, path: string, oldText: string | null, newText: string): void {
+    const rel = projectPath && path.toLowerCase().startsWith(projectPath.toLowerCase()) ? path.slice(projectPath.length).replace(/^[\\/]+/, "") : path;
+    const turn = (live.turnChanges ??= new Map<string, { id: string; oldText: string | null }>());
+    const prev = turn.get(rel);
+    const base = prev ? prev.oldText : oldText;
+    const d = diffLines(base ?? "", newText, 0);
+    if (prev) this.d.db.updateFileChange(prev.id, newText, d.added, d.removed);
+    else turn.set(rel, { id: this.d.db.addFileChange({ chatId: live.chatId, agentId: live.agentId, role: live.role.name, path: rel, oldText: base, newText, added: d.added, removed: d.removed }), oldText: base });
+    this.flow(live.agentId, { kind: "tool", label: `changed ${rel} (+${d.added} −${d.removed})`, status: "completed" });
+    this.d.emit({ type: "artifacts.changed", chatId: live.chatId });
+  }
+
   /** Reactions double as approvals for pending permission requests (✅ allow / ❌ deny). */
   onReaction(messageId: string, emoji: string, reactions: string[]): void {
     const resolve = this.pendingPermissions.get(messageId);
@@ -305,6 +320,7 @@ export class Orchestrator {
     let promptText: string;
     try {
       const firstTurn = !live.session || !live.session.alive;
+      live.turnChanges = new Map();
       live.sink = (delta) => {
         text += delta;
         this.liveText.set(reply.id, text);
@@ -435,6 +451,7 @@ export class Orchestrator {
           this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
           this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
         } else if (e.type === "plan") this.setPlan(live.agentId, e.entries);
+        else if (e.type === "diff") this.recordChange(live, projectPath, e.path, e.oldText, e.newText);
       },
       askPermission: (r) => this.askPermission(live, r),
     });

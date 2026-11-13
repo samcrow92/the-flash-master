@@ -128,6 +128,30 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await click("Using TheFlashMaster", ".docs-nav button");
       await sleep(700);
       await shot(join(demo, "18-docs-use.png"));
+      // Artifacts panel + diff viewer (mock harness produces a sample edit)
+      if (!(await js<boolean>(`!!document.querySelector('.chat-link.active')`))) {
+        if (!(await js<boolean>(`!!document.querySelector('.chat-link')`))) await click("brake-ecu", ".project-name");
+        await js(`(()=>{const el=[...document.querySelectorAll('.chat-link')].find(e=>e.textContent.includes('General'));el?.click();})()`);
+        await sleep(800);
+      }
+      await send("Implement the debounce for the brake pedal input (SRS 1102)");
+      await sleep(5500);
+      await click("Artifacts", ".chat-controls button");
+      await sleep(800);
+      await shot(join(demo, "24-artifacts-panel.png"));
+      await js(`[...document.querySelectorAll('.art-item')].find(e=>e.querySelector('.art-name')?.textContent==='brake_light.c')?.click()`);
+      await sleep(900);
+      await shot(join(demo, "25-diff-split.png"));
+      await js(`document.querySelector('.viewer-head .seg button[title="Unified"]')?.click()`);
+      await sleep(400);
+      await shot(join(demo, "26-diff-unified.png"));
+      await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
+      await sleep(300);
+      await click("Code", ".art-tabs button");
+      await sleep(400);
+      await shot(join(demo, "27-artifacts-code.png"));
+      await click("Artifacts", ".chat-controls button");
+      await sleep(200);
       // Profile: initials first, then a generated picture
       await click("Settings", ".sidebar button");
       await sleep(400);

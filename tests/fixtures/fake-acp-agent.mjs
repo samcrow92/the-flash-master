@@ -41,6 +41,16 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         const r = await request("fs/read_text_file", { sessionId: sid, path });
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `file says: ${r?.content ?? r?.message} ` } });
       }
+      if (text.includes("EDITDIFF")) {
+        upd({ sessionUpdate: "tool_call_update", toolCallId: "e1", status: "completed",
+          content: [{ type: "diff", path: msg.params.cwd ? msg.params.cwd + "/src/a.c" : "/proj/src/a.c", oldText: "int t = 50;\nint x;\n", newText: "int t = 100;\nint x;\nint y;\n" }] });
+        upd({ sessionUpdate: "tool_call_update", toolCallId: "e1", status: "completed",
+          content: [{ type: "diff", path: "/proj/src/a.c", oldText: "int t = 50;\nint x;\n", newText: "int t = 100;\nint x;\nint y;\n" }] });
+      }
+      if (text.includes("WRITEFILE:")) {
+        const path = text.split("WRITEFILE:")[1].trim().split(/\s/)[0];
+        await request("fs/write_text_file", { sessionId: sid, path, content: "hello v2\n" });
+      }
       if (text.includes("which model")) upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `model=${model} thinking=${thinking} ` } });
       const blocks = msg.params.prompt;
       if (blocks.length > 1) upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `blocks=${blocks.map((b) => b.type).join(",")} ` } });
