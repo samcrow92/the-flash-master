@@ -57,6 +57,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           TAG="${GITHUB_REF_NAME}"
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"; EXTRA="--draft --prerelease --target ${GITHUB_SHA}"; fi
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "TheFlashMaster ${TAG#v}" --generate-notes $EXTRA
+          EXTRA=()
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"; EXTRA=(--draft --prerelease --target "$GITHUB_SHA"); fi
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "TheFlashMaster ${TAG#v}" --generate-notes "${EXTRA[@]}"
           gh release upload "$TAG" release/*.exe release/latest.json release/SHA256SUMS.txt --clobber
