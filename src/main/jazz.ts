@@ -97,7 +97,7 @@ export class JazzClient {
       xml = await this.rptXml(f, LIST_FIELDS, 1).catch(() => this.rptXml(f, BASIC_FIELDS, 1));
       const c = await this.rptXml(f, "(id|comments/(content|creator/name|creationDate))", 1).catch(() => "");
       const item = parseWorkItems(xml, this.cfg.serverUrl)[0];
-      if (!item) throw new Error(`work item ${id} not found`);
+      if (!item) throw new Error(`work item ${id} not found`, { cause: e });
       return { item, comments: c ? parseComments(c) : [] };
     }
     const item = parseWorkItems(xml, this.cfg.serverUrl)[0];
