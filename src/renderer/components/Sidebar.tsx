@@ -40,8 +40,8 @@ export function Sidebar() {
       <div className="brand"><span className="bolt">⚡</span> TheFlashMaster</div>
 
       <nav className="nav">
-        <button className={isChat(st.masterChatId ?? "") ? "active" : ""} onClick={() => st.masterChatId && st.openChat(st.masterChatId)}>
-          ⚡ Master chat
+        <button className={`${isChat(st.masterChatId ?? "") ? "active" : ""} ${Object.values(st.agents).some((a) => a.role === "flashmaster" && a.status === "running") ? "nav-working" : ""}`} onClick={() => st.masterChatId && st.openChat(st.masterChatId)}>
+          <span className="nav-bolt">⚡</span> Master chat
         </button>
         <button className={view.kind === "agents" ? "active" : ""} onClick={() => st.setView({ kind: "agents" })}>
           🛰️ Agents {running > 0 && <span className="badge">{running}</span>}
@@ -80,12 +80,25 @@ export function Sidebar() {
         Specialists <button className="icon-btn" title="Add your own agent (template / import)" onClick={() => setImporting(true)}>＋</button>
       </div>
       <div className="palette">
-        {st.roles.filter((r) => r.name !== "flashmaster").map((r) => (
-          <button key={r.name} className="palette-item" title={`${r.description}\n\nClick: new chat with ${r.title} in the current project.\nTip: type @${r.name} in any chat.`}
-            onClick={() => startSpecialist(r.name)}>
-            <span className="palette-icon">{r.icon}</span><span>{r.title}</span>{r.source === "user" && <span className="custom-tag">custom</span>}
+        {st.roles.filter((r) => r.name !== "flashmaster").map((r) => {
+          const mine = Object.values(st.agents).filter((a) => a.role === r.name);
+          const working = mine.filter((a) => a.status === "running").length;
+          const paused = mine.filter((a) => a.status === "paused").length;
+          const busyAgent = mine.find((a) => a.status === "running");
+          return (
+          <button key={r.name} className={`palette-item ${working ? "is-working" : paused ? "is-paused" : ""}`} title={`${r.description}\n\n${working ? "Working now — click to watch its progress." : `Click: new chat with ${r.title} in the current project.`}\nTip: type @${r.name} in any chat.`}
+            onClick={async () => {
+              // A working specialist opens its chat with the progress flow; an idle one starts a new chat.
+              if (busyAgent?.chatId) { await st.openChat(busyAgent.chatId); st.openFlow(busyAgent.chatId, busyAgent.id); } else await startSpecialist(r.name);
+            }}>
+            <span className="palette-icon"><span className="icon-glyph">{r.icon}</span>{(working > 0 || paused > 0) && <span className="activity-ring" />}</span>
+            <span className="palette-title">{r.title}</span>
+            {working > 0 && <span className="working-dots" title={`${working} working${busyAgent?.lastActivity ? ` — ${busyAgent.lastActivity}` : ""}`}><i /><i /><i />{working > 1 && <b>{working}</b>}</span>}
+            {!working && paused > 0 && <span className="paused-tag" title={`${paused} paused`}>⏸</span>}
+            {r.source === "user" && <span className="custom-tag">custom</span>}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {importing && <AgentImportDialog onClose={() => setImporting(false)} />}

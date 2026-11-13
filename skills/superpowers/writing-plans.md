@@ -7,4 +7,5 @@ Write an implementation plan a capable engineer with no context could follow.
 - Tasks of 2–10 minutes each, in dependency order. Mark which tasks are independent (they can run in parallel).
 - For each task: files to touch, the change, the test to write first, and the exact command proving it works.
 - YAGNI: nothing beyond the approved design. DRY: reuse what exists.
+- Have the challenger review the plan (delegate to `challenger`) and resolve its must-fix items before execution.
 - Save the plan as an artifact (or in docs/plans/) and give a short summary.

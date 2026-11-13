@@ -16,6 +16,7 @@ import {
 } from "./context";
 
 export interface OrchestratorDeps {
+  onModels?: (harness: HarnessId, models: import("@shared/types").ModelInfo[]) => void;
   log?: (level: "error" | "warn" | "info" | "debug", msg: string) => void;
   db: Db;
   harnesses: HarnessRegistry;
@@ -340,6 +341,7 @@ export class Orchestrator {
       askPermission: (r) => this.askPermission(live, r),
     });
     if (session.sessionId) this.d.db.updateAgent(live.agentId, { sessionId: session.sessionId });
+    if (session.models?.length) this.d.onModels?.(live.harness, session.models);
     return session;
   }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-13
+- **Pi:** native `pi --mode rpc` adapter. Pi is now found when only `pi` is installed (no `pi-acp` needed). It streams, supports abort, reports usage, resumes sessions, and read-only mode uses Pi's read-only tool set.
+- **Models:** discovered from each harness (ACP `availableModels` or a model config option; Pi `get_available_models`; `opencode models` as a fallback), cached, and suggested in the chat header, Settings → Harnesses and per-agent overrides. The selected model is applied via `session/set_config_option` or `set_model`.
+- **New specialist:** 🥊 Challenger (adversarial review of plans and implementations). The coordinator and the plan workflow consult it.
+- **Activity animations:** specialist list, streaming avatars, agent chips and status pills.
+- **IBM Jazz fix:** login no longer uses manual redirects, which Electron cancels ("redirect was canceled"). Jazz now has its own persistent cookie session, detects login success or failure from EWM auth headers, and gives a clear error for OIDC/JAS redirects.
+- **Proxy:** standard `https_proxy`/`http_proxy`/`no_proxy` are used everywhere, and the Electron binary download is repaired automatically.
+
 ## 0.2.0 — 2026-11-13
 - **New specialists:** 📊 Presentation Expert (PowerPoint create/edit via the new `office` MCP server: outline, slide detail, create from a corporate template, targeted edits, tables, images, notes, native Ishikawa slides) and 🧭 NOW Analysis & RCA (NOW format, Ishikawa + 5 Whys, INCOSE practice).
 - **Ishikawa diagrams in chat:** a fenced `ishikawa` block renders as a fishbone; confirmed causes are highlighted and ruled-out causes struck through. Also exported as SVG or PowerPoint shapes.

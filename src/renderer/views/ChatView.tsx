@@ -4,6 +4,7 @@ import { HARNESS_IDS } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
 import { FlowPanel } from "./FlowView";
+import { ModelInput } from "../components/ModelInput";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -60,7 +61,8 @@ export function ChatView({ chatId }: { chatId: string }) {
             </label>
             <label className="ctl" title="Model id passed to the harness (blank = harness default)">
               <span>Model</span>
-              <input className="model-input" placeholder="default" defaultValue={chat.model ?? ""} onBlur={(e) => update({ model: e.target.value.trim() || null })} />
+              <ModelInput className="model-input" harness={chat.harness ?? roleOf(chat.agentRole)?.harness ?? st.settings?.general.defaultHarness ?? null}
+                value={chat.model ?? ""} onChange={(v) => update({ model: v || null })} />
             </label>
             <button className={`toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (off by default, on demand)"
               onClick={() => update({ superpowers: !chat.superpowers })}>⚡ Superpowers {chat.superpowers ? "on" : "off"}</button>
@@ -132,7 +134,7 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
 
   return (
     <div className={`msg msg-${m.author} ${m.status === "error" ? "msg-error" : ""}`}>
-      <div className="avatar">{icon}</div>
+      <div className={`avatar ${m.status === "streaming" ? "avatar-working" : ""}`}><span>{icon}</span></div>
       <div className="msg-body">
         <div className="msg-head">
           <span className="who">{who}</span>
@@ -146,7 +148,7 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
         <div className="msg-content">
           {m.author === "user" ? <div className="plain">{m.content}</div> : <Markdown text={m.content || (m.status === "streaming" ? "" : "")} />}
           {m.status === "streaming" && (
-            <div className="streaming"><span className="caret" /> <span className="muted small">{agent?.lastActivity ?? "Working…"}</span></div>
+            <div className="streaming"><span className="working-dots"><i /><i /><i /></span> <span className="muted small shimmer">{agent?.lastActivity ?? "Working…"}</span></div>
           )}
         </div>
         <div className="msg-footer">

@@ -79,6 +79,10 @@ export class MockAdapter implements HarnessAdapter {
   readonly protocol = "mock" as const;
   constructor(private delayMs = 18) {}
 
+  async listModels() {
+    return [{ id: "mock-fast", name: "Mock fast", current: true }, { id: "mock-thorough", name: "Mock thorough" }];
+  }
+
   async detect(): Promise<HarnessStatus> {
     return { id: "mock", label: this.label, available: true, version: "built-in", path: null, protocol: "mock", detail: null };
   }

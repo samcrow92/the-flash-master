@@ -249,3 +249,53 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 .tl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-time { font-variant-numeric: tabular-nums; }
 .chip-main { background: none; border: none; padding: 0; font-size: 12px; }
+
+/* ---------- model picker ---------- */
+.model-input-wrap { display: inline-flex; align-items: center; gap: 2px; width: 100%; }
+.model-input-wrap input { flex: 1; min-width: 0; }
+.ctl .model-input-wrap { width: 170px; }
+.icon-btn.refresh { font-size: 14px; padding: 0 4px; }
+.icon-btn.refresh.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- activity animations (agents at work) ---------- */
+.palette-item { position: relative; }
+.palette-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-icon { position: relative; display: inline-grid; place-content: center; width: 24px; height: 24px; }
+.icon-glyph { display: inline-block; }
+.activity-ring { position: absolute; inset: -3px; border-radius: 50%;
+  background: conic-gradient(from 0deg, var(--accent), var(--accent2), transparent 70%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: spin 1.1s linear infinite; }
+.palette-item.is-working { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.palette-item.is-working .icon-glyph { animation: bob 1.4s ease-in-out infinite; }
+.palette-item.is-paused .activity-ring { animation: none; background: var(--amber); opacity: .7; }
+.paused-tag { font-size: 11px; color: var(--amber); }
+@keyframes bob { 0%, 100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-1.5px) rotate(-6deg); } 75% { transform: translateY(1px) rotate(6deg); } }
+
+.working-dots { display: inline-flex; align-items: center; gap: 3px; }
+.working-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); display: inline-block; animation: dot 1.2s ease-in-out infinite; }
+.working-dots i:nth-child(2) { animation-delay: .15s; } .working-dots i:nth-child(3) { animation-delay: .3s; }
+.working-dots b { font-size: 10px; margin-left: 3px; color: var(--accent); }
+@keyframes dot { 0%, 80%, 100% { transform: translateY(0); opacity: .35; } 40% { transform: translateY(-4px); opacity: 1; } }
+
+.avatar { position: relative; }
+.avatar.small { width: 24px; height: 24px; font-size: 13px; border-radius: 7px; display: inline-grid; place-content: center; background: var(--bg3); }
+.avatar-working::before { content: ""; position: absolute; inset: -3px; border-radius: 11px;
+  background: conic-gradient(from 0deg, var(--accent), var(--accent2), transparent 65%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); padding: 2px; animation: spin 1.1s linear infinite; }
+.avatar-working > span { animation: bob 1.4s ease-in-out infinite; display: inline-block; }
+.shimmer { background: linear-gradient(90deg, var(--muted) 0%, var(--fg) 50%, var(--muted) 100%); background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.agent-chip.st-running { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); animation: glow 1.8s ease-in-out infinite; }
+@keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); } 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); } }
+.status.st-running::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 5px; animation: pulse 1s infinite; }
+.nav-working .nav-bolt { display: inline-block; animation: bob 1s ease-in-out infinite; filter: drop-shadow(0 0 6px var(--accent)); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; }
+}

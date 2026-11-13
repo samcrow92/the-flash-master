@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AcpAdapter } from "../src/main/harness/acp";
+import { AcpAdapter, modelsFromSession } from "../src/main/harness/acp";
+import { PiAdapter, PiSession } from "../src/main/harness/pi";
 import { MockAdapter } from "../src/main/harness/mock";
 import { HarnessRegistry } from "../src/main/harness/registry";
 import type { HarnessEvent, SessionOptions } from "../src/main/harness/types";
@@ -224,4 +225,72 @@ describe("stop during a turn", () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(db.getAgent(a.id)!.status).toBe("stopped");
   });
+});
+
+describe("Pi native RPC adapter", () => {
+  const FAKE_PI = join(__dirname, "fixtures", "fake-pi.mjs");
+
+  it("streams text with LF-only framing, maps tools and usage, keeps the session file, lists models", async () => {
+    const o = opts();
+    const s = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc"], o);
+    await s.init();
+    expect(s.sessionId).toBe("/tmp/s.jsonl");
+    const r = await s.prompt("hello");
+    expect(r).toMatchObject({ stopReason: "end_turn", usage: { tokensIn: 250, tokensOut: 40 } });
+    const text = o.events.filter((e) => e.type === "text").map((e) => (e as any).text).join("");
+    expect(text).toBe("Pi says\u2028hi done.");
+    expect(o.events.filter((e) => e.type === "tool").map((e: any) => [e.title, e.status, e.kind])).toEqual([
+      ["read src/a.c", "in_progress", "read"], ["read src/a.c", "completed", "read"]]);
+    expect(await s.availableModels()).toEqual([
+      { id: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5 (anthropic)", description: "200k context", current: true },
+      { id: "openai/gpt-5", name: "GPT-5 (openai)", description: null, current: false }]);
+    s.close();
+  });
+
+  it("aborts a running turn and enforces read-only via Pi's tool allowlist", async () => {
+    const o = opts();
+    const s = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc"], o);
+    await s.init();
+    const p = s.prompt("SLOW");
+    await new Promise((r) => setTimeout(r, 150));
+    await s.cancel();
+    expect((await p).stopReason).toBe("cancelled");
+    s.close();
+    // Read-only: PiAdapter.start passes Pi's read-only tool allowlist; the fake echoes when it sees --tools.
+    const ro = opts({ policy: { approval: "auto-all", readOnly: true, blocked: [], projectRoot: null } });
+    const shim = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc", "--tools", "read,grep,find,ls"], ro);
+    await shim.init();
+    await shim.prompt("x");
+    expect(ro.events.map((e: any) => e.text ?? "").join("")).toContain("(read-only)");
+    shim.close();
+  });
+});
+
+describe("model discovery", () => {
+  it("reads ACP models from availableModels or a model config option", () => {
+    expect(modelsFromSession({ models: { currentModelId: "b", availableModels: [{ modelId: "a", name: "A" }, { modelId: "b", name: "B" }] } }).models)
+      .toEqual([{ id: "a", name: "A", description: null, current: false }, { id: "b", name: "B", description: null, current: true }]);
+    const viaOption = modelsFromSession({ configOptions: [{ id: "model", type: "select", category: "model", currentValue: "x",
+      options: [{ groupId: "g", name: "G", options: [{ value: "x", name: "X" }, { value: "y", name: "Y" }] }] }] });
+    expect(viaOption.modelOptionId).toBe("model");
+    expect(viaOption.models.map((m) => [m.id, m.current])).toEqual([["x", true], ["y", false]]);
+    expect(modelsFromSession(undefined).models).toEqual([]);
+  });
+
+  it("probes an ACP harness for its models and selects the chosen one", async () => {
+    const adapter = new AcpAdapter("copilot", "Fake", [process.execPath], [FAKE], "");
+    const models = await adapter.listModels!({ executable: process.execPath, cwd: process.cwd(), env: {}, extraArgs: "" });
+    expect(models.map((m) => m.id)).toEqual(["gpt-5", "claude-sonnet-4.5"]);
+    const o = opts({ model: "claude-sonnet-4.5" });
+    const s = await adapter.start(o);
+    await s.prompt("which model");
+    expect(o.events.map((e: any) => e.text ?? "").join("")).toContain("model=claude-sonnet-4.5");
+    s.close();
+  });
+
+  it("probes Pi for its models", async () => {
+    const models = await new PiAdapter().listModels!({ executable: process.execPath, cwd: process.cwd(), env: {}, extraArgs: "" }).catch((e) => e);
+    // node without the fake script cannot speak RPC: the probe fails cleanly instead of hanging
+    expect(models).toBeInstanceOf(Error);
+  }, 60000);
 });

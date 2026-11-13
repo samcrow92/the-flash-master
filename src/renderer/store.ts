@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, AppEvent, Chat, McpServerStatus, Message, Project, RoleDef, SkillDef, Task } from "@shared/types";
+import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task } from "@shared/types";
 import type { Settings } from "@shared/settings";
 
 export const api = () => window.flash.api;
@@ -38,6 +38,8 @@ interface State {
   settings: Settings | null;
   locked: string[];
   mcp: McpServerStatus[];
+  models: Partial<Record<HarnessId, HarnessModels>>;
+  setModels(m: HarnessModels): void;
   toasts: Toast[];
 
   init(): Promise<void>;
@@ -84,16 +86,21 @@ export const useStore = create<State>((set, get) => ({
   settings: null,
   locked: [],
   mcp: [],
+  models: {},
+  setModels(m) {
+    set((st) => ({ models: { ...st.models, [m.harness]: m } }));
+  },
   toasts: [],
 
   async init() {
     const a = api();
-    const [projects, master, roles, skills, s, agents, tasks, mcp] = await Promise.all([
-      a.listProjects(), a.getMasterChat(), a.listRoles(), a.listSkills(), a.getSettings(), a.listAgents({}), a.listTasks({}), a.mcpStatus(),
+    const [projects, master, roles, skills, s, agents, tasks, mcp, models] = await Promise.all([
+      a.listProjects(), a.getMasterChat(), a.listRoles(), a.listSkills(), a.getSettings(), a.listAgents({}), a.listTasks({}), a.mcpStatus(), a.allModels(),
     ]);
     set({
       projects, masterChatId: master.id, chatById: { [master.id]: master }, roles, skills, settings: s.settings, locked: s.locked,
       agents: Object.fromEntries(agents.map((x) => [x.id, x])), tasks: Object.fromEntries(tasks.map((t) => [t.id, t])), mcp,
+      models: Object.fromEntries(models.filter((m) => m.fetchedAt).map((m) => [m.harness, m])),
     });
     await Promise.all(projects.map((p) => get().refreshChats(p.id)));
     applyTheme(s.settings.general.theme);
@@ -224,6 +231,9 @@ export const useStore = create<State>((set, get) => ({
       }
       case "mcp.status":
         set({ mcp: e.servers });
+        break;
+      case "models.updated":
+        st.setModels(e.models);
         break;
       case "roles.changed":
         set({ roles: e.roles });

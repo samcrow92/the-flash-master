@@ -8,7 +8,7 @@ TheFlashMaster is a Windows x64 desktop app in the spirit of Codex Desktop and C
 |---|---|
 | GitHub Copilot CLI | `copilot --acp`, via the Agent Client Protocol (ACP), with streaming |
 | OpenCode | `opencode acp` (ACP) |
-| Pi coding agent | `pi-acp` (ACP bridge) |
+| Pi coding agent | `pi --mode rpc` (Pi's native RPC; Pi has no MCP, so Pi agents can't use the MCP tools) |
 | GitLab Duo CLI | `duo run --goal …` in headless mode, with session continuation |
 | Mock | Built-in offline demo, so you can try everything without a CLI |
 
@@ -25,7 +25,10 @@ The app calls no model API itself and stores no model credentials. There's no lo
 - **Projects:** pick a local folder; agents work inside it. Each project has any number of **chats**.
 - **Master chat** with **TheFlashMaster**, the coordinator. It plans, delegates to specialists, tracks tasks and integrates the results.
 - **Streaming** replies, **threads** (reply to any message), and **reactions**. ✅/❌ reactions double as tool-approval answers.
+- **Models from each harness:** the model field suggests the models each harness reports (Copilot and OpenCode via ACP, Pi via RPC; cached; ↻ refreshes). You can still type any id.
+- **Agents that look alive:** working specialists show a spinning ring and activity dots in the sidebar (click one to watch its progress), avatars animate while replies stream, and running agent chips glow. Animation is reduced when Windows' "reduce motion" setting is on.
 - **Specialists at hand:** a sidebar palette, `@mentions` in any chat (`@autosar-vector check this ARXML`), and coordinator delegation.
+  - 🥊 **Challenger**: challenges plans, designs and implementations (assumptions, pre-mortem, gaps, alternatives) and gives a verdict: proceed / proceed with changes / rethink. The coordinator asks it before executing non-trivial plans.
   - 🔍 Code Reviewer
   - 🏛️ Software Architect
   - 📋 Requirements Analyst

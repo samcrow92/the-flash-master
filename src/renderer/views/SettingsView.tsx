@@ -4,6 +4,7 @@ import { HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { api, useStore } from "../store";
 import { AgentImportDialog, reportImports } from "../components/AgentImport";
+import { ModelInput } from "../components/ModelInput";
 
 const TABS = [
   ["general", "General"], ["harnesses", "Harnesses"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["permissions", "Permissions"],
@@ -111,8 +112,11 @@ function Harnesses(f: F) {
         {h !== "mock" && <>
           <Row label="Executable path" hint="Leave blank to auto-detect on PATH."><Text f={f} path={`harnesses.${h}.path`} placeholder="auto" /></Row>
           <Row label="Extra arguments"><Text f={f} path={`harnesses.${h}.args`} placeholder={h === "copilot" ? "--allow-all-paths" : ""} /></Row>
-          <Row label="Default model" hint="Passed to the harness; blank = its own default."><Text f={f} path={`harnesses.${h}.defaultModel`} /></Row>
+          <Row label="Default model" hint="Suggestions come from the harness (↻ to refresh); any id it accepts can be typed.">
+            <ModelInput harness={h} value={f.s.harnesses[h].defaultModel} disabled={f.locked(`harnesses.${h}.defaultModel`)} onChange={(v) => f.set(`harnesses.${h}.defaultModel`, v)} />
+          </Row>
         </>}
+        {h === "pi" && <div className="warn-note">Pi runs in its native RPC mode. Pi has no MCP support by design, so Pi agents cannot delegate, report progress steps or use the Vector/winIDEA/PowerPoint/Jazz tools — use Copilot or OpenCode for the coordinator and tool-heavy specialists. Read-only mode is enforced with Pi's read-only tool set.</div>}
         {h === "duo" && <div className="warn-note">GitLab Duo runs in headless mode (no ACP) and auto-approves its own tools. Use read-only prompts or a sandbox.</div>}
       </div>;
     })}
@@ -146,7 +150,8 @@ function Agents(f: F) {
         <td>{r.icon} {r.title} {r.source === "user" && <span className="custom-tag">custom</span>} <span className="muted small">@{r.name}</span><div className="muted small">{r.description}</div></td>
         <td><select value={overrides[r.name]?.harness ?? ""} onChange={(e) => setOverride(r.name, "harness", e.target.value)}>
           <option value="">{r.harness ? `role default (${r.harness})` : "chat default"}</option>{HARNESS_IDS.map((h) => <option key={h}>{h}</option>)}</select></td>
-        <td><input defaultValue={overrides[r.name]?.model ?? ""} placeholder={r.model ?? "default"} onBlur={(e) => setOverride(r.name, "model", e.target.value.trim())} /></td>
+        <td><ModelInput harness={overrides[r.name]?.harness ?? r.harness ?? f.s.general.defaultHarness} value={overrides[r.name]?.model ?? ""}
+          placeholder={r.model ?? undefined} onChange={(v) => setOverride(r.name, "model", v)} /></td>
         <td><input type="number" defaultValue={overrides[r.name]?.maxResultTokens ?? r.maxResultTokens} onBlur={(e) => setOverride(r.name, "maxResultTokens", Number(e.target.value))} /></td>
         <td className="actions">
           <button title="Export as .md" onClick={async () => { const p = await api().exportAgent(r.name); if (p) st.toast("info", `Exported to ${p}`); }}>⬇</button>

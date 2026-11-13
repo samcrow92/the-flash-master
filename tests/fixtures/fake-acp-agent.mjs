@@ -6,6 +6,7 @@ const pending = new Map();
 const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n");
 const request = (method, params) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); send({ id, method, params }); });
 let cancelled = false;
+let model = "gpt-5";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 createInterface({ input: process.stdin }).on("line", async (line) => {
@@ -14,8 +15,9 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   const reply = (result) => send({ id: msg.id, result });
   switch (msg.method) {
     case "initialize": return reply({ protocolVersion: 1, agentCapabilities: { loadSession: false } });
-    case "session/new": return reply({ sessionId: "sess-" + (msg.params.mcpServers?.length ?? 0) });
-    case "session/set_model": return send({ id: msg.id, error: { code: -32601, message: "unsupported" } });
+    case "session/new": return reply({ sessionId: "sess-" + (msg.params.mcpServers?.length ?? 0),
+      models: { currentModelId: "gpt-5", availableModels: [{ modelId: "gpt-5", name: "GPT-5" }, { modelId: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" }] } });
+    case "session/set_model": model = msg.params.modelId; return reply({});
     case "session/cancel": cancelled = true; return;
     case "session/prompt": {
       cancelled = false;
@@ -28,6 +30,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         const r = await request("fs/read_text_file", { sessionId: sid, path });
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `file says: ${r?.content ?? r?.message} ` } });
       }
+      if (text.includes("which model")) upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `model=${model} ` } });
       if (text.includes("WRITE")) {
         const perm = await request("session/request_permission", { sessionId: sid, toolCall: { toolCallId: "t2", title: "Edit main.c", kind: "edit" },
           options: [{ optionId: "ok", name: "Allow", kind: "allow_once" }, { optionId: "no", name: "Reject", kind: "reject_once" }] });

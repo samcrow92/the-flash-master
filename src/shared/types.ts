@@ -140,7 +140,7 @@ export interface HarnessStatus {
   available: boolean;
   version: string | null;
   path: string | null;
-  protocol: "acp" | "headless" | "mock";
+  protocol: "acp" | "rpc" | "headless" | "mock";
   detail: string | null;
 }
 
@@ -183,6 +183,7 @@ export type AppEvent =
   | { type: "mcp.status"; servers: McpServerStatus[] }
   | { type: "roles.changed"; roles: RoleDef[] }
   | { type: "flow.updated"; agentId: string }
+  | { type: "models.updated"; models: HarnessModels }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
 
 export interface AgentImportResult {
@@ -191,4 +192,19 @@ export interface AgentImportResult {
   name: string | null;
   errors: string[];
   warnings: string[];
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string | null;
+  current?: boolean; // the harness's own default / currently selected model
+}
+
+export interface HarnessModels {
+  harness: HarnessId;
+  models: ModelInfo[];
+  fetchedAt: number | null;
+  error: string | null;
+  loading: boolean;
 }

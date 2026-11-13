@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, safeStorage, session, shell, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell, Notification } from "electron";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,9 @@ import { buildTools } from "./tools";
 import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
-import type { AgentImportResult } from "@shared/types";
+import type { AgentImportResult, HarnessId, HarnessModels } from "@shared/types";
+import { HARNESS_IDS } from "@shared/types";
+import { networkEnv } from "./orchestrator";
 import { makeLogger } from "./log";
 import { runSmoke } from "./smoke";
 
@@ -68,6 +70,12 @@ const mcp = new McpBootstrap({
 const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(),
+  onModels: (h, models) => {
+    const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
+    modelCache.set(h, m);
+    emit({ type: "models.updated", models: m });
+    saveModels();
+  },
 });
 
 // ---------------- Jazz (password encrypted with the OS keychain via safeStorage) ----------------
@@ -77,7 +85,10 @@ const readJazzPassword = (): string => {
 };
 let jazzClient: JazzClient | null = null;
 let jazzKey = "";
-const netFetch: FetchLike = (url, init) => net.fetch(url, init as any) as any;
+// Dedicated persistent session for Jazz: keeps the LTPA/JSESSIONID cookies across redirects and restarts,
+// uses Chromium's network stack (Windows certificate store, proxy from applyProxy()).
+const jazzSession = () => session.fromPartition("persist:jazz");
+const netFetch: FetchLike = (url, init) => jazzSession().fetch(url, { ...init, credentials: "include", redirect: "follow" } as any) as any;
 const jazz = (): JazzClient | null => {
   const j = settings.get().jazz;
   if (!j.enabled || !j.serverUrl) return null;
@@ -90,6 +101,34 @@ const jazz = (): JazzClient | null => {
 };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, emitTask: (task) => emit({ type: "task.updated", task }) }));
+
+// ---------------- harness models (discovered from each harness, cached in models.json) ----------------
+const modelsFile = join(dataDir, "models.json");
+const modelCache = new Map<HarnessId, HarnessModels>();
+try {
+  for (const m of JSON.parse(readFileSync(modelsFile, "utf8")) as HarnessModels[]) modelCache.set(m.harness, { ...m, loading: false });
+} catch { /* first run */ }
+const modelState = (h: HarnessId): HarnessModels => modelCache.get(h) ?? { harness: h, models: [], fetchedAt: null, error: null, loading: false };
+const saveModels = () => { try { writeFileSync(modelsFile, JSON.stringify([...modelCache.values()].map((m) => ({ ...m, loading: false })))); } catch { /* best effort */ } };
+const inflight = new Map<HarnessId, Promise<HarnessModels>>();
+function refreshModels(h: HarnessId): Promise<HarnessModels> {
+  const running = inflight.get(h);
+  if (running) return running;
+  const adapter = harnesses.get(h);
+  const st = harnesses.cached(h);
+  const set = (m: HarnessModels) => { modelCache.set(h, m); emit({ type: "models.updated", models: m }); return m; };
+  if (!adapter.listModels || (h !== "mock" && !st?.available)) {
+    return Promise.resolve(set({ ...modelState(h), loading: false, error: st?.available === false ? "harness not found" : null }));
+  }
+  set({ ...modelState(h), loading: true, error: null });
+  const s = settings.get();
+  const p = adapter.listModels({ executable: st?.path ?? (s.harnesses[h]?.path || null), cwd: homedir(), env: networkEnv(s), extraArgs: s.harnesses[h]?.args ?? "" })
+    .then((models) => set({ harness: h, models, fetchedAt: Date.now(), error: models.length ? null : "the harness did not report any models — type a model id", loading: false }))
+    .catch((e) => set({ ...modelState(h), loading: false, error: String(e?.message ?? e) }))
+    .finally(() => { inflight.delete(h); saveModels(); });
+  inflight.set(h, p);
+  return p;
+}
 
 // ---------------- agent import ----------------
 const knownTools = () => [...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)];
@@ -191,6 +230,8 @@ const api: FlashApi = {
   getArtifact: async (id) => db.getArtifact(id),
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
+  listModels: async (h, refresh) => (refresh || !modelState(h).fetchedAt ? refreshModels(h) : modelState(h)),
+  allModels: async () => HARNESS_IDS.map(modelState),
   mcpStatus: async () => mcp.list(),
   mcpReinstall: async () => mcp.ensure(true),
   jazzQuery: async (q) => { const j = jazz(); if (!j) throw new Error("Jazz is not configured"); return j.query(q); },
@@ -200,6 +241,7 @@ const api: FlashApi = {
     writeFileSync(secretFile, safeStorage.encryptString(password));
     settings.update({ jazz: { hasPassword: !!password } });
     jazzClient = null;
+    await jazzSession().clearStorageData({ storages: ["cookies"] }); // new credentials → fresh login
   },
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),
@@ -253,10 +295,13 @@ async function applyProxy(): Promise<void> {
   const proxy = n.proxy || fromEnv.proxy;
   const bypass = [n.noProxy || fromEnv.noProxy, "<local>"].filter(Boolean).join(",");
   if (proxy) {
-    await session.defaultSession.setProxy({ proxyRules: proxy.replace(/^https?:\/\//, "").replace(/\/$/, ""), proxyBypassRules: bypass });
+    const cfg = { proxyRules: proxy.replace(/^https?:\/\//, "").replace(/\/$/, ""), proxyBypassRules: bypass };
+    await session.defaultSession.setProxy(cfg);
+    await jazzSession().setProxy(cfg);
     log("info", `proxy: ${proxy.replace(/\/\/[^@/]*@/, "//***@")} (${n.proxy ? "settings" : "environment"})`);
   } else {
     await session.defaultSession.setProxy({ mode: "system" });
+    await jazzSession().setProxy({ mode: "system" });
   }
 }
 settings.onChange(() => void applyProxy());
@@ -266,7 +311,10 @@ app.whenReady().then(async () => {
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
   createWindow();
-  void harnesses.detectAll(settings.get());
+  // Detect harnesses, then discover models of the available ones in the background (cache refreshed daily).
+  void harnesses.detectAll(settings.get()).then((list) => {
+    for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
+  });
   void mcp.ensure().then((servers) => emit({ type: "mcp.status", servers }));
 });
 

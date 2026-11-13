@@ -146,7 +146,7 @@ describe("roles and skills", () => {
     const roles = loadRoles(join(__dirname, "..", "agents"), join(tmp(), "none"));
     const names = roles.map((r) => r.name);
     expect(names[0]).toBe("flashmaster");
-    for (const n of ["reviewer", "architect", "analyst", "software-expert", "tester", "autosar-vector", "winidea-debugger", "jazz-analyst", "presentation-expert", "rca-analyst"]) expect(names).toContain(n);
+    for (const n of ["reviewer", "architect", "analyst", "software-expert", "tester", "autosar-vector", "winidea-debugger", "jazz-analyst", "presentation-expert", "rca-analyst", "challenger"]) expect(names).toContain(n);
     expect(roles.find((r) => r.name === "autosar-vector")!.tools).toContain("vector-autosar");
     const skills = loadSkills(join(__dirname, "..", "skills", "superpowers"));
     expect(skills.map((s) => s.command).sort()).toEqual(["brainstorm", "debug", "execute", "plan", "review", "superpowers-index", "tdd", "verify"]);
@@ -173,12 +173,37 @@ describe("Jazz client", () => {
     expect(parseWorkItems(xml, "https://j/ccm")).toEqual([{ id: "123", title: "Brake light & flicker", description: "Lamp flickers", state: "New",
       type: "Defect", owner: "Mari", url: "https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/123" }]);
   });
+  it("never asks for manual redirects (Electron cancels them) and detects login success/failure from auth headers", async () => {
+    // Behaves like Electron session.fetch + an EWM server: redirect:"manual" throws, redirects are followed transparently.
+    const server = (password: string): FetchLike => {
+      let session = false;
+      return async (url, init: any) => {
+        if (init?.redirect === "manual") throw new Error("net::ERR_ABORTED: Redirect was cancelled");
+        const h = new Map<string, string>();
+        let finalUrl = url;
+        if (url.endsWith("/authenticated/identity") && !session) { h.set("x-com-ibm-team-repository-web-auth-msg", "authrequired"); finalUrl = "https://j/ccm/auth/authrequired"; }
+        if (url.endsWith("/j_security_check")) {
+          if (init.body.includes(`j_password=${password}`)) session = true;
+          else { h.set("x-com-ibm-team-repository-web-auth-msg", "authfailed"); finalUrl = "https://j/ccm/auth/authfailed"; }
+        }
+        return { status: 200, ok: true, url: finalUrl, headers: { get: (n: string) => h.get(n.toLowerCase()) ?? null }, text: async () => xml };
+      };
+    };
+    const cfg = { serverUrl: "https://j/ccm", projectArea: "", authType: "form" as const, username: "u", password: "right" };
+    expect(await new JazzClient(cfg, server("right")).test()).toEqual({ ok: true, detail: "Connected" });
+    const bad = await new JazzClient(cfg, server("other")).test();
+    expect(bad.ok).toBe(false);
+    expect(bad.detail).toMatch(/login failed/);
+  });
+
   it("logs in with form auth, keeps cookies and queries", async () => {
     const calls: { url: string; init: any }[] = [];
+    let loggedIn = false;
     const fetch: FetchLike = async (url, init) => {
       calls.push({ url, init });
       const headers = new Map<string, string>();
-      if (url.endsWith("/j_security_check")) headers.set("set-cookie", "JSESSIONID=abc; Path=/");
+      if (url.endsWith("/j_security_check")) { headers.set("set-cookie", "JSESSIONID=abc; Path=/"); loggedIn = true; }
+      if (url.endsWith("/authenticated/identity") && !loggedIn) headers.set("x-com-ibm-team-repository-web-auth-msg", "authrequired");
       return { status: 200, ok: true, headers: { get: (n: string) => headers.get(n.toLowerCase()) ?? null }, text: async () => xml };
     };
     const j = new JazzClient({ serverUrl: "https://j/ccm/", projectArea: "Body", authType: "form", username: "u", password: "p" }, fetch);
@@ -186,8 +211,9 @@ describe("Jazz client", () => {
     expect(items[0]!.id).toBe("123");
     expect(calls[1]!.url).toBe("https://j/ccm/j_security_check");
     expect(calls[1]!.init.body).toBe("j_username=u&j_password=p");
-    expect(decodeURIComponent(calls[2]!.url)).toContain("[projectArea/name='Body' and state/group='open']");
-    expect(calls[2]!.init.headers.Cookie).toBe("JSESSIONID=abc");
+    expect(calls[2]!.url).toBe("https://j/ccm/authenticated/identity"); // confirms the login took
+    expect(decodeURIComponent(calls[3]!.url)).toContain("[projectArea/name='Body' and state/group='open']");
+    expect(calls[3]!.init.headers.Cookie).toBe("JSESSIONID=abc");
     expect((await j.query("flicker")).length).toBe(1);
     expect((await j.query("nothing-matches")).length).toBe(0);
   });

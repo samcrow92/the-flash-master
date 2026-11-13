@@ -1,4 +1,4 @@
-import type { HarnessId, HarnessStatus } from "@shared/types";
+import type { HarnessId, HarnessStatus, ModelInfo } from "@shared/types";
 import type { ApprovalPolicy } from "@shared/settings";
 
 export interface McpServerSpec {
@@ -45,13 +45,24 @@ export interface SessionOptions {
 
 export interface HarnessSession {
   readonly sessionId: string | null;
+  /** Models reported while the session started (ACP), so the cache refreshes for free. */
+  readonly models?: ModelInfo[];
   prompt(text: string): Promise<TurnResult>;
   cancel(): Promise<void>;
   close(): void;
   readonly alive: boolean;
 }
 
+export interface ProbeOptions {
+  executable: string | null;
+  cwd: string;
+  env: Record<string, string>;
+  extraArgs: string;
+}
+
 export interface HarnessAdapter {
+  /** Models this harness can use, as reported by the harness itself. Empty when it cannot tell. */
+  listModels?(o: ProbeOptions): Promise<ModelInfo[]>;
   readonly id: HarnessId;
   readonly label: string;
   readonly protocol: HarnessStatus["protocol"];

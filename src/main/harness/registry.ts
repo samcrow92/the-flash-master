@@ -2,6 +2,7 @@ import type { HarnessId, HarnessStatus } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { AcpAdapter } from "./acp";
 import { DuoAdapter } from "./duo";
+import { PiAdapter } from "./pi";
 import { MockAdapter } from "./mock";
 import type { HarnessAdapter } from "./types";
 
@@ -15,8 +16,7 @@ export class HarnessRegistry {
         "Install GitHub Copilot CLI (npm i -g @github/copilot) and run `copilot` once to sign in."),
       new AcpAdapter("opencode", "OpenCode", ["opencode"], ["acp"],
         "Install OpenCode (npm i -g opencode-ai) and run `opencode auth login` once."),
-      new AcpAdapter("pi", "Pi coding agent", ["pi-acp"], [],
-        "Install Pi and its ACP bridge (npm i -g @mariozechner/pi-coding-agent pi-acp), then sign in with `pi` once."),
+      new PiAdapter(),
       new DuoAdapter(),
       new MockAdapter(),
     ];

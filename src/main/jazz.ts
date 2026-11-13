@@ -7,8 +7,14 @@
  */
 import type { JazzWorkItem } from "@shared/types";
 
-export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; redirect?: "manual" | "follow" }) =>
-  Promise<{ status: number; ok: boolean; headers: { get(name: string): string | null; getSetCookie?: () => string[] }; text(): Promise<string> }>;
+/**
+ * Electron's net/session.fetch cancels requests made with redirect: "manual" ("Redirect was cancelled"), so the client
+ * always follows redirects and relies on a cookie-keeping session (persist:jazz) for the login cookies set on 302s.
+ */
+export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+  Promise<{ status: number; ok: boolean; url?: string; headers: { get(name: string): string | null; getSetCookie?: () => string[] }; text(): Promise<string> }>;
+
+const AUTH_MSG = "x-com-ibm-team-repository-web-auth-msg";
 
 export interface JazzConfig {
   serverUrl: string;
@@ -97,21 +103,37 @@ export class JazzClient {
     return parseWorkItems(await r.text(), this.cfg.serverUrl);
   }
 
+  /**
+   * EWM form-based login, redirect-following:
+   *   GET  /authenticated/identity  → already signed in (200, no auth header) or "authrequired"
+   *   POST /j_security_check        → "authfailed" header on the final response when credentials are wrong
+   *   GET  /authenticated/identity  → must no longer say "authrequired"
+   */
   private async login(): Promise<void> {
     if (this.authed || this.cfg.authType === "basic") return;
-    await this.req("GET", "/authenticated/identity", undefined, {}, "manual");
+    const first = await this.req("GET", "/authenticated/identity");
+    if (first.ok && first.headers.get(AUTH_MSG) !== "authrequired" && !isLoginPage(first)) { this.authed = true; return; }
+    if (!this.cfg.password) throw new Error("Jazz password not set (Settings → Integrations → IBM Jazz)");
     const body = `j_username=${encodeURIComponent(this.cfg.username)}&j_password=${encodeURIComponent(this.cfg.password)}`;
-    const r = await this.req("POST", "/j_security_check", body, { "Content-Type": "application/x-www-form-urlencoded" }, "manual");
-    const loc = r.headers.get("location") ?? "";
-    if (r.headers.get("x-com-ibm-team-repository-web-auth-msg") === "authfailed" || /authfailed/.test(loc)) throw new Error("Jazz login failed — check user/password");
+    const r = await this.req("POST", "/j_security_check", body, { "Content-Type": "application/x-www-form-urlencoded" });
+    if (r.headers.get(AUTH_MSG) === "authfailed" || /authfailed/i.test(r.url ?? "")) throw new Error("Jazz login failed — check user/password");
+    const check = await this.req("GET", "/authenticated/identity");
+    if (check.headers.get(AUTH_MSG) === "authrequired" || isLoginPage(check)) {
+      const host = hostOf(check.url);
+      throw new Error(host && host !== hostOf(this.cfg.serverUrl)
+        ? `Jazz redirected the login to ${host} (OIDC / Jazz Authorization Server). Form login is not possible there — try Authentication: Basic, or ask for an app password.`
+        : "Jazz login did not complete — check user/password and the server URL (…/ccm)");
+    }
     this.authed = true;
   }
 
-  private async req(method: string, path: string, body?: string, headers: Record<string, string> = {}, redirect: "manual" | "follow" = "follow") {
+  private async req(method: string, path: string, body?: string, headers: Record<string, string> = {}) {
     const h: Record<string, string> = { "OSLC-Core-Version": "2.0", "X-Requested-With": "XMLHttpRequest", ...headers };
     if (this.cfg.authType === "basic") h.Authorization = "Basic " + Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64");
     if (this.cookies.size) h.Cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
-    const r = await this.fetchImpl(this.cfg.serverUrl + path, { method, headers: h, body, redirect });
+    const r = await this.fetchImpl(this.cfg.serverUrl + path, { method, headers: h, body });
+    // A request that lands on the login page later (expired session) means we must log in again.
+    if (this.authed && r.headers.get(AUTH_MSG) === "authrequired") this.authed = false;
     const set = r.headers.getSetCookie?.() ?? (r.headers.get("set-cookie") ? [r.headers.get("set-cookie")!] : []);
     for (const c of set) {
       const m = /^([^=]+)=([^;]*)/.exec(c);
@@ -122,6 +144,8 @@ export class JazzClient {
 }
 
 const esc = (s: string) => s.replace(/'/g, "''");
+const hostOf = (u: string | undefined) => { try { return u ? new URL(u).host : ""; } catch { return ""; } };
+const isLoginPage = (r: { url?: string }) => /\/(auth\/authrequired|secure\/authenticated\/login|jts\/auth|oidc\/endpoint)/i.test(r.url ?? "");
 
 const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 const tag = (xml: string, path: string[]): string => {

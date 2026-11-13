@@ -41,7 +41,7 @@ export function AgentsView() {
             {list.map((a) => (
               <tr key={a.id}>
                 <td>
-                  <div className="row gap-s">{roleOf(a.role)?.icon ?? "🤖"} <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
+                  <div className="row gap-s"><span className={`avatar small ${a.status === "running" ? "avatar-working" : ""}`}><span>{roleOf(a.role)?.icon ?? "🤖"}</span></span> <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
                   {a.parentAgentId && <div className="muted small">↳ delegated by {roleOf(st.agents[a.parentAgentId]?.role)?.title ?? "agent"}</div>}
                 </td>
                 <td>{pname(a.projectId)}</td>

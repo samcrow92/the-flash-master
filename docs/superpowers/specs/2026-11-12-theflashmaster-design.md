@@ -210,3 +210,13 @@ The enterprise policy file is `%PROGRAMDATA%/TheFlashMaster/policy.json`. It ove
 
 Builder decision: "NOW" was not found as a published standard, so it is defined as **N**ow (current situation) · **O**bjective
 (target state) · **W**ay forward (actions). The definitions live at the top of the agent file, so they can be edited in one place.
+
+## 15. Additions (2026-11-13, later)
+
+| # | Requirement | Where |
+|---|---|---|
+| 32 | Pi found and used on Windows | `harness/pi.ts`: native `pi --mode rpc` (replaces the pi-acp bridge) |
+| 33 | Models picked up from the harnesses | `listModels` per adapter, cache `models.json`, `ModelInput` suggestions |
+| 34 | Animations for agents at work | CSS (reduced-motion aware): palette rings and dots, avatar ring, chip glow |
+| 35 | Challenger specialist | `agents/challenger.md`; consulted by the coordinator and the plans skill |
+| 36 | Jazz "redirect was canceled" | follow redirects + `persist:jazz` session cookies; auth detected via EWM headers |

@@ -6,10 +6,30 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ChildProcess } from "node:child_process";
-import type { HarnessId, HarnessStatus } from "@shared/types";
+import type { HarnessId, HarnessStatus, ModelInfo } from "@shared/types";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
 import { decidePermission, insideRoot } from "./policy";
-import type { HarnessAdapter, HarnessSession, SessionOptions, ToolKind, TurnResult } from "./types";
+import type { HarnessAdapter, HarnessSession, ProbeOptions, SessionOptions, ToolKind, TurnResult } from "./types";
+import { runCapture } from "./process";
+
+/** Read models from an ACP session response: `models.availableModels` or a select config option of category "model". */
+export function modelsFromSession(r: Json | undefined): { models: ModelInfo[]; modelOptionId: string | null } {
+  const out: ModelInfo[] = [];
+  const cur = r?.models?.currentModelId;
+  for (const m of r?.models?.availableModels ?? []) {
+    if (m?.modelId) out.push({ id: String(m.modelId), name: String(m.name ?? m.modelId), description: m.description ?? null, current: m.modelId === cur });
+  }
+  let modelOptionId: string | null = null;
+  const opt = (r?.configOptions ?? []).find((o: Json) => o?.type === "select" && (o.category === "model" || o.id === "model"));
+  if (opt) {
+    modelOptionId = String(opt.id);
+    if (!out.length) {
+      const flat: Json[] = (opt.options ?? []).flatMap((o: Json) => (Array.isArray(o.options) ? o.options : [o]));
+      for (const o of flat) if (o?.value) out.push({ id: String(o.value), name: String(o.name ?? o.value), description: o.description ?? null, current: o.value === opt.currentValue });
+    }
+  }
+  return { models: out.slice(0, 256), modelOptionId };
+}
 
 type Json = Record<string, any>;
 
@@ -81,6 +101,8 @@ const asKind = (k: unknown): ToolKind => (KINDS.includes(k as ToolKind) ? (k as 
 
 export class AcpSession implements HarnessSession {
   sessionId: string | null = null;
+  models: ModelInfo[] = [];
+  private modelOptionId: string | null = null;
   private child: ChildProcess;
   private peer: JsonRpcPeer;
   private exited = false;
@@ -111,19 +133,28 @@ export class AcpSession implements HarnessSession {
     const mcpServers = this.o.mcpServers.map((s) => ({
       name: s.name, command: s.command, args: s.args, env: Object.entries(s.env).map(([name, value]) => ({ name, value })),
     }));
+    let resp: Json | undefined;
     if (this.o.resumeSessionId) {
       try {
-        await this.peer.request("session/load", { sessionId: this.o.resumeSessionId, cwd: this.o.cwd, mcpServers });
+        resp = await this.peer.request("session/load", { sessionId: this.o.resumeSessionId, cwd: this.o.cwd, mcpServers });
         this.sessionId = this.o.resumeSessionId;
       } catch { /* agent may not support loadSession — fall through to a new session */ }
     }
     if (!this.sessionId) {
-      const r = await this.peer.request<{ sessionId: string }>("session/new", { cwd: this.o.cwd, mcpServers });
-      this.sessionId = r.sessionId;
+      resp = await this.peer.request<Json>("session/new", { cwd: this.o.cwd, mcpServers });
+      this.sessionId = resp.sessionId;
     }
+    const found = modelsFromSession(resp);
+    this.models = found.models;
+    this.modelOptionId = found.modelOptionId;
     if (this.o.model) {
-      // Unstable in the spec; harnesses that do not support it simply reject — model can still be set via args.
-      await this.peer.request("session/set_model", { sessionId: this.sessionId, modelId: this.o.model }).catch(() => undefined);
+      // Newer agents expose the model as a session config option; older ones use the (unstable) set_model method.
+      if (this.modelOptionId) {
+        await this.peer.request("session/set_config_option", { sessionId: this.sessionId, configId: this.modelOptionId, value: this.o.model })
+          .catch(() => this.peer.request("session/set_model", { sessionId: this.sessionId, modelId: this.o.model }).catch(() => undefined));
+      } else {
+        await this.peer.request("session/set_model", { sessionId: this.sessionId, modelId: this.o.model }).catch(() => undefined);
+      }
     }
   }
 
@@ -213,6 +244,26 @@ export class AcpAdapter implements HarnessAdapter {
 
   detect(pathOverride: string): Promise<HarnessStatus> {
     return detectExecutable({ id: this.id, label: this.label, protocol: "acp", candidates: this.candidates, pathOverride, hint: this.hint });
+  }
+
+  /** Start a throw-away ACP session just to read the advertised models, then close it. */
+  async listModels(p: ProbeOptions): Promise<ModelInfo[]> {
+    const s = new AcpSession(p.executable ?? this.candidates[0]!, [...this.baseArgs, ...splitArgs(p.extraArgs)], {
+      cwd: p.cwd, model: null, extraArgs: "", executable: p.executable, mcpServers: [], env: p.env, resumeSessionId: null,
+      policy: { approval: "ask", readOnly: true, blocked: [], projectRoot: null }, onEvent: () => {}, askPermission: async () => false,
+    });
+    try {
+      await withTimeout(s.init(), 45000, `${this.label} did not report models within 45s`);
+      if (s.models.length) return s.models;
+    } finally {
+      s.close();
+    }
+    // OpenCode also lists models on its CLI (provider/model per line).
+    if (this.id === "opencode") {
+      const r = await runCapture(p.executable ?? "opencode", ["models"], 30000, p.cwd);
+      return r.out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[\w.-]+\/[\w.:@-]+$/.test(l)).slice(0, 256).map((id) => ({ id, name: id }));
+    }
+    return [];
   }
 
   async start(o: SessionOptions): Promise<HarnessSession> {
