@@ -294,3 +294,33 @@ describe("model discovery", () => {
     expect(models).toBeInstanceOf(Error);
   }, 60000);
 });
+
+describe("chat ordering (regression)", () => {
+  it("streams each turn into its own reply when the harness session is reused", async () => {
+    const { db, orch, chat } = setup();
+    db.updateChat(chat.id, { harness: "opencode" }); // real ACP session kept across turns
+    await orch.sendUserMessage(chat.id, "first question", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    await orch.sendUserMessage(chat.id, "which model", null);
+    await until(() => agentMsgs(db, chat.id).length === 2 && agentMsgs(db, chat.id)[1]!.status === "done");
+    const list = db.listMessages(chat.id, null);
+    expect(list.map((m) => m.author)).toEqual(["user", "agent", "user", "agent"]);
+    expect(list.map((m) => m.seq)).toEqual([...list.map((m) => m.seq)].sort((a, b) => a - b));
+    const [r1, r2] = agentMsgs(db, chat.id);
+    expect(r1!.content).not.toContain("model=");      // turn-2 text must not leak into reply 1
+    expect(r2!.content).toContain("model=gpt-5");
+    expect(r2!.content.match(/Hello from fake ACP/g)).toHaveLength(1);
+    await orch.stopAll();
+  });
+
+  it("serves the live text of a streaming reply (no stale 500 ms flush)", async () => {
+    const { db, orch, chat, events } = setup();
+    db.updateChat(chat.id, { harness: "opencode" });
+    await orch.sendUserMessage(chat.id, "SLOW", null);
+    await until(() => events.filter((e) => e.type === "message.delta").length >= 2);
+    const streamed = events.filter((e) => e.type === "message.delta").map((e: any) => e.delta).join("");
+    const live = orch.withLiveText(db.listMessages(chat.id, null)).find((m) => m.status === "streaming")!;
+    expect(live.content.startsWith(streamed)).toBe(true);
+    await orch.stopAll();
+  });
+});

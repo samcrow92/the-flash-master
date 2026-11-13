@@ -8,7 +8,8 @@
 import type { ChildProcess } from "node:child_process";
 import type { HarnessStatus, ModelInfo } from "@shared/types";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
-import type { HarnessAdapter, HarnessSession, ProbeOptions, SessionOptions, ToolKind, TurnResult } from "./types";
+import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
+import { readFileSync } from "node:fs";
 
 type Json = Record<string, any>;
 
@@ -64,11 +65,18 @@ export class PiSession implements HarnessSession {
     });
   }
 
-  prompt(text: string): Promise<TurnResult> {
+  prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     if (this.exited) return Promise.resolve({ stopReason: "error", error: "pi is not running" });
+    const images: Json[] = [];
+    const files: string[] = [];
+    for (const a of attachments ?? []) {
+      if (a.kind === "image") { try { images.push({ type: "image", data: readFileSync(a.path).toString("base64"), mimeType: a.mime }); continue; } catch { /* path instead */ } }
+      files.push(`- ${a.name}: ${a.path}`);
+    }
+    const message = files.length ? `${text}\n\nAttached files (read only what you need):\n${files.join("\n")}` : text;
     return new Promise((resolve) => {
       this.turn = { resolve, tokensIn: 0, tokensOut: 0, stop: "end_turn" };
-      void this.command({ type: "prompt", message: text }).then((r) => {
+      void this.command({ type: "prompt", message, ...(images.length ? { images } : {}) }).then((r) => {
         if (!r.success && this.turn) { this.turn.resolve({ stopReason: "error", error: r.error ?? "prompt rejected" }); this.turn = null; }
       });
     });
@@ -76,6 +84,13 @@ export class PiSession implements HarnessSession {
 
   async cancel(): Promise<void> {
     if (!this.exited) this.write({ type: "abort" });
+  }
+
+  /** Native steering: Pi delivers it after the current tool calls, before the next model call. */
+  async steer(text: string): Promise<boolean> {
+    if (this.exited || !this.turn) return false;
+    const r = await this.command({ type: "steer", message: text });
+    return !!r.success;
   }
 
   close(): void {
@@ -210,6 +225,7 @@ export class PiAdapter implements HarnessAdapter {
   async start(o: SessionOptions): Promise<HarnessSession> {
     const args = ["--mode", "rpc"];
     if (o.model) args.push("--model", o.model);
+    if (o.thinking) args.push("--thinking", o.thinking);
     if (o.policy.readOnly) args.push("--tools", "read,grep,find,ls");
     if (o.resumeSessionId) args.push("--session", o.resumeSessionId);
     args.push(...splitArgs(o.extraArgs));

@@ -30,7 +30,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(300);
       await click("General", ".chat-link");
       await sleep(500);
-      const send = async (text: string, sel = ".chat .composer textarea") => {
+      const send = async (text: string, sel = ".chat .composer2 textarea") => {
         await js(`(()=>{const t=document.querySelector(${JSON.stringify(sel)});const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;set.call(t,${JSON.stringify(text)});t.dispatchEvent(new Event('input',{bubbles:true}));t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
       };
       await send("Analyse the brake light feature: which SWCs and CAN signals are involved, and what should we test?");
@@ -39,7 +39,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(4500);
       await js(`[...document.querySelectorAll('.msg-agent .msg-actions button')].find(b=>b.title==='Reply in thread')?.click()`);
       await sleep(500);
-      await send("@reviewer double-check the signal scaling", ".thread .composer textarea");
+      await send("@reviewer double-check the signal scaling", ".thread .composer2 textarea");
       await sleep(5500);
       await js(`(async()=>{const st=window.flash.api;const chats=await st.listChats((await st.listProjects())[0].id);const msgs=await st.listMessages(chats[0].id,null);const a=msgs.find(m=>m.author==='agent');if(a){await st.toggleReaction(a.id,'👍');await st.toggleReaction(a.id,'🚀');}})()`);
       await sleep(600);

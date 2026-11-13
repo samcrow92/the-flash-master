@@ -1,5 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell, Notification } from "electron";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, Notification } from "electron";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { extname } from "node:path";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -14,7 +15,8 @@ import { buildTools } from "./tools";
 import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
-import type { AgentImportResult, HarnessId, HarnessModels } from "@shared/types";
+import type { AgentImportResult, Attachment, HarnessId, HarnessModels } from "@shared/types";
+import { randomUUID } from "node:crypto";
 import { HARNESS_IDS } from "@shared/types";
 import { networkEnv } from "./orchestrator";
 import { prepareInstructions } from "./harness/instructions";
@@ -77,6 +79,7 @@ const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   extraRules: () => marketplace.instructions(),
+  attachmentRoots: () => attachmentRoots(),
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
     modelCache.set(h, m);
@@ -108,6 +111,42 @@ const jazz = (): JazzClient | null => {
 };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, emitTask: (task) => emit({ type: "task.updated", task }) }));
+
+// ---------------- chat attachments ----------------
+// Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
+// chats without a project use the app data folder, which is added to the agents' readable roots.
+const appAttachDir = join(dataDir, "attachments");
+mkdirSync(appAttachDir, { recursive: true });
+const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+  ".bmp": "image/bmp", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
+  ".csv": "text/csv", ".xml": "application/xml", ".arxml": "application/xml", ".dbc": "text/plain", ".c": "text/x-c", ".h": "text/x-c", ".log": "text/plain" };
+function attachDir(chatId: string): string {
+  const chat = db.getChat(chatId);
+  const project = chat?.projectId ? db.getProject(chat.projectId) : null;
+  if (!project) return appAttachDir;
+  const dir = join(project.path, ".flashmaster", "attachments");
+  mkdirSync(dir, { recursive: true });
+  const ignore = join(project.path, ".flashmaster", ".gitignore");
+  if (!existsSync(ignore)) writeFileSync(ignore, "*\n");
+  return dir;
+}
+function storeAttachment(chatId: string, name: string, mime: string, write: (target: string) => void): Attachment {
+  const safe = name.replace(/[^\w.\- ()]/g, "_").slice(-120) || "file";
+  const id = randomUUID().slice(0, 8);
+  const target = join(attachDir(chatId), `${id}-${safe}`);
+  write(target);
+  const size = statSync(target).size;
+  const max = settings.get().chat.maxAttachmentMB * 1024 * 1024;
+  if (size > max) { unlinkSync(target); throw new Error(`${name} is larger than ${settings.get().chat.maxAttachmentMB} MB (Settings → Chat)`); }
+  const type = mime || MIME[extname(name).toLowerCase()] || "application/octet-stream";
+  const kind = type.startsWith("image/") ? "image" : "file";
+  let thumb: string | undefined;
+  if (kind === "image" && type !== "image/svg+xml") {
+    try { const img = nativeImage.createFromPath(target); if (!img.isEmpty()) thumb = img.resize({ width: 240, quality: "good" }).toDataURL(); } catch { /* no preview */ }
+  }
+  return { id, name, mime: type, size, kind, path: target, thumb };
+}
+const attachmentRoots = () => [appAttachDir];
 
 // ---------------- harness models (discovered from each harness, cached in models.json) ----------------
 const modelsFile = join(dataDir, "models.json");
@@ -214,10 +253,26 @@ const api: FlashApi = {
   listChats: async (projectId) => db.listChats(projectId),
   getMasterChat: async () => db.getOrCreateMasterChat(),
   createChat: async (i) => db.createChat({ projectId: i.projectId, title: i.title || "New chat", kind: "project", agentRole: i.agentRole || "flashmaster" }),
-  updateChat: async (id, patch) => db.updateChat(id, patch),
+  updateChat: async (id, patch) => {
+    const c = db.updateChat(id, patch);
+    // New mode/harness/model: idle agent sessions of this chat restart with it on the next message.
+    if ("mode" in patch || "harness" in patch || "model" in patch) orch.resetChatSessions(id);
+    return c;
+  },
   deleteChat: async (id) => { await orch.stopChat(id); db.deleteChat(id); },
-  listMessages: async (chatId, parentId) => db.listMessages(chatId, parentId),
-  sendMessage: async (i) => orch.sendUserMessage(i.chatId, i.content, i.parentId ?? null),
+  listMessages: async (chatId, parentId) => orch.withLiveText(db.listMessages(chatId, parentId)),
+  sendMessage: async (i) => orch.sendUserMessage(i.chatId, i.content, i.parentId ?? null, { attachments: i.attachments, whileBusy: i.whileBusy }),
+  saveAttachment: async (i) => storeAttachment(i.chatId, i.name, i.mime, (t) => writeFileSync(t, Buffer.from(i.dataBase64, "base64"))),
+  pickAttachments: async (chatId) => {
+    const r = await dialog.showOpenDialog(win!, { title: "Attach files", properties: ["openFile", "multiSelections"] });
+    if (r.canceled) return [];
+    return r.filePaths.map((f) => storeAttachment(chatId, basename(f), MIME[extname(f).toLowerCase()] ?? "", (t) => copyFileSync(f, t)));
+  },
+  openAttachment: async (path) => {
+    const ok = path.startsWith(appAttachDir) || db.listProjects().some((p) => path.startsWith(join(p.path, ".flashmaster", "attachments")));
+    if (!ok || !existsSync(path)) throw new Error("attachment not found");
+    await shell.openPath(path);
+  },
   toggleReaction: async (messageId, emoji) => {
     const reactions = db.toggleReaction(messageId, emoji);
     const m = db.getMessage(messageId);

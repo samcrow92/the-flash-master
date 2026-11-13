@@ -9,7 +9,35 @@ import type { ChildProcess } from "node:child_process";
 import type { HarnessId, HarnessStatus, ModelInfo } from "@shared/types";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
 import { decidePermission, insideRoot } from "./policy";
-import type { HarnessAdapter, HarnessSession, ProbeOptions, SessionOptions, ToolKind, TurnResult } from "./types";
+import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+/** Pick the option of a select config whose value/name matches a wanted level (e.g. thinking "medium"). */
+export function pickOption(opt: Json | undefined, wanted: string): string | null {
+  if (!opt || !wanted) return null;
+  const flat: Json[] = (opt.options ?? []).flatMap((o: Json) => (Array.isArray(o.options) ? o.options : [o]));
+  const w = wanted.toLowerCase();
+  const hit = flat.find((o) => String(o.value).toLowerCase() === w) ?? flat.find((o) => String(o.name ?? "").toLowerCase() === w)
+    ?? flat.find((o) => String(o.value).toLowerCase().includes(w) || String(o.name ?? "").toLowerCase().includes(w));
+  return hit ? String(hit.value) : null;
+}
+
+/** ACP prompt content: text, images inline (when the agent accepts images), files as resource links (agent reads ranges). */
+export function promptBlocks(text: string, atts: PromptAttachment[] | undefined, caps: { image: boolean }): Json[] {
+  const blocks: Json[] = [{ type: "text", text }];
+  const fallback: string[] = [];
+  for (const a of atts ?? []) {
+    if (a.kind === "image" && caps.image) {
+      try { blocks.push({ type: "image", mimeType: a.mime, data: readFileSync(a.path).toString("base64") }); continue; } catch { /* fall back to a link */ }
+    }
+    blocks.push({ type: "resource_link", uri: pathToFileURL(a.path).href, name: a.name, mimeType: a.mime });
+    fallback.push(`- ${a.name}: ${a.path}`);
+  }
+  // Agents that ignore resource links still get the paths in plain text.
+  if (fallback.length) blocks[0] = { type: "text", text: `${text}\n\nAttached files (read only what you need):\n${fallback.join("\n")}` };
+  return blocks;
+}
 import { runCapture } from "./process";
 
 /** Read models from an ACP session response: `models.availableModels` or a select config option of category "model". */
@@ -103,6 +131,7 @@ export class AcpSession implements HarnessSession {
   sessionId: string | null = null;
   models: ModelInfo[] = [];
   private modelOptionId: string | null = null;
+  private caps = { image: false };
   private child: ChildProcess;
   private peer: JsonRpcPeer;
   private exited = false;
@@ -125,11 +154,12 @@ export class AcpSession implements HarnessSession {
   }
 
   async init(): Promise<void> {
-    await this.peer.request("initialize", {
+    const init = await this.peer.request<Json>("initialize", {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: true, writeTextFile: !this.o.policy.readOnly }, terminal: false },
       clientInfo: { name: "TheFlashMaster", version: "0.1.0" },
     });
+    this.caps.image = !!init?.agentCapabilities?.promptCapabilities?.image;
     const mcpServers = this.o.mcpServers.map((s) => ({
       name: s.name, command: s.command, args: s.args, env: Object.entries(s.env).map(([name, value]) => ({ name, value })),
     }));
@@ -156,11 +186,17 @@ export class AcpSession implements HarnessSession {
         await this.peer.request("session/set_model", { sessionId: this.sessionId, modelId: this.o.model }).catch(() => undefined);
       }
     }
+    // Reasoning effort: ACP agents expose it as a select config option of category "thought_level".
+    if (this.o.thinking) {
+      const opt = (resp?.configOptions ?? []).find((o: Json) => o?.type === "select" && (o.category === "thought_level" || /thought|reason|effort|think/i.test(String(o.id))));
+      const value = pickOption(opt, this.o.thinking);
+      if (opt && value) await this.peer.request("session/set_config_option", { sessionId: this.sessionId, configId: opt.id, value }).catch(() => undefined);
+    }
   }
 
-  async prompt(text: string): Promise<TurnResult> {
+  async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     try {
-      const r = await this.peer.request<Json>("session/prompt", { sessionId: this.sessionId, prompt: [{ type: "text", text }] });
+      const r = await this.peer.request<Json>("session/prompt", { sessionId: this.sessionId, prompt: promptBlocks(text, attachments, this.caps) });
       const u = r?.usage ?? r?._meta?.usage;
       const usage = u ? { tokensIn: Number(u.inputTokens ?? u.input_tokens ?? 0), tokensOut: Number(u.outputTokens ?? u.output_tokens ?? 0) } : undefined;
       return { stopReason: r?.stopReason ?? "end_turn", usage };
@@ -201,6 +237,7 @@ export class AcpSession implements HarnessSession {
 
   private async onRequest(method: string, p: Json): Promise<any> {
     const root = this.o.policy.projectRoot;
+    const allowed = (path: string) => insideRoot(root, path) || (this.o.policy.extraRoots ?? []).some((r) => insideRoot(r, path));
     switch (method) {
       case "session/request_permission": {
         const tc = p.toolCall ?? {};
@@ -215,7 +252,7 @@ export class AcpSession implements HarnessSession {
         return pick ? { outcome: { outcome: "selected", optionId: pick.optionId } } : { outcome: { outcome: "cancelled" } };
       }
       case "fs/read_text_file": {
-        if (!insideRoot(root, p.path)) throw new Error("path outside project folder");
+        if (!allowed(p.path)) throw new Error("path outside project folder");
         const text = await readFile(p.path, "utf8");
         if (p.line || p.limit) {
           const lines = text.split("\n");

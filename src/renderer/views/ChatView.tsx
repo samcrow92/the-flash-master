@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
 import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
+import { Composer } from "../components/Composer";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -62,10 +63,9 @@ export function ChatView({ chatId }: { chatId: string }) {
             <label className="ctl" title="Model id passed to the harness (blank = harness default)">
               <span>Model</span>
               <ModelInput className="model-input" harness={chat.harness ?? roleOf(chat.agentRole)?.harness ?? st.settings?.general.defaultHarness ?? null}
-                value={chat.model ?? ""} onChange={(v) => update({ model: v || null })} />
+                value={chat.model ?? ""} disabled={!!chat.mode} onChange={(v) => update({ model: v || null })} />
             </label>
-            <button className={`toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (off by default, on demand)"
-              onClick={() => update({ superpowers: !chat.superpowers })}>⚡ Superpowers {chat.superpowers ? "on" : "off"}</button>
+            {chat.mode && <span className={`pill mode-pill mode-${chat.mode}`} title="Drive mode overrides the harness/model below">{chat.mode.toUpperCase()}</span>}
             <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
               onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}>🧭 Progress</button>
             {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}>■ Stop</button>}
@@ -100,7 +100,7 @@ export function ChatView({ chatId }: { chatId: string }) {
           {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
           {messages.map((m) => <MessageItem key={m.id} m={m} onReply={() => st.openThread(chatId, m.id)} />)}
         </div>
-        <Composer chatId={chatId} parentId={null} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @role to route, / for commands`} />
+        <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
       </section>
       {st.thread && st.thread.chatId === chatId && <ThreadPanel />}
       {!st.thread && st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
@@ -146,7 +146,17 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
           )}
         </div>
         <div className="msg-content">
+          {m.steer && <span className="steer-badge" title="Sent while the agent was working, to steer it">↪ steering</span>}
           {m.author === "user" ? <div className="plain">{m.content}</div> : <Markdown text={m.content || (m.status === "streaming" ? "" : "")} />}
+          {m.attachments.length > 0 && (
+            <div className="msg-atts">
+              {m.attachments.map((a) => (
+                <button key={a.id} className={`msg-att ${a.thumb ? "img" : ""}`} title={`${a.name} — click to open`} onClick={() => void api().openAttachment(a.path)}>
+                  {a.thumb ? <img src={a.thumb} alt={a.name} /> : <><span>📄</span><span className="att-name">{a.name}</span><span className="muted small">{(a.size / 1024).toFixed(0)} KB</span></>}
+                </button>
+              ))}
+            </div>
+          )}
           {m.status === "streaming" && (
             <div className="streaming"><span className="working-dots"><i /><i /><i /></span> <span className="muted small shimmer">{agent?.lastActivity ?? "Working…"}</span></div>
           )}
@@ -187,63 +197,7 @@ function ThreadPanel() {
           </div>
         ))}
       </div>
-      <Composer chatId={t.chatId} parentId={t.rootId} placeholder="Reply in thread…" />
+      <Composer chat={st.chatById[t.chatId]!} parentId={t.rootId} compact busy={Object.values(st.agents).some((a) => a.chatId === t.chatId && a.status === "running")} placeholder="Reply in thread…" />
     </aside>
-  );
-}
-
-function Composer({ chatId, parentId, placeholder }: { chatId: string; parentId: string | null; placeholder: string }) {
-  const { roles, skills, toast } = useStore();
-  const [text, setText] = useState("");
-  const [sel, setSel] = useState(0);
-  const ta = useRef<HTMLTextAreaElement>(null);
-
-  const suggestions = useMemo(() => {
-    const at = /^@([\w-]*)$/.exec(text);
-    if (at) return roles.filter((r) => r.name.startsWith(at[1]!.toLowerCase())).map((r) => ({ insert: `@${r.name} `, label: `${r.icon} @${r.name}`, hint: r.title }));
-    const sl = /^\/([\w-]*)$/.exec(text);
-    if (sl) {
-      const cmds = [
-        { c: "superpowers", d: "toggle the superpowers workflow for this chat" }, { c: "stop", d: "stop agents in this chat" }, { c: "help", d: "list commands and specialists" },
-        ...skills.filter((s) => s.command !== "superpowers-index").map((s) => ({ c: s.command, d: s.description })),
-      ];
-      return cmds.filter((x) => x.c.startsWith(sl[1]!.toLowerCase())).map((x) => ({ insert: `/${x.c} `, label: `/${x.c}`, hint: x.d }));
-    }
-    return [];
-  }, [text, roles, skills]);
-
-  const send = async () => {
-    const content = text.trim();
-    if (!content) return;
-    setText("");
-    try {
-      await api().sendMessage({ chatId, content, parentId });
-    } catch (e: any) {
-      toast("error", String(e?.message ?? e));
-      setText(content);
-    }
-  };
-
-  return (
-    <div className="composer">
-      {suggestions.length > 0 && (
-        <div className="suggest">
-          {suggestions.map((s, i) => (
-            <button key={s.insert} className={i === sel ? "sel" : ""} onMouseDown={(e) => { e.preventDefault(); setText(s.insert); ta.current?.focus(); }}>
-              <span>{s.label}</span><span className="muted small">{s.hint}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <textarea ref={ta} value={text} placeholder={placeholder} rows={Math.min(8, Math.max(2, text.split("\n").length))}
-        onChange={(e) => { setText(e.target.value); setSel(0); }}
-        onKeyDown={(e) => {
-          if (suggestions.length && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) { e.preventDefault(); setText(suggestions[sel]!.insert); return; }
-          if (suggestions.length && e.key === "ArrowDown") { e.preventDefault(); setSel((sel + 1) % suggestions.length); return; }
-          if (suggestions.length && e.key === "ArrowUp") { e.preventDefault(); setSel((sel - 1 + suggestions.length) % suggestions.length); return; }
-          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
-        }} />
-      <button className="primary send" onClick={send} disabled={!text.trim()}>Send ⏎</button>
-    </div>
   );
 }

@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
+  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -17,12 +17,15 @@ export interface FlashApi {
   listChats(projectId: string | null): Promise<Chat[]>;
   getMasterChat(): Promise<Chat>;
   createChat(input: { projectId: string | null; title?: string; agentRole?: string }): Promise<Chat>;
-  updateChat(id: string, patch: Partial<Pick<Chat, "title" | "agentRole" | "harness" | "model" | "superpowers">>): Promise<Chat>;
+  updateChat(id: string, patch: Partial<Pick<Chat, "title" | "agentRole" | "harness" | "model" | "superpowers" | "mode" | "autopilot">>): Promise<Chat>;
   deleteChat(id: string): Promise<void>;
 
   // messages
   listMessages(chatId: string, parentId: string | null): Promise<Message[]>;
-  sendMessage(input: { chatId: string; content: string; parentId?: string | null }): Promise<Message>;
+  sendMessage(input: { chatId: string; content: string; parentId?: string | null; attachments?: Attachment[]; whileBusy?: "queue" | "steer" }): Promise<Message>;
+  saveAttachment(input: { chatId: string; name: string; mime: string; dataBase64: string }): Promise<Attachment>;
+  pickAttachments(chatId: string): Promise<Attachment[]>;
+  openAttachment(path: string): Promise<void>;
   toggleReaction(messageId: string, emoji: string): Promise<string[]>;
 
   // agents
@@ -85,7 +88,7 @@ export interface FlashApi {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "deleteChat", "listMessages", "sendMessage", "toggleReaction", "listAgents", "startAgent",
+  "updateChat", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "toggleReaction", "listAgents", "startAgent",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

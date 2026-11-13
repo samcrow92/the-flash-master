@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { HarnessStatus } from "@shared/types";
 import { estimateTokens } from "../context";
-import type { HarnessAdapter, HarnessSession, SessionOptions, TurnResult } from "./types";
+import type { HarnessAdapter, HarnessSession, PromptAttachment, SessionOptions, TurnResult } from "./types";
 
 export class MockSession implements HarnessSession {
   readonly sessionId = `mock-${randomUUID().slice(0, 8)}`;
@@ -19,7 +19,7 @@ export class MockSession implements HarnessSession {
     return !this.closed;
   }
 
-  async prompt(text: string): Promise<TurnResult> {
+  async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     this.cancelled = false;
     this.turn += 1;
     const request = /## Request\n([\s\S]*)$/.exec(text)?.[1] ?? text;
@@ -27,6 +27,8 @@ export class MockSession implements HarnessSession {
     const reply = [
       `**${role}** (mock harness, turn ${this.turn}) received:`,
       `> ${request.trim().split("\n")[0]!.slice(0, 160)}`,
+      ...(attachments?.length ? ["", `Attachments received: ${attachments.map((a) => `${a.name} (${a.kind})`).join(", ")}`] : []),
+      ...(/Autopilot/.test(text) ? ["", "_Autopilot is on — continuing without asking for confirmation._"] : []),
       "",
       "This is a simulated streaming reply so you can try TheFlashMaster without an agent CLI. Enable Copilot, OpenCode, Pi or GitLab Duo in **Settings → Harnesses** for real work.",
       "",

@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  AgentEvent, AgentRun, AgentStatus, PlanStep, Artifact, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
+  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, UsageSummary,
 } from "@shared/types";
 
 const MIGRATIONS: string[] = [
@@ -33,6 +33,10 @@ const MIGRATIONS: string[] = [
    CREATE TABLE agent_events(id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL,
      status TEXT, ref TEXT, at INTEGER NOT NULL);
    CREATE INDEX agent_events_agent ON agent_events(agent_id, id);`,
+  // v3: drive modes, autopilot, attachments and steering flags
+  `ALTER TABLE chats ADD COLUMN mode TEXT;
+   ALTER TABLE chats ADD COLUMN autopilot INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE messages ADD COLUMN meta TEXT;`,
 ];
 
 type Row = Record<string, any>;
@@ -118,7 +122,7 @@ export class Db {
   createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string }): Chat {
     const c: Chat = {
       id: newId(), projectId: i.projectId, title: i.title, kind: i.kind, agentRole: i.agentRole,
-      harness: null, model: null, superpowers: false, createdAt: now(),
+      harness: null, model: null, superpowers: false, mode: null, autopilot: false, createdAt: now(),
     };
     this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
       c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.createdAt);
@@ -128,8 +132,8 @@ export class Db {
     const c = this.getChat(id);
     if (!c) throw new Error(`chat ${id} not found`);
     const n = { ...c, ...patch };
-    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=? WHERE id=?",
-      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, id);
+    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, autopilot=? WHERE id=?",
+      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.autopilot ? 1 : 0, id);
     return n;
   }
   deleteChat(id: string): void {
@@ -151,22 +155,23 @@ export class Db {
     return rows.map((r) => this.hydrate(r));
   }
   /** Messages with their seq, for context building (main thread or one thread). */
-  history(chatId: string, parentId: string | null, afterSeq = 0): (Message & { seq: number })[] {
+  history(chatId: string, parentId: string | null, afterSeq = 0): Message[] {
     const rows = parentId === null
       ? this.all("SELECT * FROM messages WHERE chat_id=? AND parent_id IS NULL AND seq>? ORDER BY seq", chatId, afterSeq)
       : this.all("SELECT * FROM messages WHERE chat_id=? AND (parent_id=? OR id=?) AND seq>? ORDER BY seq", chatId, parentId, parentId, afterSeq);
-    return rows.map((r) => ({ ...this.hydrate(r), seq: Number(r.seq) }));
+    return rows.map((r) => this.hydrate(r));
   }
   getMessage(id: string): Message | null {
     const r = this.get("SELECT * FROM messages WHERE id=?", id);
     return r ? this.hydrate(r) : null;
   }
   addMessage(i: { chatId: string; parentId?: string | null; author: Message["author"]; content: string; agentId?: string | null;
-    role?: string | null; status?: MessageStatus }): Message {
+    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean }): Message {
     const id = newId();
     this.seq += 1;
-    this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-      id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now());
+    const meta = i.attachments?.length || i.steer ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer }) : null;
+    this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now(), meta);
     return this.getMessage(id)!;
   }
   updateMessage(id: string, patch: { content?: string; status?: MessageStatus; tokensIn?: number; tokensOut?: number; estimated?: boolean }): Message {
@@ -188,10 +193,13 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
+    let meta: { attachments?: Attachment[]; steer?: boolean } = {};
+    try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
-      estimated: !!r.estimated, createdAt: Number(r.created_at), reactions: this.reactions(r.id), replyCount,
+      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer,
+      reactions: this.reactions(r.id), replyCount,
     };
   }
 
@@ -366,7 +374,7 @@ export class Db {
 const toProject = (r: Row): Project => ({ id: r.id, name: r.name, path: r.path, createdAt: Number(r.created_at) });
 const toChat = (r: Row): Chat => ({
   id: r.id, projectId: r.project_id ?? null, title: r.title, kind: r.kind, agentRole: r.agent_role, harness: r.harness ?? null,
-  model: r.model ?? null, superpowers: !!r.superpowers, createdAt: Number(r.created_at),
+  model: r.model ?? null, superpowers: !!r.superpowers, mode: r.mode ?? null, autopilot: !!r.autopilot, createdAt: Number(r.created_at),
 });
 const toAgent = (r: Row): AgentRun => ({
   id: r.id, projectId: r.project_id ?? null, chatId: r.chat_id ?? null, role: r.role, harness: r.harness, model: r.model ?? null,

@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { HarnessId, HarnessStatus } from "@shared/types";
-import { HARNESS_IDS } from "@shared/types";
+import type { DriveMode, HarnessId, HarnessStatus } from "@shared/types";
+import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { api, useStore } from "../store";
 import { AgentImportDialog, reportImports } from "../components/AgentImport";
 import { ModelInput } from "../components/ModelInput";
 
 const TABS = [
-  ["general", "General"], ["harnesses", "Harnesses"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["permissions", "Permissions"],
+  ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["permissions", "Permissions"],
   ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
 ] as const;
 
@@ -36,6 +36,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
         <div className="tab-body">
           {tab === "general" && <General {...f} />}
           {tab === "harnesses" && <Harnesses {...f} />}
+          {tab === "modes" && <Modes {...f} />}
           {tab === "agents" && <Agents {...f} />}
           {tab === "tokens" && <Tokens {...f} />}
           {tab === "permissions" && <Permissions {...f} />}
@@ -161,6 +162,49 @@ function Agents(f: F) {
         </td>
       </tr>)}</tbody>
     </table>
+  </>;
+}
+
+const MODE_TEXT: Record<DriveMode, string> = {
+  local: "🏠 LOCAL — your on-prem / local model (e.g. an Ollama or company-hosted model configured in OpenCode or Pi)",
+  eco: "🍃 ECO — cheapest capable model",
+  comfort: "🛋️ COMFORT — balanced quality and cost",
+  sport: "🏁 SPORT — most capable model",
+};
+
+function Modes(f: F) {
+  return <>
+    <p className="muted">The four buttons under the chat bar switch a chat's model profile in one click. Each mode sets the harness (blank = the chat's
+      harness), the model and the thinking level. Model ids are the ones your harness uses — the field suggests what it reports.</p>
+    {DRIVE_MODES.map((m) => {
+      const p = f.s.modes[m];
+      const harness = (p.harness || f.s.general.defaultHarness) as HarnessId;
+      return <div key={m} className="panel">
+        <h4>{MODE_TEXT[m]}</h4>
+        <div className="grid3">
+          <label className="field"><span>Harness</span>
+            <select value={p.harness} disabled={f.locked(`modes.${m}`)} onChange={(e) => f.set(`modes.${m}.harness`, e.target.value)}>
+              <option value="">chat harness / default</option>{HARNESS_IDS.map((h) => <option key={h} value={h}>{h}</option>)}
+            </select>
+          </label>
+          <label className="field"><span>Model</span>
+            <ModelInput harness={harness} value={p.model} disabled={f.locked(`modes.${m}`)} placeholder={m === "local" ? "e.g. ollama/qwen3-coder" : "model id"} onChange={(v) => f.set(`modes.${m}.model`, v)} />
+          </label>
+          <label className="field"><span>Thinking</span>
+            <select value={p.thinking} disabled={f.locked(`modes.${m}`)} onChange={(e) => f.set(`modes.${m}.thinking`, e.target.value)}>
+              {["", "minimal", "low", "medium", "high", "xhigh"].map((t) => <option key={t} value={t}>{t || "harness default"}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>;
+    })}
+    <p className="muted small">Thinking is applied through Pi's <code>--thinking</code> flag and through the ACP "thought level" option for Copilot/OpenCode when they offer it.
+      Switching mode restarts the chat's idle agent sessions with the new model on the next message.</p>
+    <h4>Chat</h4>
+    <Row label="While an agent is working, Enter…" hint="Steer delivers your message into the running turn (natively in Pi; other harnesses are interrupted and redirected). Queue sends it when the turn finishes. You can switch per message in the chat bar.">
+      <Choice f={f} path="chat.defaultSendWhileBusy" options={[["steer", "Steers the agent"], ["queue", "Queues the message"]]} />
+    </Row>
+    <Row label="Max attachment size (MB)"><Num f={f} path="chat.maxAttachmentMB" min={1} /></Row>
   </>;
 }
 

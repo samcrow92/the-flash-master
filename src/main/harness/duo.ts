@@ -6,7 +6,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { HarnessStatus } from "@shared/types";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
-import type { HarnessAdapter, HarnessSession, SessionOptions, TurnResult } from "./types";
+import type { HarnessAdapter, HarnessSession, PromptAttachment, SessionOptions, TurnResult } from "./types";
 
 const SESSION_RE = /session[\s_-]*id[\s:=]+([A-Za-z0-9_-]{6,})/i;
 // eslint-disable-next-line no-control-regex
@@ -25,8 +25,9 @@ export class DuoSession implements HarnessSession {
     return !this.closed;
   }
 
-  prompt(text: string): Promise<TurnResult> {
-    const args = [...this.prefixArgs, "run", "--goal", text, ...splitArgs(this.o.extraArgs)];
+  prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
+    const goal = attachments?.length ? `${text}\n\nAttached files:\n${attachments.map((a) => `- ${a.name}: ${a.path}`).join("\n")}` : text;
+    const args = [...this.prefixArgs, "run", "--goal", goal, ...splitArgs(this.o.extraArgs)];
     if (this.sessionId) args.push("--existing-session-id", this.sessionId);
     if (this.o.model) args.push("--model", this.o.model);
     return new Promise((resolve) => {

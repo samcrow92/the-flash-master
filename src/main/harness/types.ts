@@ -29,15 +29,23 @@ export interface TurnResult {
   error?: string;
 }
 
+export interface PromptAttachment {
+  kind: "image" | "file";
+  name: string;
+  mime: string;
+  path: string;
+}
+
 export interface SessionOptions {
   cwd: string;
   model: string | null;
+  thinking?: string | null; // reasoning effort: minimal | low | medium | high | xhigh
   extraArgs: string;
   executable: string | null; // resolved path override
   mcpServers: McpServerSpec[];
   env: Record<string, string>;
   resumeSessionId: string | null;
-  policy: { approval: ApprovalPolicy; readOnly: boolean; blocked: string[]; projectRoot: string | null };
+  policy: { approval: ApprovalPolicy; readOnly: boolean; blocked: string[]; projectRoot: string | null; extraRoots?: string[] };
   onEvent: (e: HarnessEvent) => void;
   /** Ask the user (returns true = allow). Only called when policy says "ask". */
   askPermission: (r: PermissionRequest) => Promise<boolean>;
@@ -47,7 +55,9 @@ export interface HarnessSession {
   readonly sessionId: string | null;
   /** Models reported while the session started (ACP), so the cache refreshes for free. */
   readonly models?: ModelInfo[];
-  prompt(text: string): Promise<TurnResult>;
+  prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult>;
+  /** Inject a message into the running turn. Only harnesses with native support implement it (Pi `steer`). */
+  steer?(text: string): Promise<boolean>;
   cancel(): Promise<void>;
   close(): void;
   readonly alive: boolean;

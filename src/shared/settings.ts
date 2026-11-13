@@ -1,4 +1,11 @@
-import type { HarnessId } from "./types";
+import type { DriveMode, HarnessId } from "./types";
+
+export type ThinkingLevel = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export interface ModeProfile {
+  harness: HarnessId | ""; // "" = the chat's harness / default harness
+  model: string;
+  thinking: ThinkingLevel;
+}
 
 export interface HarnessSettings {
   enabled: boolean;
@@ -18,6 +25,11 @@ export interface Settings {
     restoreLastChat: boolean;
   };
   harnesses: Record<HarnessId, HarnessSettings>;
+  modes: Record<DriveMode, ModeProfile>;
+  chat: {
+    maxAttachmentMB: number;
+    defaultSendWhileBusy: "queue" | "steer"; // what Enter does while an agent is still working
+  };
   agents: {
     maxConcurrent: number;
     roleOverrides: Record<string, { harness?: HarnessId; model?: string; maxResultTokens?: number }>;
@@ -105,6 +117,13 @@ export const DEFAULT_SETTINGS: Settings = {
     duo: harness(true),
     mock: harness(true),
   },
+  modes: {
+    local: { harness: "opencode", model: "", thinking: "" }, // e.g. an on-prem / Ollama model configured in OpenCode or Pi
+    eco: { harness: "", model: "luna", thinking: "medium" },
+    comfort: { harness: "", model: "sol", thinking: "low" },
+    sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
+  },
+  chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
   tokens: {
     dailyBudget: 0,

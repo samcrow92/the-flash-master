@@ -5,7 +5,7 @@
  * named with @mention. Delegated specialists run as thread replies under the delegating message, so the
  * user sees them without the coordinator's context ever containing their transcript.
  */
-import type { AgentRun, AppEvent, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
+import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
@@ -30,6 +30,7 @@ export interface OrchestratorDeps {
   homeDir: string;
   dataDir?: string;
   extraRules?: () => string; // e.g. instructions from installed marketplace plugins
+  attachmentRoots?: () => string[]; // folders agents may read attachments from (outside the project)
 }
 
 interface Live {
@@ -44,12 +45,15 @@ interface Live {
   sessionTokens: number; // estimated tokens accumulated in the harness session (drives rollover compaction)
   busy: boolean;
   paused: boolean;
-  queue: string[];
+  queue: { input: string; attachments: Attachment[] }[];
+  redirect: { input: string; attachments: Attachment[] } | null; // steering by interrupt: next turn input
   depth: number;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
   lastResult: string | null;
   stopped: boolean;
+  /** Where streamed text goes for the *current* turn. Sessions outlive turns, so this is swapped per turn. */
+  sink: ((delta: string) => void) | null;
 }
 
 const MAX_CONCURRENT_FALLBACK = 4;
@@ -58,6 +62,8 @@ export class Orchestrator {
   private live = new Map<string, Live>();
   private byAgent = new Map<string, Live>();
   private pendingPermissions = new Map<string, (allow: boolean) => void>();
+  /** Full text of replies that are still streaming (the DB copy is only flushed every 500 ms). */
+  private liveText = new Map<string, string>();
   private running = 0;
   private slotWaiters: (() => void)[] = [];
 
@@ -66,11 +72,19 @@ export class Orchestrator {
   // ------------------------------------------------------------------ public API
 
   /** Handle a user message. Returns the stored user message; the agent reply streams via events. */
-  async sendUserMessage(chatId: string, content: string, parentId: string | null): Promise<Message> {
+  async sendUserMessage(chatId: string, content: string, parentId: string | null,
+    o: { attachments?: Attachment[]; whileBusy?: "queue" | "steer" } = {}): Promise<Message> {
     const chat = this.mustChat(chatId);
     const threadRoot = parentId ? (this.d.db.getMessage(parentId)?.parentId ?? parentId) : null;
-    const userMsg = this.d.db.addMessage({ chatId, parentId: threadRoot, author: "user", content });
+    const attachments = o.attachments ?? [];
+    // Steering: a message sent while the chat's agent is working goes into the running turn.
+    const busyLive = [...this.live.values()].find((l) => l.chatId === chatId && l.threadRoot === threadRoot && l.busy);
+    const mentioned = parseMention(content, this.d.roles().map((r) => r.name)).role;
+    const steer = !!busyLive && (o.whileBusy ?? this.d.settings().chat.defaultSendWhileBusy) === "steer" && !parseSlash(content).command
+      && (!mentioned || mentioned === busyLive.role.name);
+    const userMsg = this.d.db.addMessage({ chatId, parentId: threadRoot, author: "user", content, attachments, steer });
     this.d.emit({ type: "message.created", message: userMsg });
+    if (steer && busyLive) { await this.steer(busyLive, content, attachments); return userMsg; }
 
     const slash = parseSlash(content);
     if (slash.command === "superpowers") {
@@ -90,7 +104,7 @@ export class Orchestrator {
     const role = this.role(roleName);
     const skills = this.activeSkills(chat, slash.command);
     const text = slash.command && skills.length ? slash.text || content : mention.text;
-    void this.turn({ chat, threadRoot, role, input: text, skills, depth: 0, brief: null }).catch((e) =>
+    void this.turn({ chat, threadRoot, role, input: text, attachments, skills, depth: 0, brief: null }).catch((e) =>
       this.system(chatId, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
     return userMsg;
   }
@@ -161,10 +175,11 @@ export class Orchestrator {
     l.paused = false;
     const queued = l.queue.splice(0);
     const chat = this.mustChat(l.chatId);
-    const input = queued.length ? queued.join("\n\n") : "Continue where you left off. Be concise.";
+    const input = queued.length ? queued.map((q) => q.input).join("\n\n") : "Continue where you left off. Be concise.";
     this.setStatus(l, "idle", "Resumed");
     this.flow(agentId, { kind: "status", label: "resumed", status: "running" });
-    void this.turn({ chat, threadRoot: l.threadRoot, role: l.role, input, skills: [], depth: l.depth, brief: null, liveKey: l.key });
+    void this.turn({ chat, threadRoot: l.threadRoot, role: l.role, input, attachments: queued.flatMap((q) => q.attachments), skills: [], depth: l.depth,
+      brief: null, liveKey: l.key });
   }
 
   async stop(agentId: string): Promise<void> {
@@ -194,6 +209,34 @@ export class Orchestrator {
     for (const l of [...this.live.values()]) await this.stop(l.agentId);
   }
 
+  /**
+   * Steering: harnesses with native support (Pi) receive the message inside the running turn. For the others
+   * (ACP agents, GitLab Duo, mock) the current turn is interrupted at a safe point and the next turn starts at once
+   * with the new direction — the session keeps its history, so no work is lost.
+   */
+  private async steer(l: Live, text: string, attachments: Attachment[]): Promise<void> {
+    if (!attachments.length && l.session?.steer && (await l.session.steer(text).catch(() => false))) {
+      this.flow(l.agentId, { kind: "status", label: `steered: ${text.slice(0, 120)}`, status: "steer" });
+      this.setStatus(l, "running", "Steering message delivered");
+      return;
+    }
+    l.redirect = l.redirect ? { input: `${l.redirect.input}\n${text}`, attachments: [...l.redirect.attachments, ...attachments] } : { input: text, attachments };
+    this.flow(l.agentId, { kind: "status", label: `redirected: ${text.slice(0, 120)}`, status: "steer" });
+    this.setStatus(l, "running", "Redirecting with your steering message…");
+    await l.session?.cancel();
+  }
+
+  /** Drive mode / harness / model changed: idle sessions of the chat restart on the next message with the new setup. */
+  resetChatSessions(chatId: string): void {
+    for (const l of [...this.live.values()]) {
+      if (l.chatId !== chatId || l.busy) continue;
+      l.session?.close();
+      this.live.delete(l.key);
+      this.byAgent.delete(l.agentId);
+      this.emitAgent(this.d.db.updateAgent(l.agentId, { status: "done", ended: true, lastActivity: "Restarted for new mode/model" }));
+    }
+  }
+
   /** Reactions double as approvals for pending permission requests (✅ allow / ❌ deny). */
   onReaction(messageId: string, emoji: string, reactions: string[]): void {
     const resolve = this.pendingPermissions.get(messageId);
@@ -202,19 +245,25 @@ export class Orchestrator {
     if (emoji === "❌" || emoji === "👎") { this.pendingPermissions.delete(messageId); resolve(false); }
   }
 
+  /** Messages as the UI should see them: streaming replies carry their live text, not the last 500 ms flush. */
+  withLiveText(messages: Message[]): Message[] {
+    return messages.map((m) => (m.status === "streaming" && this.liveText.has(m.id) ? { ...m, content: this.liveText.get(m.id)! } : m));
+  }
+
   activeCount(): number {
     return [...this.live.values()].filter((l) => l.busy).length;
   }
 
   // ------------------------------------------------------------------ turn engine
 
-  private async turn(t: { chat: Chat; threadRoot: string | null; role: RoleDef; input: string; skills: SkillDef[]; depth: number;
-    brief: string | null; taskId?: string; liveKey?: string }): Promise<void> {
+  private async turn(t: { chat: Chat; threadRoot: string | null; role: RoleDef; input: string; attachments?: Attachment[]; skills: SkillDef[];
+    depth: number; brief: string | null; taskId?: string; liveKey?: string }): Promise<void> {
     const s = this.d.settings();
     const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth);
     if (!live) return;
-    if (live.paused) { live.queue.push(t.input); this.system(t.chat.id, t.threadRoot, `⏸ ${t.role.title} is paused — message queued.`); return; }
-    if (live.busy) { live.queue.push(t.input); return; }
+    const item = { input: t.input, attachments: t.attachments ?? [] };
+    if (live.paused) { live.queue.push(item); this.system(t.chat.id, t.threadRoot, `⏸ ${t.role.title} is paused — message queued.`); return; }
+    if (live.busy) { live.queue.push(item); return; }
 
     // Budgets — checked before spending anything.
     const blocked = this.checkBudgets(live, t.chat);
@@ -235,11 +284,13 @@ export class Orchestrator {
     let promptText: string;
     try {
       const firstTurn = !live.session || !live.session.alive;
-      if (firstTurn) live.session = await this.openSession(live, project?.path ?? null, t.chat, (delta) => {
+      live.sink = (delta) => {
         text += delta;
+        this.liveText.set(reply.id, text);
         this.d.emit({ type: "message.delta", messageId: reply.id, chatId: t.chat.id, delta });
         if (Date.now() - lastFlush > 500) { lastFlush = Date.now(); this.d.db.updateMessage(reply.id, { content: text }); }
-      });
+      };
+      if (firstTurn) live.session = await this.openSession(live, project?.path ?? null, t.chat);
       // On a (re)started session send a compact history instead of a transcript.
       let summary: string | null = null;
       let recent: Message[] = [];
@@ -262,15 +313,21 @@ export class Orchestrator {
         brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
         houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? ""].filter((x) => x.trim()).join("\n\n") });
       this.setStatus(live, "running", "Thinking…");
-      const res = await live.session!.prompt(promptText);
+      // Autopilot is read per turn, so toggling it applies to the very next message.
+      const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
+      if (chatNow.autopilot) promptText += "\n\n(Autopilot: work autonomously. Do not stop to ask for confirmation or feedback — make reasonable assumptions, state them briefly, and finish the task.)";
+      const atts = (t.attachments ?? []).map((a) => ({ kind: a.kind, name: a.name, mime: a.mime, path: a.path }));
+      const res = await live.session!.prompt(promptText, atts);
       this.d.db.updateMessage(reply.id, { content: text });
       const usage = res.usage && (res.usage.tokensIn || res.usage.tokensOut)
         ? { ...res.usage, estimated: false }
         : { tokensIn: estimateTokens(promptText), tokensOut: estimateTokens(text), estimated: true };
       this.d.db.recordUsage({ agentId: live.agentId, projectId: t.chat.projectId, harness: live.harness, role: t.role.name, ...usage });
       live.sessionTokens += usage.tokensIn + usage.tokensOut;
-      const status = live.stopped ? "stopped" : res.stopReason === "error" ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
-      if (res.error) text += `\n\n⚠️ ${res.error}`;
+      const redirected = !!live.redirect && !live.stopped;
+      const status = live.stopped ? "stopped" : redirected ? "done" : res.stopReason === "error" ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
+      if (redirected) text += "\n\n_↪ Redirected by your steering message._";
+      else if (res.error) text += `\n\n⚠️ ${res.error}`;
       const final = this.d.db.updateMessage(reply.id, { content: text || (status === "paused" ? "_(paused)_" : "_(no output)_"),
         status: res.stopReason === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
       this.d.emit({ type: "message.updated", message: final });
@@ -305,22 +362,34 @@ export class Orchestrator {
       this.finishWaiters(live, `error: ${msg}`);
       if (t.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(t.taskId, { status: "blocked" }) });
     } finally {
+      this.liveText.delete(reply.id);
+      live.sink = null;
       live.busy = false;
       live.currentMessageId = null;
       this.releaseSlot();
     }
+    if (live.redirect && !live.stopped) {
+      const r = live.redirect;
+      live.redirect = null;
+      void this.turn({ ...t, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
+        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key });
+      return;
+    }
     if (!live.paused && !live.stopped && live.queue.length) {
-      const next = live.queue.splice(0).join("\n\n");
-      void this.turn({ ...t, input: next, skills: [], brief: null, taskId: undefined, liveKey: live.key });
+      const items = live.queue.splice(0);
+      void this.turn({ ...t, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
+        taskId: undefined, liveKey: live.key });
     }
   }
 
-  private async openSession(live: Live, projectPath: string | null, chat: Chat, onText: (d: string) => void): Promise<HarnessSession> {
+  private async openSession(live: Live, projectPath: string | null, chat: Chat): Promise<HarnessSession> {
     const s = this.d.settings();
     const adapter = this.d.harnesses.get(live.harness);
     const hs = s.harnesses[live.harness];
     const override = s.agents.roleOverrides[live.role.name];
-    const model = live.model ?? (chat.harness === live.harness && chat.model ? chat.model : (override?.model ?? live.role.model ?? hs?.defaultModel ?? "") || null);
+    const chatNow = this.d.db.getChat(chat.id) ?? chat;
+    const mode = chatNow.mode ? s.modes[chatNow.mode] : null;
+    const model = live.model ?? (mode?.model || null) ?? (chatNow.harness === live.harness && chatNow.model ? chatNow.model : (override?.model ?? live.role.model ?? hs?.defaultModel ?? "") || null);
     const status = this.d.harnesses.cached(live.harness);
     this.setStatus(live, "running", `Starting ${adapter.label}…`);
     const ins = prepareInstructions(live.harness, { mode: s.agents.instructionMode, keepProject: s.agents.keepProjectInstructions,
@@ -328,6 +397,7 @@ export class Orchestrator {
     const session = await adapter.start({
       cwd: projectPath ?? this.d.homeDir,
       model,
+      thinking: mode?.thinking || null,
       extraArgs: [ins.args.join(" "), hs?.args ?? ""].filter(Boolean).join(" "),
       executable: status?.path ?? (hs?.path || null),
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
@@ -335,10 +405,11 @@ export class Orchestrator {
       resumeSessionId: this.d.db.getAgentSession(live.agentId),
       policy: {
         approval: s.permissions.approval, readOnly: s.permissions.readOnly, projectRoot: projectPath,
+        extraRoots: this.d.attachmentRoots?.() ?? [],
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
       },
       onEvent: (e) => {
-        if (e.type === "text") onText(e.text);
+        if (e.type === "text") live.sink?.(e.text);
         else if (e.type === "tool") {
           this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
           this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
@@ -352,6 +423,10 @@ export class Orchestrator {
   }
 
   private askPermission(live: Live, r: PermissionRequest): Promise<boolean> {
+    if (this.d.db.getChat(live.chatId)?.autopilot) {
+      this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "auto-approved (autopilot)" });
+      return Promise.resolve(true);
+    }
     const msg = this.d.db.addMessage({ chatId: live.chatId, parentId: live.threadRoot ?? live.currentMessageId, author: "system",
       role: live.role.name, content: `🔐 **${live.role.title}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
@@ -398,7 +473,8 @@ export class Orchestrator {
     if (existing) return existing;
     const s = this.d.settings();
     const override = s.agents.roleOverrides[role.name];
-    const requested = (chat.agentRole === role.name ? chat.harness : null) ?? override?.harness ?? role.harness ?? null;
+    const mode = chat.mode ? s.modes[chat.mode] : null;
+    const requested = (mode?.harness || null) ?? (chat.agentRole === role.name ? chat.harness : null) ?? override?.harness ?? role.harness ?? null;
     // Economy routing: delegated specialists can run on a cheaper harness/model.
     const economy = !!parentAgentId && s.tokens.economyForDelegated && !!s.tokens.economyHarness;
     const harness = this.d.harnesses.resolve(economy ? (s.tokens.economyHarness as HarnessId) : requested, s);
@@ -406,7 +482,7 @@ export class Orchestrator {
     const agent = this.d.db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: role.name, harness, model,
       parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}` });
     const l: Live = { key, agentId: agent.id, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
-      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false };
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false, sink: null, redirect: null };
     this.live.set(key, l);
     this.byAgent.set(agent.id, l);
     this.emitAgent(agent);

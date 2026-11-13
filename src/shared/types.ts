@@ -16,6 +16,19 @@ export interface Project {
   createdAt: number;
 }
 
+export type DriveMode = "local" | "eco" | "comfort" | "sport";
+export const DRIVE_MODES: DriveMode[] = ["local", "eco", "comfort", "sport"];
+
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "image" | "file";
+  path: string; // absolute path on disk (inside the project's .flashmaster/attachments or the app data folder)
+  thumb?: string; // small data: URL preview for images
+}
+
 export interface Chat {
   id: string;
   projectId: string | null; // null = master chat
@@ -25,6 +38,8 @@ export interface Chat {
   harness: HarnessId | null; // null = role/default harness
   model: string | null;
   superpowers: boolean;
+  mode: DriveMode | null; // LOCAL / ECO / COMFORT / SPORT model profile, null = chat harness/model
+  autopilot: boolean; // auto-approve tool calls and tell agents not to stop for feedback
   createdAt: number;
 }
 
@@ -41,6 +56,9 @@ export interface Message {
   tokensOut: number;
   estimated: boolean;
   createdAt: number;
+  seq: number; // server-assigned order: the UI always sorts by this
+  attachments: Attachment[];
+  steer: boolean; // sent as a steering message into a running turn
   reactions: string[];
   replyCount: number;
 }

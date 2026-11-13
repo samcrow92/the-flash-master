@@ -59,12 +59,24 @@ interface State {
 
 let toastId = 0;
 
+const bySeq = (a: Message, b: Message) => a.seq - b.seq;
 const upsertMsg = (list: Message[], m: Message) => {
   const i = list.findIndex((x) => x.id === m.id);
-  if (i < 0) return [...list, m];
-  const copy = list.slice();
-  copy[i] = m;
-  return copy;
+  if (i >= 0) { const copy = list.slice(); copy[i] = m; return copy; }
+  // Insert by server order (events can interleave with a reload).
+  const at = list.findIndex((x) => x.seq > m.seq);
+  return at < 0 ? [...list, m] : [...list.slice(0, at), m, ...list.slice(at)];
+};
+/** Merge a freshly loaded list with what is on screen: server order wins; a streaming bubble keeps the longer text. */
+const mergeLoaded = (loaded: Message[], shown: Message[] | undefined): Message[] => {
+  if (!shown?.length) return loaded.slice().sort(bySeq);
+  const byId = new Map(shown.map((m) => [m.id, m]));
+  const merged = loaded.map((m) => {
+    const cur = byId.get(m.id);
+    return cur && m.status === "streaming" && cur.content.length > m.content.length ? { ...m, content: cur.content } : m;
+  });
+  for (const m of shown) if (!merged.some((x) => x.id === m.id) && m.seq > (loaded.at(-1)?.seq ?? 0)) merged.push(m);
+  return merged.sort(bySeq);
 };
 const patchMsg = (list: Message[] | undefined, id: string, fn: (m: Message) => Message) =>
   list ? list.map((m) => (m.id === id ? fn(m) : m)) : list;
@@ -120,12 +132,12 @@ export const useStore = create<State>((set, get) => ({
     set({ view: { kind: "chat", chatId }, thread: null, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
-    set((st) => ({ messages: { ...st.messages, [chatId]: msgs } }));
+    set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
   },
 
   async openThread(chatId, rootId) {
     const msgs = await api().listMessages(chatId, rootId);
-    set({ thread: { chatId, rootId, messages: msgs }, flowPanel: null });
+    set((st) => ({ thread: { chatId, rootId, messages: mergeLoaded(msgs, st.thread?.rootId === rootId ? st.thread.messages : undefined) }, flowPanel: null }));
   },
 
   openFlow(chatId, agentId) {
