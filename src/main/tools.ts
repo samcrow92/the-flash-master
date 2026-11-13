@@ -28,12 +28,14 @@ export function buildTools(d: {
   return [
     {
       set: "core", name: "delegate",
-      description: "Hand a focused sub-task to a specialist agent. Send a brief (goal, context, files, acceptance), never transcripts. Returns the specialist's compact result.",
+      description: "Hand a focused sub-task to a specialist agent. Send a brief (goal, context, files, acceptance), never transcripts. Returns the specialist's compact result. This is the only way to run another agent (including on Copilot/OpenCode/Pi/Duo via `harness`): it gets the project's tools and shows in the Agents tab.",
       inputSchema: obj({
         role: s("specialist role name, see list_roles"), goal: s("what to achieve, one or two sentences"),
         context: s("only the facts the specialist needs"), files: { type: "array", items: { type: "string" }, description: "relevant paths" },
         acceptance: s("done when…"), wait: { type: "boolean", description: "wait for the result (default true)" },
         timeoutSec: { type: "number", description: "max seconds to wait (default 600)" },
+        harness: { type: "string", enum: ["copilot", "opencode", "pi", "duo"], description: "run the specialist on this agent CLI (e.g. the user asked for Pi). Default: the role's configured harness. Never start agent CLIs from a shell instead." },
+        model: s("model id for that harness (optional)"),
       }, ["role", "goal"]),
       handler: (a, c) => d.orch.delegate(c.agentId, a),
     },

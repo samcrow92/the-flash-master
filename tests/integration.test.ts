@@ -123,6 +123,39 @@ describe("Orchestrator", () => {
     expect(db.listMessages(chat.id, null).find((m) => m.id === reply.id)!.replyCount).toBe(2);
   });
 
+  it("queued agents show as running, and a waiting delegation never deadlocks on the slot limit", async () => {
+    const { db, orch, chat } = setup({ agents: { maxConcurrent: 1 } });
+    cleanup = () => orch.stopAll();
+    await orch.sendUserMessage(chat.id, "Plan the brake light feature", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "streaming");
+    const parentId = agentMsgs(db, chat.id)[0]!.agentId!;
+    // Background delegation while the only slot is taken: visible as running/queued, not idle.
+    const bg = await orch.delegate(parentId, { role: "tester", goal: "Write tests", wait: false });
+    const queued = db.getAgent(bg.agentId)!;
+    expect(queued.status).toBe("running");
+    expect(queued.lastActivity).toMatch(/Queued/);
+    // Waiting delegation borrows the coordinator's slot: it starts at once instead of waiting behind it.
+    const waiting = orch.delegate(parentId, { role: "reviewer", goal: "Review brake.c" });
+    const r = await waiting;
+    expect(r.result).toBeTruthy();
+    expect(agentMsgs(db, chat.id)[0]!.status).toBe("streaming"); // coordinator still busy: no deadlock, no waiting behind it
+    await until(() => db.getAgent(bg.agentId)!.status === "idle", 10000);
+  });
+
+  it("delegate can pick the harness the user asked for, and warns when it is unavailable", async () => {
+    const { db, orch, chat } = setup();
+    cleanup = () => orch.stopAll();
+    await orch.sendUserMessage(chat.id, "Plan the brake light feature", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "streaming");
+    const parentId = agentMsgs(db, chat.id)[0]!.agentId!;
+    const r = await orch.delegate(parentId, { role: "presentation-expert", goal: "hi", harness: "opencode", wait: false });
+    expect(db.getAgent(r.agentId)!.harness).toBe("opencode");
+    const r2 = await orch.delegate(parentId, { role: "presentation-expert", goal: "hi", harness: "duo", wait: false });
+    expect(db.getAgent(r2.agentId)!.harness).not.toBe("duo");
+    expect(db.listMessages(chat.id, null).concat(...db.listMessages(chat.id, null).map((m) => db.listMessages(chat.id, m.id)))
+      .some((m) => m.author === "system" && m.content.includes("duo is not available"))).toBe(true);
+  });
+
   it("uses a real ACP harness when the chat selects it", async () => {
     const { db, orch, chat } = setup();
     cleanup = () => orch.stopAll();

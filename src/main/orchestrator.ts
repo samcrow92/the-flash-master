@@ -6,6 +6,7 @@
  * user sees them without the coordinator's context ever containing their transcript.
  */
 import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
+import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
@@ -136,7 +137,7 @@ export class Orchestrator {
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
-    wait?: boolean; timeoutSec?: number }): Promise<{ agentId: string; status: string; result?: string }> {
+    wait?: boolean; timeoutSec?: number; harness?: string; model?: string }): Promise<{ agentId: string; status: string; result?: string; harness?: string }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
     const s = this.d.settings();
@@ -146,7 +147,11 @@ export class Orchestrator {
     const brief = buildBrief({ goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, parentRole: parent.role.name });
     // Specialist output appears as a thread under the coordinator's current reply.
     const threadRoot = parent.threadRoot ?? parent.currentMessageId;
-    const live = this.ensureLive(chat, threadRoot, role, parent.depth + 1, `${parentAgentId}>${role.name}`, parentAgentId, brief);
+    const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
+    const live = this.ensureLive(chat, threadRoot, role, parent.depth + 1, `${parentAgentId}>${role.name}${want ? `@${want}` : ""}`, parentAgentId, brief,
+      want ? { harness: want, model: a.model || null } : undefined);
+    if (want && live.harness !== want)
+      this.system(chat.id, threadRoot, `⚠️ ${want} is not available (not installed or disabled in Settings → Harnesses); ${role.title} runs on ${live.harness}.`, "warn");
     let taskId: string | undefined;
     if (s.agents.autoTaskFromDelegation) {
       const t = this.d.db.createTask({ projectId: chat.projectId, title: `${role.title}: ${a.goal.slice(0, 80)}`, description: brief,
@@ -156,9 +161,11 @@ export class Orchestrator {
     }
     this.flow(parentAgentId, { kind: "delegate", label: `${role.title}: ${a.goal.slice(0, 120)}`, ref: live.agentId });
     const done = new Promise<string>((resolve) => live.waiters.push(resolve));
-    void this.turn({ chat, threadRoot, role, input: a.goal, skills: [], depth: live.depth, brief, taskId, liveKey: live.key })
+    // Waiting delegations borrow the coordinator's slot; background ones (wait: false) queue for their own.
+    const borrowSlot = a.wait !== false && parent.busy;
+    void this.turn({ chat, threadRoot, role, input: a.goal, skills: [], depth: live.depth, brief, taskId, liveKey: live.key, borrowSlot })
       .catch((e) => this.finishWaiters(live, `error: ${String(e?.message ?? e)}`));
-    if (a.wait === false) return { agentId: live.agentId, status: "running" };
+    if (a.wait === false) return { agentId: live.agentId, status: "running", harness: live.harness };
     const timeout = Math.min(Math.max(a.timeoutSec ?? 600, 10), 1800) * 1000;
     const result = await Promise.race([done, new Promise<null>((r) => setTimeout(() => r(null), timeout))]);
     if (result === null) return { agentId: live.agentId, status: "running", result: "Still running. Call get_result later." };
@@ -321,7 +328,9 @@ export class Orchestrator {
   // ------------------------------------------------------------------ turn engine
 
   private async turn(t: { chat: Chat; threadRoot: string | null; role: RoleDef; input: string; attachments?: Attachment[]; skills: SkillDef[];
-    depth: number; brief: string | null; taskId?: string; liveKey?: string; msgIds?: string[]; deliver?: boolean }): Promise<void> {
+    depth: number; brief: string | null; taskId?: string; liveKey?: string; msgIds?: string[]; deliver?: boolean;
+    /** A specialist the coordinator is blocked waiting on runs in the coordinator's slot (else both could wait on each other forever). */
+    borrowSlot?: boolean }): Promise<void> {
     const s = this.d.settings();
     const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth);
     if (!live) return;
@@ -335,7 +344,14 @@ export class Orchestrator {
     if (blocked) return;
 
     live.busy = true;
-    await this.acquireSlot(s.agents.maxConcurrent || MAX_CONCURRENT_FALLBACK);
+    const borrowed = !!t.borrowSlot;
+    if (!borrowed) {
+      const max = s.agents.maxConcurrent || MAX_CONCURRENT_FALLBACK;
+      // Visible right away: an agent waiting for a slot used to sit at "idle" and looked like it never started.
+      if (this.running >= max) this.setStatus(live, "running", `⏳ Queued — ${this.running}/${max} agents busy; starts when one finishes (Settings → Agents)`);
+      await this.acquireSlot(max);
+    }
+    if (live.stopped) { live.busy = false; if (!borrowed) this.releaseSlot(); return; } // stopped while queued
     const reply = this.d.db.addMessage({ chatId: t.chat.id, parentId: t.threadRoot, author: "agent", agentId: live.agentId,
       role: t.role.name, content: "", status: "streaming" });
     live.currentMessageId = reply.id;
@@ -449,19 +465,19 @@ export class Orchestrator {
       live.sink = null;
       live.busy = false;
       live.currentMessageId = null;
-      this.releaseSlot();
+      if (!borrowed) this.releaseSlot();
     }
     if (live.redirect && !live.stopped) {
       const r = live.redirect;
       live.redirect = null;
       void this.turn({ ...t, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
-        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true });
+        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false });
       return;
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);
       void this.turn({ ...t, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
-        taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true });
+        taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true, borrowSlot: false });
     }
   }
 
@@ -553,7 +569,7 @@ export class Orchestrator {
   // ------------------------------------------------------------------ helpers
 
   private ensureLive(chat: Chat, threadRoot: string | null, role: RoleDef, depth: number, keyOverride?: string,
-    parentAgentId?: string, brief?: string): Live {
+    parentAgentId?: string, brief?: string, pick?: { harness: HarnessId; model: string | null }): Live {
     const key = keyOverride ?? `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
     const existing = this.live.get(key);
     if (existing) return existing;
@@ -563,8 +579,9 @@ export class Orchestrator {
     const requested = (mode?.harness || null) ?? (chat.agentRole === role.name ? chat.harness : null) ?? override?.harness ?? role.harness ?? null;
     // Economy routing: delegated specialists can run on a cheaper harness/model.
     const economy = !!parentAgentId && s.tokens.economyForDelegated && !!s.tokens.economyHarness;
-    const harness = this.d.harnesses.resolve(economy ? (s.tokens.economyHarness as HarnessId) : requested, s);
-    const model = economy && s.tokens.economyModel ? s.tokens.economyModel : null;
+    // An explicit harness from the coordinator (the user asked for "the Pi agent") wins over economy routing.
+    const harness = this.d.harnesses.resolve(pick?.harness ?? (economy ? (s.tokens.economyHarness as HarnessId) : requested), s);
+    const model = pick && harness === pick.harness ? pick.model : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
     const agent = this.d.db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: role.name, harness, model,
       parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}` });
     const l: Live = { key, agentId: agent.id, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
