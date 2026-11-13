@@ -1,11 +1,12 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, useStore } from "../store";
 import {
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
   KeyRound, LifeBuoy, ListChecks, Package, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
   CornerDownRight, Leaf, Users, Lightbulb, FileText, FlaskConical, ScanSearch, ShieldCheck, Bug, Swords,
-  RoleIcon,
+  RoleIcon, User, ChevronRight,
 } from "../components/icons";
+import { AGENT_DOCS, type AgentDoc } from "./agentDocs";
 
 const DL = {
   x64: "https://github.com/github/copilot-cli/releases/latest/download/copilot-win32-x64.zip",
@@ -28,10 +29,13 @@ const PAGES = [
   { id: "trouble", label: "Troubleshooting", icon: LifeBuoy },
 ] as const;
 type PageId = (typeof PAGES)[number]["id"];
+/** A top-level page, or one agent's page ("agent:reviewer"). */
+type Page = PageId | `agent:${string}`;
+const agentOf = (p: Page) => (p.startsWith("agent:") ? AGENT_DOCS.find((a) => `agent:${a.name}` === p) : undefined);
 
 /** Lets pages link to each other without threading a callback through every component. */
-const DocsNav = createContext<(p: PageId) => void>(() => {});
-const PageLink = ({ to, children }: { to: PageId; children: ReactNode }) => {
+const DocsNav = createContext<(p: Page) => void>(() => {});
+const PageLink = ({ to, children }: { to: Page; children: ReactNode }) => {
   const go = useContext(DocsNav);
   return <button className="link" onClick={() => go(to)}>{children}</button>;
 };
@@ -39,7 +43,11 @@ const PageLink = ({ to, children }: { to: PageId; children: ReactNode }) => {
 type Check = { found: boolean; path: string | null; version: string | null; signedIn: boolean; detail: string } | null;
 
 export function DocsView({ initialPage }: { initialPage?: string }) {
-  const [page, setPage] = useState<PageId>((PAGES.find((p) => p.id === initialPage)?.id ?? "start") as PageId);
+  const [page, setPage] = useState<Page>(() => {
+    const p = initialPage as Page | undefined;
+    return p && (PAGES.some((x) => x.id === p) || agentOf(p)) ? p : "start";
+  });
+  const agent = agentOf(page);
   const [check, setCheck] = useState<Check>(null);
   const [checking, setChecking] = useState(false);
   const run = async () => {
@@ -54,7 +62,14 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
       <div className="docs-layout">
         <nav className="docs-nav">
           {PAGES.map((p) => (
-            <button key={p.id} className={page === p.id ? "active" : ""} onClick={() => setPage(p.id)}><p.icon size={16} /> {p.label}</button>
+            <Fragment key={p.id}>
+              <button className={page === p.id ? "active" : ""} onClick={() => setPage(p.id)}><p.icon size={16} /> {p.label}</button>
+              {p.id === "agents" && (page === "agents" || agent) && AGENT_DOCS.map((a) => (
+                <button key={a.name} className={`sub ${agent?.name === a.name ? "active" : ""}`} onClick={() => setPage(`agent:${a.name}`)}>
+                  <RoleIcon role={a.name} size={18} /> {a.title}
+                </button>
+              ))}
+            </Fragment>
           ))}
           <StatusCard check={check} checking={checking} onCheck={run} onGo={setPage} />
         </nav>
@@ -65,6 +80,7 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
           {page === "login" && <Login check={check} checking={checking} onCheck={run} />}
           {page === "use" && <Use />}
           {page === "agents" && <Agents />}
+          {agent && <AgentPage doc={agent} />}
           {page === "superpowers" && <Superpowers />}
           {page === "trouble" && <Trouble />}
         </article>
@@ -248,202 +264,6 @@ function Trouble() {
 
 /* ───────────────────────── Agents ───────────────────────── */
 
-type AgentDoc = { name: string; title: string; summary: string; can: string[]; when: string[]; instead?: ReactNode; tools: string[] };
-
-/** Built-in agents as documented for people. The agent's own instructions live in agents/<name>.md. */
-const AGENT_DOCS: AgentDoc[] = [
-  {
-    name: "flashmaster", title: "TheFlashMaster", tools: ["flashmaster-core", "jazz"],
-    summary: "The coordinator of the master chat. It plans, delegates and integrates. It never does the work itself.",
-    can: [
-      "Splits a request into sub-tasks and delegates each one to the best specialist, in parallel when they are independent.",
-      "Creates custom agents on the fly when no specialist fits (for example a CAN-log analyst or a MISRA checker), and keeps them for later.",
-      "Tracks multi-step work on the task board and links Jazz work items.",
-      "Sends non-trivial plans and finished work to the Challenger before declaring them done.",
-      "Runs specialists on another harness (Copilot, OpenCode, Pi, GitLab Duo) when you ask for it.",
-    ],
-    when: [
-      "You have a goal rather than a single step: “add the new DID and test it”, “analyse this defect and prepare a deck”.",
-      "The work spans several skills, such as analysis, code, tests and a review.",
-      "You don’t know which specialist to pick. Start here and let it choose.",
-    ],
-    instead: <>For one focused question to one expert, <code>@mention</code> the specialist directly. It is faster and uses fewer requests.</>,
-  },
-  {
-    name: "challenger", title: "Challenger", tools: ["flashmaster-core", "jazz"],
-    summary: "A constructive devil’s advocate that tries to break a plan, design or implementation before reality does.",
-    can: [
-      "Restates the claim, lists the load-bearing assumptions and how to check each one cheaply.",
-      "Runs a pre-mortem: the three most likely reasons this fails.",
-      "Finds gaps: edge cases, error paths, timing, safety (ASIL), security, testability, rollback.",
-      "Proposes at least one materially different alternative and gives a clear verdict: Proceed, Proceed with changes, or Rethink.",
-    ],
-    when: [
-      "Before you commit to a plan, a design or an estimate.",
-      "Before significant work is declared done. TheFlashMaster does this automatically.",
-      "When a solution feels too easy, or the stakes (safety, release, customer) are high.",
-    ],
-    instead: <>It doesn’t rewrite the work. For a line-by-line code review, use the <b>Code Reviewer</b>.</>,
-  },
-  {
-    name: "analyst", title: "Requirements Analyst", tools: ["flashmaster-core", "jazz"],
-    summary: "Turns requests and work items into clear requirements, acceptance criteria and impact analysis.",
-    can: [
-      "Clarifies goal, scope, assumptions and open questions.",
-      "Writes testable acceptance criteria (Given/When/Then).",
-      "Impact analysis: affected modules, interfaces, signals, configurations and tests, with paths.",
-      "Reads Jazz work items, DOORS Next requirements (rm_search / rm_get) and Word/Excel/PDF specs.",
-    ],
-    when: [
-      "A request or work item is vague and needs to be made testable before anyone builds.",
-      "You need to know what a change touches before estimating or planning it.",
-      "You need traceability from requirement ids to code and tests.",
-    ],
-  },
-  {
-    name: "architect", title: "Software Architect", tools: ["flashmaster-core", "jazz"],
-    summary: "Designs and evaluates architecture, module boundaries, interfaces and trade-offs.",
-    can: [
-      "Maps the current structure with targeted searches and describes it briefly.",
-      "Proposes 2–3 options with trade-offs and a recommendation, including risks and migration steps.",
-      "Respects AUTOSAR layering (ASW / RTE / BSW), ASIL partitioning, timing and memory constraints.",
-      "Saves long design documents as artifacts.",
-    ],
-    when: [
-      "A new feature or refactoring changes module boundaries or interfaces.",
-      "You need to choose between approaches and want the trade-offs written down.",
-      "Before a large implementation, to agree on the shape of the solution.",
-    ],
-    instead: <>For small, local changes, go straight to the <b>Software Expert</b>.</>,
-  },
-  {
-    name: "software-expert", title: "Software Expert", tools: ["flashmaster-core"],
-    summary: "Implements and refactors code, with deep C/C++, Python, TypeScript and embedded expertise.",
-    can: [
-      "Makes minimal, focused changes that follow the existing style.",
-      "Builds and runs the relevant tests after a change and reports the exact commands and results.",
-      "Applies embedded rules: no dynamic allocation at runtime, careful integer promotion and volatile use, short ISRs.",
-    ],
-    when: [
-      "The task is clear and you need code written, fixed or refactored.",
-      "Executing the tasks of an approved plan.",
-    ],
-    instead: <>If the cause of a bug is still unknown, start with the <b>winIDEA Debug Engineer</b> (on target) or the Superpowers <code>/debug</code> skill.</>,
-  },
-  {
-    name: "reviewer", title: "Code Reviewer", tools: ["flashmaster-core", "jazz"],
-    summary: "Reviews changes for correctness, safety, maintainability and project conventions.",
-    can: [
-      "Reviews only the given scope (a diff, files or a feature), starting from git diff.",
-      "Ranks findings as blocker, major, minor or nit, each with file:line and a concrete fix.",
-      "Checks error handling, concurrency, resource leaks, security, tests, and MISRA-relevant issues in embedded C.",
-    ],
-    when: [
-      "Before you commit or open a merge request.",
-      "After each task of a Superpowers plan, to catch problems while they are still small.",
-    ],
-    instead: <>To question whether the approach itself is right, ask the <b>Challenger</b>.</>,
-  },
-  {
-    name: "tester", title: "Test Engineer", tools: ["flashmaster-core", "vector-autosar", "jazz"],
-    summary: "Designs and writes tests, runs suites, analyses failures and coverage.",
-    can: [
-      "Derives test cases from requirements and code paths: equivalence classes, boundaries, error paths.",
-      "Writes tests in the project’s framework: pytest, GoogleTest, Unity/CMock, vitest, CANoe test modules / CAPL.",
-      "Runs suites and reports pass/fail counts, with a root-cause hypothesis for each failure.",
-    ],
-    when: [
-      "New code needs tests, or coverage of a requirement must be shown.",
-      "A suite fails and you need the failures sorted and explained.",
-    ],
-    instead: <>For HiL/SiL test cases in EXAM, use the <b>EXAM Test Agent</b>.</>,
-  },
-  {
-    name: "autosar-vector", title: "AUTOSAR & Vector Expert", tools: ["flashmaster-core", "vector-autosar", "jazz"],
-    summary: "Expert in AUTOSAR and the Vector toolchain: DBC, ARXML, CDD, DaVinci, CANoe and CAPL.",
-    can: [
-      "Answers targeted questions about DBC messages and signals, ARXML elements and references, and CDD diagnostics (DIDs, routines, DTCs) without dumping whole files.",
-      "Indexes and lints CAPL, runs CANoe tests over COM automation, and validates or generates with the DaVinci Configurator command line.",
-      "Knows SWC/port design, RTE, BSW configuration (Com, PduR, CanIf, CanTp, Dcm, Dem, NvM, Os), E2E and UDS.",
-      "Flags inconsistencies between DBC, ARXML and CDD.",
-    ],
-    when: [
-      "Questions about signals, PDUs, ECU extracts or diagnostic services.",
-      "Changing a communication or BSW configuration.",
-      "Writing or checking CAPL and CANoe test modules.",
-    ],
-  },
-  {
-    name: "winidea-debugger", title: "winIDEA Debug Engineer", tools: ["flashmaster-core", "winidea"],
-    summary: "Debugs embedded software on real hardware through iSYSTEM/TASKING winIDEA.",
-    can: [
-      "Connects, downloads, resets, runs, halts and steps the target.",
-      "Sets breakpoints, reads and writes variables and memory, reads the call stack, evaluates expressions.",
-      "Follows systematic debugging: reproduce, 2–3 hypotheses, instrument to tell them apart, conclude with evidence.",
-    ],
-    when: [
-      "A defect only shows on target, or depends on timing, registers or memory.",
-      "You need evidence (values, call stacks) rather than a guess from reading code.",
-    ],
-    instead: <>It states what it will write before touching memory or flash. Without winIDEA and its SDK installed, use the <b>Software Expert</b> with <code>/debug</code>.</>,
-  },
-  {
-    name: "exam-test-agent", title: "EXAM Test Agent", tools: ["flashmaster-core", "exam", "jazz"],
-    summary: "Expert in EXAM (MicroNova) HiL/SiL test automation: designs and creates test cases, runs suites, analyses results.",
-    can: [
-      "Checks that EXAM is up, installs the RESTapi plugin if needed, and opens models.",
-      "Designs test cases from DOORS Next requirements or Jazz items, with boundaries, state transitions and fault cases.",
-      "Creates them through the Test Case Generator or Groovy, filters and runs suites, and reads failures from JUnit results.",
-      "Separates test defects (expectation, timing, mapping) from real findings in the system under test.",
-    ],
-    when: [
-      "You test on a HiL, SiL or test bench driven by EXAM.",
-      "You need EXAM test cases created from requirements, or a campaign run and analysed.",
-    ],
-  },
-  {
-    name: "jazz-analyst", title: "Jazz Work Item Analyst", tools: ["flashmaster-core", "jazz"],
-    summary: "Fetches IBM Jazz/EWM work items, analyses them against the code, and updates them.",
-    can: [
-      "Queries and reads work items and summarises each in two or three lines.",
-      "Finds the likely affected files and estimates effort and risk.",
-      "Creates board tasks linked to work items, and comments or updates items when asked, quoting what it wrote.",
-    ],
-    when: [
-      "Triage: “what is in my queue and how big is each item?”",
-      "Linking work items to the code they affect.",
-    ],
-    instead: <>It changes work items only when your request says so.</>,
-  },
-  {
-    name: "rca-analyst", title: "NOW Analysis & RCA (Ishikawa)", tools: ["flashmaster-core", "office", "jazz"],
-    summary: "Structured problem analysis in NOW format with an Ishikawa root-cause analysis, following INCOSE practice.",
-    can: [
-      "Writes the NOW analysis: current situation, measurable objective, way forward with owners and verification methods.",
-      "Builds an Ishikawa diagram (drawn in the chat) with systems-engineering categories and 5 Whys.",
-      "Marks each cause confirmed, plausible or ruled out, with evidence, and asks why the defect escaped verification.",
-      "Exports to PowerPoint or SVG with the office tools.",
-    ],
-    when: [
-      "A field issue, escalation or recurring defect needs a root cause and corrective actions.",
-      "Management or a customer expects a structured 8D-style analysis.",
-    ],
-  },
-  {
-    name: "presentation-expert", title: "Presentation Expert", tools: ["flashmaster-core", "office"],
-    summary: "Creates and edits PowerPoint decks: storyline, clean slides, speaker notes and corporate templates.",
-    can: [
-      "Builds a storyline for the audience and decision, with takeaway titles and at most five bullets a slide.",
-      "Creates new decks in one pass, using a corporate template when you name one.",
-      "Edits existing decks slide by slide instead of rebuilding them, and adds Ishikawa slides.",
-    ],
-    when: [
-      "Results need to be presented: status, analysis, design review, steering committee.",
-      "An existing deck needs updating with new numbers or findings.",
-    ],
-  },
-];
-
 function Agents() {
   const roles = useStore((s) => s.roles);
   const custom = roles.filter((r) => r.source === "user" && !AGENT_DOCS.some((a) => a.name === r.name));
@@ -456,39 +276,39 @@ function Agents() {
     <table className="docs-table">
       <thead><tr><th>You want to…</th><th>Ask</th></tr></thead>
       <tbody>
-        <tr><td>Get a multi-step goal done, or you aren’t sure who to ask</td><td><code>TheFlashMaster</code> (master chat)</td></tr>
-        <tr><td>Make a vague request or work item testable; see what a change affects</td><td><code>@analyst</code></td></tr>
-        <tr><td>Decide on a design or module structure</td><td><code>@architect</code></td></tr>
-        <tr><td>Stress-test a plan, design or result before committing to it</td><td><code>@challenger</code></td></tr>
-        <tr><td>Write, fix or refactor code</td><td><code>@software-expert</code></td></tr>
-        <tr><td>Review a diff before committing</td><td><code>@reviewer</code></td></tr>
-        <tr><td>Write or run unit / integration / CAPL tests</td><td><code>@tester</code></td></tr>
-        <tr><td>Create or run HiL/SiL tests in EXAM</td><td><code>@exam-test-agent</code></td></tr>
-        <tr><td>Work with DBC, ARXML, CDD, DaVinci, CANoe or CAPL</td><td><code>@autosar-vector</code></td></tr>
-        <tr><td>Debug on the target hardware</td><td><code>@winidea-debugger</code></td></tr>
-        <tr><td>Triage or update Jazz work items</td><td><code>@jazz-analyst</code></td></tr>
-        <tr><td>Find the root cause of a problem (NOW + Ishikawa)</td><td><code>@rca-analyst</code></td></tr>
-        <tr><td>Build or update a PowerPoint deck</td><td><code>@presentation-expert</code></td></tr>
+        <tr><td>Get a multi-step goal done, or you aren’t sure who to ask</td><td><PageLink to="agent:flashmaster"><code>TheFlashMaster</code></PageLink> (master chat)</td></tr>
+        <tr><td>Make a vague request or work item testable; see what a change affects</td><td><PageLink to="agent:analyst"><code>@analyst</code></PageLink></td></tr>
+        <tr><td>Decide on a design or module structure</td><td><PageLink to="agent:architect"><code>@architect</code></PageLink></td></tr>
+        <tr><td>Stress-test a plan, design or result before committing to it</td><td><PageLink to="agent:challenger"><code>@challenger</code></PageLink></td></tr>
+        <tr><td>Write, fix or refactor code</td><td><PageLink to="agent:software-expert"><code>@software-expert</code></PageLink></td></tr>
+        <tr><td>Review a diff before committing</td><td><PageLink to="agent:reviewer"><code>@reviewer</code></PageLink></td></tr>
+        <tr><td>Write or run unit / integration / CAPL tests</td><td><PageLink to="agent:tester"><code>@tester</code></PageLink></td></tr>
+        <tr><td>Create or run HiL/SiL tests in EXAM</td><td><PageLink to="agent:exam-test-agent"><code>@exam-test-agent</code></PageLink></td></tr>
+        <tr><td>Work with DBC, ARXML, CDD, DaVinci, CANoe or CAPL</td><td><PageLink to="agent:autosar-vector"><code>@autosar-vector</code></PageLink></td></tr>
+        <tr><td>Debug on the target hardware</td><td><PageLink to="agent:winidea-debugger"><code>@winidea-debugger</code></PageLink></td></tr>
+        <tr><td>Triage or update Jazz work items</td><td><PageLink to="agent:jazz-analyst"><code>@jazz-analyst</code></PageLink></td></tr>
+        <tr><td>Find the root cause of a problem (NOW + Ishikawa)</td><td><PageLink to="agent:rca-analyst"><code>@rca-analyst</code></PageLink></td></tr>
+        <tr><td>Build or update a PowerPoint deck</td><td><PageLink to="agent:presentation-expert"><code>@presentation-expert</code></PageLink></td></tr>
       </tbody>
     </table>
 
     <h4>Built-in agents</h4>
-    <div className="agent-docs">
+    <p className="muted small">Each agent has its own page with its purpose, what it can do, example flows and prompts to try.</p>
+    <div className="agent-grid">
       {AGENT_DOCS.map((a) => (
-        <section key={a.name} className="agent-doc">
-          <header>
-            <RoleIcon role={a.name} size={30} />
-            <div><b>{a.title}</b> <code>@{a.name}</code>{overridden.has(a.name) && <span className="pill">customised</span>}<div className="muted small">{a.summary}</div></div>
-          </header>
-          <div className="agent-doc-cols">
-            <div><h5><Wrench size={14} /> What it can do</h5><ul>{a.can.map((c) => <li key={c}>{c}</li>)}</ul></div>
-            <div><h5><Lightbulb size={14} /> Use it when</h5><ul>{a.when.map((c) => <li key={c}>{c}</li>)}</ul></div>
-          </div>
-          {a.instead && <p className="agent-doc-instead small"><CornerDownRight size={13} /> <span>{a.instead}</span></p>}
-          <div className="agent-doc-tools">{a.tools.map((t) => <span key={t} className="pill">{t}</span>)}</div>
-        </section>
+        <PageCard key={a.name} doc={a} customised={overridden.has(a.name)} />
       ))}
     </div>
+
+    <h4>How the agents work together</h4>
+    <div className="agent-lanes">
+      <div><b>Understand</b><span>Requirements Analyst, Jazz Work Item Analyst</span></div>
+      <div><b>Decide</b><span>Software Architect, Challenger</span></div>
+      <div><b>Build</b><span>Software Expert, AUTOSAR &amp; Vector Expert</span></div>
+      <div><b>Prove</b><span>Code Reviewer, Test Engineer, EXAM Test Agent, winIDEA Debug Engineer</span></div>
+      <div><b>Explain</b><span>NOW Analysis &amp; RCA, Presentation Expert</span></div>
+    </div>
+    <p className="small muted">TheFlashMaster moves work through these stages, and the <PageLink to="superpowers">Superpowers workflow</PageLink> makes the order strict.</p>
 
     {custom.length > 0 && <>
       <h4>Your custom agents</h4>
@@ -503,11 +323,95 @@ function Agents() {
     <h4>Tips</h4>
     <ul className="docs-list">
       <li><b>One expert or a team?</b> A direct <code>@mention</code> runs one agent. The master chat may run several, which costs more requests but covers more ground.</li>
-      <li><b>Tools follow the agent.</b> Each agent only gets the tool servers listed under its card (shown above as tags). Add or change tools in Settings → Agents.</li>
+      <li><b>Tools follow the agent.</b> Each agent only gets the tool servers listed on its page. Add or change tools in Settings → Agents.</li>
       <li><b>Short results.</b> Specialists return a compact summary to whoever delegated to them; long output goes into Artifacts.</li>
       <li><b>Make your own.</b> Import an agent file (<code>agents/_template.md</code>) from Settings → Agents, the ＋ next to Specialists, or by dropping the .md onto the window. Reusing a built-in name overrides it.</li>
       <li><b>Workflow skills per agent.</b> An agent file can list <code>skills:</code> (brainstorm, plan, execute, tdd, debug, review, verify) that load on its first turn. See <PageLink to="superpowers">Superpowers workflow</PageLink>.</li>
     </ul>
+  </>;
+}
+
+function PageCard({ doc: a, customised }: { doc: AgentDoc; customised: boolean }) {
+  const go = useContext(DocsNav);
+  return (
+    <button className="agent-card" onClick={() => go(`agent:${a.name}`)}>
+      <RoleIcon role={a.name} size={30} />
+      <div>
+        <b>{a.title}</b>{customised && <span className="pill">customised</span>}
+        <code>@{a.name}</code>
+        <span className="muted small">{a.summary}</span>
+      </div>
+      <ChevronRight size={16} className="agent-card-go" />
+    </button>
+  );
+}
+
+function Actor({ actor }: { actor: string }) {
+  if (actor === "you") return <span className="flow-actor"><span className="flow-dot you"><User size={13} /></span> You</span>;
+  if (actor.startsWith("tool:")) return <span className="flow-actor"><span className="flow-dot tool"><Wrench size={12} /></span> <code>{actor.slice(5)}</code></span>;
+  const d = AGENT_DOCS.find((a) => a.name === actor);
+  return <span className="flow-actor"><RoleIcon role={actor} size={22} /> {d?.title ?? actor}</span>;
+}
+
+function AgentPage({ doc: a }: { doc: AgentDoc }) {
+  const roles = useStore((s) => s.roles);
+  const role = roles.find((r) => r.name === a.name);
+  const i = AGENT_DOCS.indexOf(a);
+  const prev = AGENT_DOCS[i - 1], next = AGENT_DOCS[i + 1];
+  return <>
+    <p className="small"><PageLink to="agents">Agents</PageLink> <span className="muted">/ {a.title}</span></p>
+    <header className="agent-hero">
+      <RoleIcon role={a.name} size={46} />
+      <div>
+        <h3>{a.title}</h3>
+        <div className="row gap wrap"><code>@{a.name}</code>{role?.source === "user" && <span className="pill amber">customised in your setup</span>}</div>
+      </div>
+    </header>
+
+    <h4>Purpose</h4>
+    <p>{a.purpose}</p>
+
+    <div className="agent-doc-cols">
+      <div className="agent-doc"><h5><Wrench size={14} /> What it can do</h5><ul>{a.can.map((c) => <li key={c}>{c}</li>)}</ul></div>
+      <div className="agent-doc"><h5><Lightbulb size={14} /> Use it when</h5><ul>{a.when.map((c) => <li key={c}>{c}</li>)}</ul></div>
+    </div>
+    {a.instead && <Note>{a.instead}</Note>}
+
+    <h4>What you get back</h4>
+    <p>{a.output}</p>
+
+    {a.flows.map((f) => (
+      <section key={f.title} className="agent-flow">
+        <h4><Compass size={16} /> Example flow: {f.title}</h4>
+        <ol className="flow">
+          {f.steps.map((st, k) => (
+            <li key={k} className={st.actor === "you" ? "you" : st.actor.startsWith("tool:") ? "tool" : ""}>
+              <Actor actor={st.actor} />
+              <div>{st.text}</div>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))}
+
+    <h4>Prompts to try</h4>
+    <div className="prompt-list">
+      {a.prompts.map((p) => <div key={p} className="prompt"><AtSign size={14} /> <span>{a.name === "flashmaster" ? "" : `@${a.name} `}{p}</span></div>)}
+    </div>
+
+    {a.tips && a.tips.length > 0 && <>
+      <h4>Tips</h4>
+      <ul className="docs-list">{a.tips.map((t, k) => <li key={k}>{t}</li>)}</ul>
+    </>}
+
+    <h4>Tools</h4>
+    <div className="agent-doc-tools">{(role?.tools ?? a.tools).map((t) => <span key={t} className="pill">{t}</span>)}</div>
+    <p className="muted small">The tool servers this agent may use{role?.source === "user" ? " in your setup" : ""}. The agent’s full instructions are in <code>agents/{a.name}.md</code>; override them by importing an agent with the same name.</p>
+
+    <div className="agent-pager">
+      {prev ? <PageLink to={`agent:${prev.name}`}>← {prev.title}</PageLink> : <span />}
+      {next ? <PageLink to={`agent:${next.name}`}>{next.title} →</PageLink> : <span />}
+    </div>
   </>;
 }
 
