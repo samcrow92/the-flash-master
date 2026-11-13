@@ -7,6 +7,7 @@
  * Servers are attached per ACP session (session/new mcpServers), so the user's global harness configs stay untouched.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cliProxyUrl } from "./proxy";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { McpServerStatus, RoleDef } from "@shared/types";
@@ -93,7 +94,7 @@ export class McpBootstrap {
         this.set({ ...this.status.get(p.id)!, state: "installing", detail: "Installing Python packages…" });
         const args = ["-m", "pip", "install", "--disable-pip-version-check", "-r", req];
         if (s.mcp.pipIndexUrl) args.push("--index-url", s.mcp.pipIndexUrl);
-        if (s.network.proxy) args.push("--proxy", s.network.proxy);
+        if (cliProxyUrl(s.network.proxy)) args.push("--proxy", cliProxyUrl(s.network.proxy));
         if (s.network.caBundlePath) args.push("--cert", s.network.caBundlePath);
         const r = await runCapture(vpy, args, 600000);
         if (r.code !== 0) { this.set({ ...this.status.get(p.id)!, state: "error", detail: `pip failed: ${r.out.trim().slice(-300)}` }); continue; }
@@ -140,7 +141,7 @@ export class McpBootstrap {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `flash-mcp-${c.id}`, private: true }));
     const env: Record<string, string> = { ...networkEnv(s) };
-    const proxy = s.network.proxy || process.env.https_proxy || process.env.HTTPS_PROXY || "";
+    const proxy = cliProxyUrl(s.network.proxy) || process.env.https_proxy || process.env.HTTPS_PROXY || "";
     if (proxy) Object.assign(env, { npm_config_proxy: proxy, npm_config_https_proxy: proxy });
     if (s.network.caBundlePath) env.npm_config_cafile = s.network.caBundlePath;
     if (s.mcp.npmRegistry) env.npm_config_registry = s.mcp.npmRegistry;
@@ -174,7 +175,7 @@ export class McpBootstrap {
     }
     const args = ["-m", "pip", "install", "--disable-pip-version-check", "--upgrade", c.package];
     if (s.mcp.pipIndexUrl) args.push("--index-url", s.mcp.pipIndexUrl);
-    if (s.network.proxy) args.push("--proxy", s.network.proxy);
+    if (cliProxyUrl(s.network.proxy)) args.push("--proxy", cliProxyUrl(s.network.proxy));
     if (s.network.caBundlePath) args.push("--cert", s.network.caBundlePath);
     const r = await runCapture(vpy, args, 900000, undefined, networkEnv(s));
     if (r.code !== 0) throw new Error(`pip failed: ${r.out.trim().slice(-300)}`);

@@ -135,6 +135,8 @@ export interface FlashApi {
   /** Sign in to the repository's GitHub (company SSO) in a window, for private/internal repositories. */
   updateSignIn(): Promise<{ ok: boolean; detail: string }>;
   updateSetToken(token: string): Promise<void>;
+  /** Show which proxy the app uses for a URL and try to reach it (blank = the Jazz server). */
+  proxyTest(url: string): Promise<{ ok: boolean; detail: string; config: string; resolved: string; source: string }>;
   appInfo(): Promise<{ version: string; dataDir: string; platform: string }>;
 }
 
@@ -146,7 +148,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
-  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "appInfo",
+  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",
 ];
 
 export interface FlashBridge {

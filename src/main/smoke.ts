@@ -168,6 +168,13 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(400);
       const saved = await js<string>(`document.querySelector('.chat-link.active .chat-title')?.textContent ?? ""`);
       log("info", `smoke-rename: typed-after-1.5s="${typed}" saved="${saved}"`);
+      // Project rename (was window.prompt, unsupported in Electron)
+      await js(`document.querySelector('.project-row.current .project-name')?.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))`);
+      await sleep(200);
+      await js(`(()=>{const i=document.querySelector('.project-row .chat-rename');if(!i)return;const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(i,'BCM firmware');i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
+      await sleep(600);
+      const pname = await js<string>(`document.querySelector('.project-row.current .project-name')?.textContent ?? ""`);
+      log("info", `smoke-rename-project: saved="${pname.trim()}"`);
       await send("focus on BCM_Status only");
       await sleep(250);
       await js(`(()=>{const l=document.querySelector('.chat .messages');l.scrollTop=l.scrollHeight})()`);

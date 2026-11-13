@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Fix: `ERR_NO_SUPPORTED_PROXIES`.** The proxy value (from Settings or `https_proxy`) is now normalised before Chromium sees it. That covers credentials (`http://user:pass@host:port`, answered on the proxy's sign-in challenge), paths and trailing slashes, `socks5h://` and `socks4a://`, PAC/WPAD URLs (`…/proxy.pac`, `wpad.dat`, `pac:<url>`) and lists of several proxies. When Chromium still rejects the proxy setup, requests fall back to the Windows system proxy, then a direct connection, and keep the mode that works. Settings → Network has a **Test connection** panel that shows the proxy in use and what it resolves to for an address. Copilot, npm and pip get a proper `http://host:port` URL, and never a PAC URL.
+- **Fix: renaming a project** did nothing, because it used `window.prompt()`, which Electron doesn't support. It now renames inline, like chats: right-click → Rename project, double-click the name, or press F2. Enter saves, Esc cancels.
 - **Fix: renaming a chat** no longer snaps back to the old name while typing. The sidebar row was a component defined inside the render function, so every update (agent status, streaming) remounted the rename field. The rename field now keeps its own state, Enter or clicking away saves, and Esc cancels. The same pattern was fixed in the Documentation page, where open troubleshooting items no longer collapse.
 - **Self-update from your repository's releases:**
   - **Source:** set once in `package.json` (`flashmaster.updates.url`): a github.com or GitHub Enterprise repository, or a web folder. Settings and policy can override it.

@@ -33,7 +33,7 @@ Locked keys are greyed out in Settings and ignored if written. If `lock` is omit
 - harness processes, MCP servers and pip (inherited)
 - the app's own network stack for Jazz (applied at startup)
 
-Without them it falls back to the Windows system proxy. `127.0.0.1` / `localhost` are always bypassed for the app's internal bridge. A value in Settings → Network overrides the environment.
+Without them it falls back to the Windows system proxy. Accepted forms: `host:port`, `http://user:pass@host:port`, `socks5://host:port`, or a PAC file URL (`http://wpad.corp/wpad.dat`, `…/proxy.pac`, `pac:<url>`). If Chromium rejects the proxy setup (`ERR_NO_SUPPORTED_PROXIES`), the app falls back to the system proxy, then a direct connection. **Settings → Network → Test connection** shows which proxy is used for an address. `127.0.0.1` / `localhost` are always bypassed for the app's internal bridge. A value in Settings → Network overrides the environment.
 
 - The proxy, no-proxy list and CA bundle are passed to the harness processes (`HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`), to the MCP servers and to pip.
 - Jazz requests go through Electron's network stack, which uses the **system proxy and the Windows certificate store**.

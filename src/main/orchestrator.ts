@@ -6,6 +6,7 @@
  * user sees them without the coordinator's context ever containing their transcript.
  */
 import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task } from "@shared/types";
+import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
 import type { Db } from "./db";
@@ -680,7 +681,8 @@ export function networkEnv(s: Settings): Record<string, string> {
   const local = "localhost,127.0.0.1";
   const np = [s.network.noProxy || inherited, local].filter(Boolean).join(",");
   Object.assign(env, { NO_PROXY: np, no_proxy: np });
-  if (s.network.proxy) Object.assign(env, { HTTPS_PROXY: s.network.proxy, HTTP_PROXY: s.network.proxy, https_proxy: s.network.proxy, http_proxy: s.network.proxy });
+  const proxy = cliProxyUrl(s.network.proxy); // "" for a PAC file: the CLIs can't use one, they keep the inherited environment
+  if (proxy) Object.assign(env, { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, https_proxy: proxy, http_proxy: proxy });
   if (s.network.caBundlePath) Object.assign(env, { NODE_EXTRA_CA_CERTS: s.network.caBundlePath, SSL_CERT_FILE: s.network.caBundlePath, REQUESTS_CA_BUNDLE: s.network.caBundlePath });
   return env;
 }

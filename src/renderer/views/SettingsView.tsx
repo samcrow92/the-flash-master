@@ -629,11 +629,33 @@ function Integrations(f: F) {
 function Network(f: F) {
   return <>
     <p className="muted">Leave the proxy empty to use your <code>https_proxy</code> / <code>http_proxy</code> / <code>no_proxy</code> environment variables (or, without them, the Windows system proxy). A value here overrides them for harnesses, MCP servers, pip and Jazz.</p>
-    <Row label="HTTP(S) proxy" hint="Blank = environment variables / system proxy."><Text f={f} path="network.proxy" placeholder="from environment" /></Row>
+    <Row label="HTTP(S) proxy" hint="host:port, http://user:pass@host:port, socks5://host:port, or a PAC file URL. Blank = environment variables / system proxy."><Text f={f} path="network.proxy" placeholder="from environment" /></Row>
     <Row label="No proxy" hint="Blank = no_proxy environment variable. localhost is always bypassed."><Text f={f} path="network.noProxy" placeholder="from environment" /></Row>
     <Row label="Custom CA bundle (PEM)" hint="For TLS-inspecting corporate proxies."><Text f={f} path="network.caBundlePath" /></Row>
     <Row label="Offline mode" hint="Skip anything that needs the network (MCP installs)."><Bool f={f} path="network.offline" /></Row>
+    <ProxyTest />
   </>;
+}
+
+function ProxyTest() {
+  const [url, setUrl] = useState("");
+  const [res, setRes] = useState<{ ok: boolean; detail: string; config: string; resolved: string; source: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => { setBusy(true); try { setRes(await api().proxyTest(url)); } finally { setBusy(false); } };
+  return (
+    <div className="panel selftest">
+      <div className="row between">
+        <div><strong>Test connection</strong><div className="muted small">Shows which proxy the app uses for an address and tries to reach it. Blank = your Jazz server. If the proxy setup is rejected (ERR_NO_SUPPORTED_PROXIES), the app falls back to the system proxy, then a direct connection.</div></div>
+        <button className="primary" disabled={busy} onClick={run}>{busy ? "Testing…" : "Test"}</button>
+      </div>
+      <input value={url} placeholder="https://alm.company.com/ccm" onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void run(); }} />
+      {res && <table className="kv"><tbody>
+        <tr><td>{res.ok ? "✅" : "❌"} <b>Result</b></td><td className={res.ok ? "" : "warn-text"}>{res.detail}</td></tr>
+        <tr><td><b>Proxy in use</b></td><td>{res.config} <span className="muted small">({res.source})</span></td></tr>
+        <tr><td><b>Resolved for this address</b></td><td><code>{res.resolved || "—"}</code></td></tr>
+      </tbody></table>}
+    </div>
+  );
 }
 
 function Data(f: F) {

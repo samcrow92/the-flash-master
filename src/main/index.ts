@@ -18,6 +18,7 @@ import { parseCopilotUsage } from "./copilot-usage";
 import { Requirements, parseRmLink } from "./requirements";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
+import { parseProxy, fallbacks, isProxySetupError, describe, explainProxyError, type ProxyCfg, type ParsedProxy } from "./proxy";
 import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
@@ -127,7 +128,8 @@ let jazzKey = "";
 // Dedicated persistent session for Jazz: keeps the LTPA/JSESSIONID cookies across redirects and restarts,
 // uses Chromium's network stack (Windows certificate store, proxy from applyProxy()).
 const jazzSession = () => session.fromPartition("persist:jazz");
-const netFetch: FetchLike = (url, init) => jazzSession().fetch(url, { ...init, credentials: "include", redirect: "follow" } as any) as any;
+const jazzFetchRaw = withProxyFallback(() => jazzSession(), (url, init) => jazzSession().fetch(url, { ...init, credentials: "include", redirect: "follow" } as any) as any);
+const netFetch: FetchLike = (url, init) => jazzFetchRaw(url, init) as any;
 const jazzAreas = (j: { projectAreas?: string[]; projectArea?: string }) =>
   j.projectAreas?.length ? j.projectAreas : j.projectArea ? [j.projectArea] : [];
 const jazzHost = (u: string) => { try { return new URL(u).hostname; } catch { return ""; } };
@@ -165,7 +167,7 @@ const jazz = (): JazzClient | null => {
 let signInWin: BrowserWindow | null = null;
 async function jazzIdentity(serverUrl: string): Promise<string | null> {
   try {
-    const r = await jazzSession().fetch(`${serverUrl.replace(/\/+$/, "")}/authenticated/identity`, { headers: { Accept: "application/json" }, credentials: "include", redirect: "follow" } as any);
+    const r = await jazzFetchRaw(`${serverUrl.replace(/\/+$/, "")}/authenticated/identity`, { headers: { Accept: "application/json" } });
     if (!r.ok || r.headers.get("x-com-ibm-team-repository-web-auth-msg") === "authrequired") return null;
     const body = await r.text();
     try { return JSON.parse(body)?.userId ?? null; } catch { return null; }
@@ -343,7 +345,7 @@ const updateFeed = () => {
   return { url: (u.feedUrl || process.env.FLASH_UPDATE_URL || repoUpdates.url || "").trim(), channel: (u.channel || repoUpdates.channel || "stable") as "stable" | "beta", token: secrets.get(updateSecret) };
 };
 const updater = new Updater({
-  fetch: (url, init) => updatesSession().fetch(url, { ...init, redirect: "follow", credentials: "include" } as any) as any,
+  fetch: withProxyFallback(() => updatesSession(), (url, init) => updatesSession().fetch(url, { ...init, redirect: "follow", credentials: "include" } as any) as any) as any,
   version: app.getVersion(),
   mode: !app.isPackaged ? "dev" : process.env.PORTABLE_EXECUTABLE_FILE ? "portable" : "installer",
   portablePath: process.env.PORTABLE_EXECUTABLE_FILE,
@@ -378,7 +380,7 @@ function updateSignIn(): Promise<{ ok: boolean; detail: string }> {
 // ---------------- marketplace ----------------
 const marketplace = new Marketplace({
   dataDir, rolesDir: userRolesDir, skillsDir: userSkillsDir,
-  fetch: (url, init) => session.defaultSession.fetch(url, { ...init, redirect: "follow" } as any) as any,
+  fetch: withProxyFallback(() => session.defaultSession, (url, init) => session.defaultSession.fetch(url, { ...init, redirect: "follow" } as any) as any) as any,
   policy: () => ({ allowMcpServers: settings.get().marketplace.allowMcpServers }),
   knownTools: () => [...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)],
   builtinRoles: () => loadRoles(join(resources, "agents"), join(dataDir, "__none__")).map((r) => r.name),
@@ -691,6 +693,7 @@ const api: FlashApi = {
   },
   updateState: async () => updater.state,
   updateCheck: async () => updater.check(),
+  proxyTest: async (url: string) => proxyTest(url),
   updateDownload: async () => updater.download(),
   updateInstall: async () => updater.install(),
   updateSignIn: async () => updateSignIn(),
@@ -731,23 +734,70 @@ function envProxy(): { proxy: string; noProxy: string } {
   const e = process.env;
   return { proxy: e.https_proxy || e.HTTPS_PROXY || e.http_proxy || e.HTTP_PROXY || "", noProxy: e.no_proxy || e.NO_PROXY || "" };
 }
+/** What applyProxy() configured, and what each session actually uses after a fallback. */
+let proxyPrimary: ProxyCfg = { mode: "system" };
+let proxyCreds: ParsedProxy["credentials"];
+let proxySource = "system";
+const proxyEffective = new WeakMap<Electron.Session, ProxyCfg>();
+const proxiedSessions = () => [session.defaultSession, jazzSession(), updatesSession()];
 async function applyProxy(): Promise<void> {
   const n = settings.get().network;
   const fromEnv = envProxy();
-  const proxy = n.proxy || fromEnv.proxy;
+  const value = n.proxy || fromEnv.proxy;
   // Marketplaces are internal servers (IP:port): never send them through the corporate proxy.
   const mpHosts = settings.get().marketplace.sources.map((x) => { try { return new URL(normaliseUrl(x.url)).hostname; } catch { return ""; } }).filter(Boolean);
   const bypass = [n.noProxy || fromEnv.noProxy, ...mpHosts, "<local>"].filter(Boolean).join(",");
-  if (proxy) {
-    const cfg = { proxyRules: proxy.replace(/^https?:\/\//, "").replace(/\/$/, ""), proxyBypassRules: bypass };
-    await session.defaultSession.setProxy(cfg);
-    await jazzSession().setProxy(cfg);
-    await updatesSession().setProxy(cfg);
-    log("info", `proxy: ${proxy.replace(/\/\/[^@/]*@/, "//***@")} (${n.proxy ? "settings" : "environment"})`);
-  } else {
-    await session.defaultSession.setProxy({ mode: "system" });
-    await jazzSession().setProxy({ mode: "system" });
-    await updatesSession().setProxy({ mode: "system" });
+  const parsed = parseProxy(value, bypass);
+  proxyPrimary = parsed?.config ?? { mode: "system" };
+  if (proxyPrimary.mode === "system" || proxyPrimary.mode === "auto_detect") proxyPrimary = { ...proxyPrimary, proxyBypassRules: bypass };
+  proxyCreds = parsed?.credentials;
+  proxySource = parsed ? (n.proxy ? "settings" : "environment") : "system";
+  for (const w of parsed?.warnings ?? []) log("warn", `proxy: ${w}`);
+  for (const ses of proxiedSessions()) { await ses.setProxy(proxyPrimary); proxyEffective.set(ses, proxyPrimary); }
+  log("info", `proxy: ${describe(proxyPrimary)} (${proxySource}${parsed ? `: ${parsed.display}` : ""})`);
+}
+/** Answer the proxy's sign-in challenge with credentials given in the proxy value (http://user:pass@host:port). */
+app.on("login", (event, _wc, _details, authInfo, callback) => {
+  if (authInfo.isProxy && proxyCreds) { event.preventDefault(); callback(proxyCreds.username, proxyCreds.password); }
+});
+/**
+ * session.fetch with a proxy fallback: when Chromium rejects the proxy setup (ERR_NO_SUPPORTED_PROXIES and friends),
+ * try the next mode (configured → system → direct) and keep the one that works for that session.
+ */
+function withProxyFallback(ses: () => Electron.Session, doFetch: (url: string, init?: any) => Promise<Response>) {
+  return async (url: string, init?: any): Promise<Response> => {
+    try { return await doFetch(url, init); }
+    catch (e) {
+      if (!isProxySetupError(e)) throw e;
+      const s = ses();
+      const current = proxyEffective.get(s) ?? proxyPrimary;
+      const resolved = await s.resolveProxy(url).catch(() => "");
+      log("warn", `proxy: ${String((e as Error)?.message ?? e)} for ${new URL(url).host} with ${describe(current)} (resolved "${resolved}")`);
+      let lastErr: unknown = e;
+      for (const next of fallbacks(current)) {
+        await s.setProxy(next);
+        try {
+          const r = await doFetch(url, init);
+          proxyEffective.set(s, next);
+          log("warn", `proxy: falling back to ${describe(next)} — it works for ${new URL(url).host}`);
+          return r;
+        } catch (e2) { lastErr = e2; if (!isProxySetupError(e2)) { proxyEffective.set(s, next); throw e2; } }
+      }
+      await s.setProxy(current);
+      throw new Error(explainProxyError(lastErr, resolved), { cause: e });
+    }
+  };
+}
+async function proxyTest(url: string): Promise<{ ok: boolean; detail: string; config: string; resolved: string; source: string }> {
+  let target = (url || "").trim() || settings.get().jazz.serverUrl || "https://github.com";
+  if (!/^https?:\/\//i.test(target)) target = `https://${target}`;
+  const ses = jazzSession();
+  const resolved = await ses.resolveProxy(target).catch((e) => `error: ${String(e)}`);
+  try {
+    const r = await jazzFetchRaw(target, { method: "GET" });
+    return { ok: true, detail: `HTTP ${r.status} from ${new URL(target).host}`, config: describe(proxyEffective.get(ses) ?? proxyPrimary), resolved, source: proxySource };
+  } catch (e) {
+    return { ok: false, detail: String((e as Error)?.message ?? e), config: describe(proxyEffective.get(ses) ?? proxyPrimary), resolved, source: proxySource };
   }
 }
 settings.onChange(() => void applyProxy());

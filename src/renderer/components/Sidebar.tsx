@@ -80,7 +80,7 @@ export function Sidebar() {
     const archived = (st.chats[p.id] ?? []).filter((c) => c.archived).length;
     return [
       { label: "New chat", icon: <MessageSquarePlus size={15} />, onClick: () => newChat(p.id) },
-      { label: "Rename project", icon: <Pencil size={15} />, onClick: async () => { const n = prompt("Project name", p.name); if (n) { await api().renameProject(p.id, n); await st.refreshProjects(); } } },
+      { label: "Rename project", icon: <Pencil size={15} />, hint: "F2", onClick: () => setRenaming(`project:${p.id}`) },
       { label: "Open folder", icon: <FolderOpen size={15} />, onClick: () => api().openProjectFolder(p.id) },
       { label: showArchived[p.id] ? "Hide archived chats" : `Show archived chats${archived ? ` (${archived})` : ""}`, icon: <Archive size={15} />, disabled: !archived,
         onClick: () => { setShowArchived((o) => ({ ...o, [p.id]: !o[p.id] })); setOpen((o) => ({ ...o, [p.id]: true })); } },
@@ -140,9 +140,16 @@ export function Sidebar() {
           return (
             <div key={p.id} className="project">
               <div className={`project-row ${st.currentProjectId === p.id ? "current" : ""}`} onContextMenu={(e) => openMenu(e, projectMenu(p))}>
-                <button className="project-name" title={p.path} onClick={() => setOpen((o) => ({ ...o, [p.id]: !o[p.id] }))}>
-                  <ChevronRight size={14} className={`chev ${open[p.id] ? "open" : ""}`} /> {p.name}
-                </button>
+                {renaming === `project:${p.id}` ? (
+                  // window.prompt() isn't supported in Electron: rename inline, like chats.
+                  <RenameInput key={`project:${p.id}`} initial={p.name} onCancel={() => setRenaming(null)}
+                    onDone={async (n) => { setRenaming(null); if (n && n !== p.name) { await api().renameProject(p.id, n); await st.refreshProjects(); } }} />
+                ) : (
+                  <button className="project-name" title={p.path} onClick={() => setOpen((o) => ({ ...o, [p.id]: !o[p.id] }))}
+                    onDoubleClick={() => setRenaming(`project:${p.id}`)} onKeyDown={(e) => { if (e.key === "F2") setRenaming(`project:${p.id}`); }}>
+                    <ChevronRight size={14} className={`chev ${open[p.id] ? "open" : ""}`} /> {p.name}
+                  </button>
+                )}
                 <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
                 <button className="icon-btn" title="New chat" onClick={() => newChat(p.id)}><Plus size={15} /></button>
               </div>
