@@ -46,6 +46,45 @@ export class JazzClient {
   private basicFallback = false;
   private me: string | null = null;
   private level: QueryLevel = 0; // first query shape this server accepted
+  private noFullText = false;
+  private areaIds: Map<string, string> | null = null; // project area name → context id (OSLC catalog)
+
+  /** Project area name → id from the OSLC CM service provider catalog. */
+  private async contexts(): Promise<Map<string, string>> {
+    if (this.areaIds) return this.areaIds;
+    const r = await this.send("GET", "/oslc/workitems/catalog", undefined, { Accept: "application/rdf+xml" });
+    if (!r.ok) throw new JazzQueryError(r.status, serverMessage(await r.text()));
+    const xml = await r.text();
+    const map = new Map<string, string>();
+    for (const m of xml.matchAll(/<(?:\w+:)?ServiceProvider\b[^>]*about="[^"]*\/contexts\/([^/"]+)\/[^"]*"[^>]*>([\s\S]*?)<\/(?:\w+:)?ServiceProvider>/g)) {
+      const title = decode(/<(?:\w+:)?title[^>]*>([\s\S]*?)<\/(?:\w+:)?title>/.exec(m[2]!)?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
+      if (title) map.set(title, m[1]!);
+    }
+    return (this.areaIds = map);
+  }
+
+  /** Full-text search (ranked by the server) with OSLC CM: /oslc/contexts/<area>/workitems?oslc.searchTerms="…" */
+  private async fullText(text: string, areas: string[], state: "open" | "closed" | "all", max: number): Promise<JazzWorkItem[]> {
+    const ctx = await this.contexts();
+    const ids = (areas.length ? areas.map((a) => ctx.get(a) ?? [...ctx].find(([n]) => n.toLowerCase() === a.toLowerCase())?.[1]) : [...ctx.values()]).filter(Boolean).slice(0, 10) as string[];
+    if (!ids.length) throw new Error(areas.length ? `project area(s) not found: ${areas.join(", ")}` : "no project areas visible");
+    const prefix = "dcterms=<http://purl.org/dc/terms/>,rtc_cm=<http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/>,oslc_cm=<http://open-services.net/ns/cm#>,oslc_cmx=<http://open-services.net/ns/cm-x#>,foaf=<http://xmlns.com/foaf/0.1/>,oslc=<http://open-services.net/ns/core#>";
+    const select = "dcterms:identifier,dcterms:title,dcterms:description,dcterms:type,dcterms:modified,rtc_cm:state{dcterms:title},dcterms:contributor{foaf:name},oslc_cmx:priority{dcterms:title},rtc_cm:filedAgainst{dcterms:title}";
+    const terms = `"${text.replace(/"/g, "")}"`;
+    const one = async (id: string, withWhere: boolean): Promise<JazzWorkItem[]> => {
+      const where = withWhere && state !== "all" ? `&oslc.where=${encodeURIComponent(`oslc_cm:closed=${state === "closed"}`)}` : "";
+      const url = `/oslc/contexts/${id}/workitems?oslc.searchTerms=${encodeURIComponent(terms)}&oslc.prefix=${encodeURIComponent(prefix)}&oslc.select=${encodeURIComponent(select)}${where}&oslc.pageSize=${Math.min(max, 100)}`;
+      const r = await this.send("GET", url, undefined, { Accept: "application/json" });
+      if (!r.ok) throw new JazzQueryError(r.status, serverMessage(await r.text()));
+      const items = parseOslcWorkItems(await r.text(), this.cfg.serverUrl, [...ctx].find(([, v]) => v === id)?.[0]);
+      return withWhere || state === "all" ? items : items.filter((w) => (state === "closed") === CLOSED_STATE.test(w.state));
+    };
+    const results = await Promise.all(ids.map((id) => one(id, true).catch((e) => {
+      if (e instanceof JazzQueryError && e.status >= 400 && e.status !== 401 && e.status !== 403) return one(id, false); // where not supported
+      throw e;
+    })));
+    return results.flat().slice(0, max * Math.max(1, ids.length));
+  }
 
   constructor(private cfg: JazzConfig, private fetchImpl: FetchLike) {
     // Tolerate links copied from the browser (…/ccm/web#action=…): keep the context root only.
@@ -124,6 +163,20 @@ export class JazzClient {
     }
     const areas = s.projectAreas?.length ? s.projectAreas : this.cfg.projectAreas;
     const me = s.owner === "me" ? await this.whoAmI() : null;
+    // Words: use EWM's full-text search (OSLC oslc.searchTerms) across the whole project areas.
+    if (text && !this.noFullText) {
+      try {
+        const hits = await this.fullText(text, areas, s.state ?? "open", Math.max(max, 50));
+        return hits.filter((w) =>
+          (!s.type || w.type.toLowerCase() === s.type.toLowerCase()) &&
+          (s.owner !== "unassigned" || !w.owner || /unassigned/i.test(w.owner)) &&
+          (s.owner !== "me" || !me || (!!w.owner && w.owner.toLowerCase().replace(/\s+/g, "").includes(me.toLowerCase().replace(/^.*\\/, "").slice(0, 4))))
+        ).slice(0, max);
+      } catch (e: any) {
+        if (e instanceof JazzSignInRequired || /HTTP 40[13]/.test(String(e?.message))) throw e;
+        this.noFullText = true; // server without OSLC full-text: fall back to local matching below
+      }
+    }
     // The reportable API has no full-text operator: with words, fetch a larger filtered set and match locally.
     const all = await this.list({ areas, state: s.state ?? "open", type: s.type, owner: s.owner, me, raw: s.raw?.trim() }, text ? 1000 : max);
     if (!text) return all.slice(0, max);
@@ -365,6 +418,24 @@ export function parseWorkItems(xml: string, serverUrl: string): JazzWorkItem[] {
     });
   }
   return out;
+}
+
+/** OSLC CM JSON query results → work items (tolerates nested selects and plain resource references). */
+export function parseOslcWorkItems(body: string, serverUrl: string, area?: string): JazzWorkItem[] {
+  const j = JSON.parse(body);
+  const list: any[] = j["oslc:results"] ?? j["oslc_cm:results"] ?? j.results ?? [];
+  const str = (v: any): string => v == null ? "" : typeof v === "string" ? v : typeof v === "number" ? String(v)
+    : v["dcterms:title"] ?? v["foaf:name"] ?? v["rdfs:label"] ?? "";
+  const clean = (s: string) => decode(s.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  return list.map((x) => {
+    const id = str(x["dcterms:identifier"]) || /\/(\d+)$/.exec(x["rdf:about"] ?? "")?.[1] || "";
+    return {
+      id, title: clean(str(x["dcterms:title"])), description: clean(str(x["dcterms:description"])).slice(0, 4000),
+      type: str(x["dcterms:type"]), state: str(x["rtc_cm:state"]), owner: str(x["dcterms:contributor"]) || null,
+      url: id ? `${serverUrl}/resource/itemName/com.ibm.team.workitem.WorkItem/${id}` : null, projectArea: area,
+      priority: str(x["oslc_cmx:priority"]) || undefined, category: str(x["rtc_cm:filedAgainst"]) || undefined, modified: str(x["dcterms:modified"]) || undefined,
+    } as JazzWorkItem;
+  }).filter((w) => w.id);
 }
 
 export function parseComments(xml: string): JazzComment[] {

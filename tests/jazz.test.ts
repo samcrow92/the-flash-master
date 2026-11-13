@@ -52,7 +52,7 @@ describe("Jazz client", () => {
     const j = new JazzClient({ ...base, authType: "basic" }, f);
     expect((await j.search({ text: "flash nvm" })).map((w) => w.id)).toEqual(["8"]);
     await j.search({ text: "7, 8" });
-    expect(decodeURIComponent(calls[1]!.url)).toContain("[id=7 or id=8]");
+    expect(calls.map((c) => decodeURIComponent(c.url)).some((u) => u.includes("[id=7 or id=8]"))).toBe(true);
   });
 
   it("re-logs in once when a form session expires (HTTP 401)", async () => {
@@ -152,5 +152,45 @@ describe("Jazz query fallbacks", () => {
     const d = await new JazzClient({ ...base, authType: "basic" }, f).detail("7");
     expect(d.item.id).toBe("7");
     expect(d.comments).toHaveLength(2);
+  });
+});
+
+describe("Jazz keyword search (EWM full-text)", () => {
+  const CATALOG = `<rdf:RDF><oslc:ServiceProviderCatalog><oslc:serviceProvider><oslc:ServiceProvider rdf:about="https://j/ccm/oslc/contexts/_BODY/workitems/services.xml"><dcterms:title rdf:parseType="Literal">Body</dcterms:title></oslc:ServiceProvider></oslc:serviceProvider>
+    <oslc:serviceProvider><oslc:ServiceProvider rdf:about="https://j/ccm/oslc/contexts/_PT/workitems/services.xml"><dcterms:title>Powertrain</dcterms:title></oslc:ServiceProvider></oslc:serviceProvider></oslc:ServiceProviderCatalog></rdf:RDF>`;
+  const RESULTS = JSON.stringify({ "oslc:results": [
+    { "rdf:about": "https://j/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/9001", "dcterms:identifier": "9001", "dcterms:title": "Brake light &amp; flicker at cold start",
+      "dcterms:type": "Defect", "rtc_cm:state": { "dcterms:title": "In Progress" }, "dcterms:contributor": { "foaf:name": "Ana Pop" }, "oslc_cmx:priority": { "dcterms:title": "High" } },
+  ] });
+  it("uses oslc.searchTerms per configured project area and parses the JSON results", async () => {
+    const { f, calls } = fake((url) => {
+      if (url.includes("/oslc/workitems/catalog")) return { body: CATALOG };
+      if (url.includes("/oslc/contexts/_BODY/workitems")) return { body: RESULTS };
+      if (url.includes("/oslc/contexts/_PT/workitems")) return { body: JSON.stringify({ "oslc:results": [] }) };
+      return {};
+    });
+    const j = new JazzClient({ ...base, authType: "basic" }, f);
+    const hits = await j.search({ text: "flicker cold" });
+    expect(hits).toEqual([expect.objectContaining({ id: "9001", title: "Brake light & flicker at cold start", type: "Defect", state: "In Progress", owner: "Ana Pop", priority: "High", projectArea: "Body" })]);
+    const q = decodeURIComponent(calls.find((c) => c.url.includes("_BODY/workitems"))!.url);
+    expect(q).toContain('oslc.searchTerms="flicker cold"');
+    expect(q).toContain("oslc.where=oslc_cm:closed=false");
+    expect(calls.some((c) => c.url.includes("/rpt/"))).toBe(false);
+  });
+
+  it("retries without the closed filter, and falls back to local matching without full-text", async () => {
+    const { f, calls } = fake((url) => {
+      const u = decodeURIComponent(url);
+      if (u.includes("/oslc/workitems/catalog")) return { body: CATALOG };
+      if (u.includes("/oslc/contexts/") && u.includes("oslc.where")) return { status: 400, body: "<message>unsupported where</message>" };
+      if (u.includes("/oslc/contexts/_BODY")) return { body: RESULTS };
+      if (u.includes("/oslc/contexts/")) return { body: JSON.stringify({ "oslc:results": [] }) };
+      return {};
+    });
+    expect((await new JazzClient({ ...base, authType: "basic" }, f).search({ text: "flicker" })).map((w) => w.id)).toEqual(["9001"]);
+    expect(calls.filter((c) => c.url.includes("/oslc/contexts/_BODY")).length).toBe(2);
+
+    const { f: f2 } = fake((url) => (url.includes("/oslc/") ? { status: 404, body: "not found" } : {}));
+    expect((await new JazzClient({ ...base, authType: "basic" }, f2).search({ text: "flash nvm", state: "all" })).map((w) => w.id)).toEqual(["8"]);
   });
 });

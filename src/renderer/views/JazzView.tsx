@@ -32,7 +32,9 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
   const [serverAreas, setServerAreas] = useState<string[]>([]);
   const [state, setState] = useState<"open" | "closed" | "all">("open");
   const [type, setType] = useState("");
-  const [owner, setOwner] = useState<"" | "me" | "unassigned">("");
+  const [owner, setOwnerState] = useState<"" | "me" | "unassigned">("");
+  const [autoOwner, setAutoOwner] = useState(false); // "mine" set by the first load, not by the user
+  const setOwner = (v: "" | "me" | "unassigned") => { setAutoOwner(false); setOwnerState(v); };
   const [raw, setRaw] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [sort, setSort] = useState<SortKey>("modified");
@@ -51,7 +53,10 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
   const search = async (over: Partial<JazzSearch> = {}) => {
     setBusy(true); setError(null);
     try {
-      const q: JazzSearch = { text, projectAreas: areas, state, type, owner, raw: advanced ? raw : "", max: 200, ...over };
+      // Keyword search looks at everyone's items unless the user picked "mine" themselves.
+      const effOwner = text.trim() && autoOwner ? "" : owner;
+      if (effOwner !== owner) { setOwnerState(effOwner); setAutoOwner(false); }
+      const q: JazzSearch = { text, projectAreas: areas, state, type, owner: effOwner, raw: advanced ? raw : "", max: 200, ...over };
       setItems(await api().jazzSearch(q));
       setSearched(true);
     } catch (e: any) { setError(String(e?.message ?? e)); } finally { setBusy(false); }
@@ -59,7 +64,7 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
   // Project areas visible on the server, so any area can be picked here even if it is not in Settings.
   useEffect(() => { if (enabled) api().jazzProjectAreas().then(setServerAreas).catch(() => setServerAreas([])); }, [enabled]);
   // First load: show my open items (or the default query) so the page is useful immediately.
-  useEffect(() => { if (enabled) void search(cfg?.defaultQuery ? {} : { owner: "me" }).then(() => !cfg?.defaultQuery && setOwner("me")); }, [enabled]);
+  useEffect(() => { if (enabled) void search(cfg?.defaultQuery ? {} : { owner: "me" }).then(() => { if (!cfg?.defaultQuery) { setOwnerState("me"); setAutoOwner(true); } }); }, [enabled]);
 
   const open = async (id: string) => {
     setSelId(id); setDetailBusy(true);
@@ -105,7 +110,7 @@ function JazzWorkItems({ tabs }: { tabs: React.ReactNode }) {
       <div className="jazz-filters panel">
         <div className="row gap">
           <input className="grow" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()}
-            placeholder="Search words in summary/description, or IDs: 123, 456" autoFocus />
+            placeholder="Search words (full-text across the project areas), or IDs: 123, 456" autoFocus />
           <button className="primary" onClick={() => search()} disabled={busy}>{busy ? "Searching…" : "Search"}</button>
         </div>
         <div className="row gap wrap">
