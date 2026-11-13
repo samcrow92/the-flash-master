@@ -48,8 +48,10 @@ interface Live {
   sessionTokens: number; // estimated tokens accumulated in the harness session (drives rollover compaction)
   busy: boolean;
   paused: boolean;
-  queue: { input: string; attachments: Attachment[] }[];
-  redirect: { input: string; attachments: Attachment[] } | null; // steering by interrupt: next turn input
+  queue: { input: string; attachments: Attachment[]; msgIds?: string[] }[];
+  /** Delivered steering/queued messages waiting to be seen: native = wait for the harness ack, else first model output. */
+  awaiting: { id: string; native: boolean }[];
+  redirect: { input: string; attachments: Attachment[]; msgIds: string[] } | null; // steering by interrupt: next turn input
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
   depth: number;
   currentMessageId: string | null;
@@ -86,9 +88,11 @@ export class Orchestrator {
     const mentioned = parseMention(content, this.d.roles().map((r) => r.name)).role;
     const steer = !!busyLive && (o.whileBusy ?? this.d.settings().chat.defaultSendWhileBusy) === "steer" && !parseSlash(content).command
       && (!mentioned || mentioned === busyLive.role.name);
-    const userMsg = this.d.db.addMessage({ chatId, parentId: threadRoot, author: "user", content, attachments, steer });
+    const queued = !!busyLive && !steer && !parseSlash(content).command && (!mentioned || mentioned === busyLive.role.name);
+    const userMsg = this.d.db.addMessage({ chatId, parentId: threadRoot, author: "user", content, attachments, steer,
+      delivery: steer ? "sent" : queued ? "queued" : undefined });
     this.d.emit({ type: "message.created", message: userMsg });
-    if (steer && busyLive) { await this.steer(busyLive, content, attachments); return userMsg; }
+    if (steer && busyLive) { await this.steer(busyLive, content, attachments, userMsg.id); return userMsg; }
 
     const slash = parseSlash(content);
     if (slash.command === "superpowers") {
@@ -108,7 +112,7 @@ export class Orchestrator {
     const role = this.role(roleName);
     const skills = this.activeSkills(chat, slash.command);
     const text = slash.command && skills.length ? slash.text || content : mention.text;
-    void this.turn({ chat, threadRoot, role, input: text, attachments, skills, depth: 0, brief: null }).catch((e) =>
+    void this.turn({ chat, threadRoot, role, input: text, attachments, skills, depth: 0, brief: null, msgIds: [userMsg.id] }).catch((e) =>
       this.system(chatId, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
     return userMsg;
   }
@@ -183,7 +187,7 @@ export class Orchestrator {
     this.setStatus(l, "idle", "Resumed");
     this.flow(agentId, { kind: "status", label: "resumed", status: "running" });
     void this.turn({ chat, threadRoot: l.threadRoot, role: l.role, input, attachments: queued.flatMap((q) => q.attachments), skills: [], depth: l.depth,
-      brief: null, liveKey: l.key });
+      brief: null, liveKey: l.key, msgIds: queued.flatMap((q) => q.msgIds ?? []), deliver: true });
   }
 
   async stop(agentId: string): Promise<void> {
@@ -218,13 +222,15 @@ export class Orchestrator {
    * (ACP agents, GitLab Duo, mock) the current turn is interrupted at a safe point and the next turn starts at once
    * with the new direction — the session keeps its history, so no work is lost.
    */
-  private async steer(l: Live, text: string, attachments: Attachment[]): Promise<void> {
+  private async steer(l: Live, text: string, attachments: Attachment[], msgId: string): Promise<void> {
     if (!attachments.length && l.session?.steer && (await l.session.steer(text).catch(() => false))) {
       this.flow(l.agentId, { kind: "status", label: `steered: ${text.slice(0, 120)}`, status: "steer" });
       this.setStatus(l, "running", "Steering message delivered");
+      this.markDelivered(l, [msgId], true);
       return;
     }
-    l.redirect = l.redirect ? { input: `${l.redirect.input}\n${text}`, attachments: [...l.redirect.attachments, ...attachments] } : { input: text, attachments };
+    l.redirect = l.redirect ? { input: `${l.redirect.input}\n${text}`, attachments: [...l.redirect.attachments, ...attachments], msgIds: [...l.redirect.msgIds, msgId] }
+      : { input: text, attachments, msgIds: [msgId] };
     this.flow(l.agentId, { kind: "status", label: `redirected: ${text.slice(0, 120)}`, status: "steer" });
     this.setStatus(l, "running", "Redirecting with your steering message…");
     await l.session?.cancel();
@@ -260,6 +266,24 @@ export class Orchestrator {
     return m;
   }
 
+  /** Steering/queued messages reached the agent; `native` = the harness will confirm when the model sees them. */
+  private markDelivered(l: Live, ids: string[], native: boolean): void {
+    for (const id of ids) {
+      const m = this.d.db.setDelivery(id, "delivered");
+      if (m) { this.d.emit({ type: "message.updated", message: m }); l.awaiting.push({ id, native }); }
+    }
+  }
+  /** The model continued with the message in its context. ack = harness confirmation (native steering). */
+  private markSeen(l: Live, ack: boolean): void {
+    if (!l.awaiting.length) return;
+    const take = ack ? l.awaiting.filter((a) => a.native).slice(0, 1) : l.awaiting.filter((a) => !a.native);
+    for (const a of take) {
+      l.awaiting.splice(l.awaiting.indexOf(a), 1);
+      const m = this.d.db.setDelivery(a.id, "seen");
+      if (m) this.d.emit({ type: "message.updated", message: m });
+    }
+  }
+
   /** A file changed by an agent: one record per path and turn (first old text, latest new text). */
   private recordChange(live: Live, projectPath: string | null, path: string, oldText: string | null, newText: string): void {
     const rel = projectPath && path.toLowerCase().startsWith(projectPath.toLowerCase()) ? path.slice(projectPath.length).replace(/^[\\/]+/, "") : path;
@@ -293,11 +317,12 @@ export class Orchestrator {
   // ------------------------------------------------------------------ turn engine
 
   private async turn(t: { chat: Chat; threadRoot: string | null; role: RoleDef; input: string; attachments?: Attachment[]; skills: SkillDef[];
-    depth: number; brief: string | null; taskId?: string; liveKey?: string }): Promise<void> {
+    depth: number; brief: string | null; taskId?: string; liveKey?: string; msgIds?: string[]; deliver?: boolean }): Promise<void> {
     const s = this.d.settings();
     const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth);
     if (!live) return;
-    const item = { input: t.input, attachments: t.attachments ?? [] };
+    const item = { input: t.input, attachments: t.attachments ?? [], msgIds: t.msgIds };
+    if (live.paused || live.busy) for (const id of t.msgIds ?? []) { const m = this.d.db.setDelivery(id, "queued"); if (m) this.d.emit({ type: "message.updated", message: m }); }
     if (live.paused) { live.queue.push(item); this.system(t.chat.id, t.threadRoot, `⏸ ${t.role.title} is paused — message queued.`); return; }
     if (live.busy) { live.queue.push(item); return; }
 
@@ -354,6 +379,7 @@ export class Orchestrator {
       const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
       if (chatNow.autopilot) promptText += "\n\n(Autopilot: work autonomously. Do not stop to ask for confirmation or feedback — make reasonable assumptions, state them briefly, and finish the task.)";
       const atts = (t.attachments ?? []).map((a) => ({ kind: a.kind, name: a.name, mime: a.mime, path: a.path }));
+      if (t.deliver && t.msgIds?.length) this.markDelivered(live, t.msgIds, false);
       const res = await live.session!.prompt(promptText, atts);
       this.d.db.updateMessage(reply.id, { content: text });
       const usage = res.usage && (res.usage.tokensIn || res.usage.tokensOut)
@@ -409,13 +435,13 @@ export class Orchestrator {
       const r = live.redirect;
       live.redirect = null;
       void this.turn({ ...t, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
-        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key });
+        attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true });
       return;
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);
       void this.turn({ ...t, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
-        taskId: undefined, liveKey: live.key });
+        taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true });
     }
   }
 
@@ -446,6 +472,8 @@ export class Orchestrator {
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
       },
       onEvent: (e) => {
+        if (live.awaiting.length && (e.type === "text" || e.type === "tool" || e.type === "thought")) this.markSeen(live, false);
+        if (e.type === "steer_ack") this.markSeen(live, true);
         if (e.type === "text") live.sink?.(e.text);
         else if (e.type === "tool") {
           this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
@@ -520,7 +548,7 @@ export class Orchestrator {
     const agent = this.d.db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: role.name, harness, model,
       parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}` });
     const l: Live = { key, agentId: agent.id, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
-      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false, sink: null, redirect: null };
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false, sink: null, redirect: null, awaiting: [] };
     this.live.set(key, l);
     this.byAgent.set(agent.id, l);
     this.emitAgent(agent);

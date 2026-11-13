@@ -180,10 +180,11 @@ export class Db {
     return r ? this.hydrate(r) : null;
   }
   addMessage(i: { chatId: string; parentId?: string | null; author: Message["author"]; content: string; agentId?: string | null;
-    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"] }): Message {
+    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"] }): Message {
     const id = newId();
     this.seq += 1;
-    const meta = i.attachments?.length || i.steer || i.marker ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}) }) : null;
+    const meta = i.attachments?.length || i.steer || i.marker || i.delivery
+      ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}), ...(i.delivery ? { delivery: i.delivery } : {}) }) : null;
     this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now(), meta);
     return this.getMessage(id)!;
@@ -196,6 +197,18 @@ export class Db {
       (patch.estimated ?? m.estimated) ? 1 : 0, id);
     return this.getMessage(id)!;
   }
+  /** Update the delivery state of a steering/queued message (never goes backwards). */
+  setDelivery(id: string, state: NonNullable<Message["delivery"]>): Message | null {
+    const r = this.get("SELECT meta FROM messages WHERE id=?", id);
+    if (!r) return null;
+    let meta: Record<string, unknown> = {};
+    try { meta = r.meta ? JSON.parse(r.meta as string) : {}; } catch { /* ignore */ }
+    const order = ["sent", "queued", "delivered", "seen"];
+    if (order.indexOf(String(meta.delivery ?? "")) >= order.indexOf(state)) return null;
+    meta.delivery = state;
+    this.run("UPDATE messages SET meta=? WHERE id=?", JSON.stringify(meta), id);
+    return this.getMessage(id);
+  }
   toggleReaction(messageId: string, emoji: string): string[] {
     const exists = this.get("SELECT 1 FROM reactions WHERE message_id=? AND emoji=?", messageId, emoji);
     if (exists) this.run("DELETE FROM reactions WHERE message_id=? AND emoji=?", messageId, emoji);
@@ -207,12 +220,12 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
-    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"] } = {};
+    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"] } = {};
     try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
-      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}),
+      estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}), ...(meta.delivery ? { delivery: meta.delivery } : {}),
       reactions: this.reactions(r.id), replyCount,
     };
   }

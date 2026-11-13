@@ -78,6 +78,7 @@ describe("steering", () => {
     await p;
     const text = events.map((e: any) => e.text ?? "").join("");
     expect(text).toContain("[steered: use the CAN log instead]");
+    expect(events.filter((e) => e.type === "steer_ack")).toHaveLength(1);
     expect(text).toContain("(thinking=medium)");
     expect(text).toContain("(images=1)");
     s.close();
@@ -92,7 +93,11 @@ describe("steering", () => {
     await until(() => agentMsgs(db, chat.id).length === 2 && agentMsgs(db, chat.id)[1]!.status === "done");
     const [first, second] = agentMsgs(db, chat.id);
     expect(first!.content).toContain("Redirected by your steering message");
-    expect(db.listMessages(chat.id, null).find((m) => m.content === "focus on the brake ECU only")!.steer).toBe(true);
+    const steerMsg = db.listMessages(chat.id, null).find((m) => m.content === "focus on the brake ECU only")!;
+    expect(steerMsg.steer).toBe(true);
+    expect(steerMsg.delivery).toBe("seen");
+    const states = events.filter((e) => e.type === "message.updated" && e.message.id === steerMsg.id).map((e: any) => e.message.delivery);
+    expect(states).toEqual(["delivered", "seen"]);
     expect(second!.status).toBe("done");
     // queue: no redirect, message answered after the running turn
     await orch.sendUserMessage(chat.id, "SLOW again", null);
@@ -100,6 +105,9 @@ describe("steering", () => {
     await orch.sendUserMessage(chat.id, "and then summarise", null, { whileBusy: "queue" });
     await until(() => agentMsgs(db, chat.id).length === 4 && agentMsgs(db, chat.id)[3]!.status === "done");
     expect(agentMsgs(db, chat.id)[2]!.content).not.toContain("Redirected");
+    const q = db.listMessages(chat.id, null).find((m) => m.content === "and then summarise")!;
+    expect(q.delivery).toBe("seen");
+    expect(events.filter((e) => e.type === "message.updated" && e.message.id === q.id).map((e: any) => e.message.delivery)).toEqual(["delivered", "seen"]);
     await orch.stopAll();
   }, 20000);
 });
@@ -191,4 +199,29 @@ describe("files changed by agents", () => {
     expect(events.some((e) => e.type === "artifacts.changed" && e.chatId === chat.id)).toBe(true);
     await orch.stopAll();
   });
+});
+
+describe("steering acknowledgement with native steering", () => {
+  it("Pi steering goes sent → delivered → seen when Pi injects it", async () => {
+    const { db, orch, chat, events } = setup();
+    const harnesses = (orch as any).d.harnesses as HarnessRegistry;
+    const { PiAdapter } = await import("../src/main/harness/pi");
+    class FakePi extends PiAdapter {
+      override async start(o: SessionOptions) {
+        const sess = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc"], o);
+        await sess.init();
+        return sess;
+      }
+    }
+    (harnesses as any).adapters.set("pi", new FakePi());
+    (harnesses as any).status.set("pi", { id: "pi", available: true, path: process.execPath });
+    db.updateChat(chat.id, { harness: "pi" });
+    await orch.sendUserMessage(chat.id, "SLOW", null);
+    await until(() => events.some((e) => e.type === "message.delta"));
+    const m = await orch.sendUserMessage(chat.id, "use the CAN log", null, { whileBusy: "steer" });
+    expect(m.delivery).toBe("sent");
+    await until(() => db.getMessage(m.id)!.delivery === "seen");
+    expect(events.filter((e) => e.type === "message.updated" && e.message.id === m.id).map((e: any) => e.message.delivery)).toEqual(["delivered", "seen"]);
+    await orch.stopAll();
+  }, 15000);
 });

@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Steering acknowledgement:** steering and queued messages show their delivery status. **sending** or **queued** turns into **delivered** when the agent receives the message, then **seen ✓✓** once the model continues with it in context.
+  - Pi confirms natively when it injects the message.
+  - Other harnesses count it as seen at the first output of the redirected turn.
+  - The status updates live, with a short animation.
 - **Chat artifacts & diff viewer:** an **Artifacts** button in every chat opens a panel with four tabs:
   - **Changes:** every file agents created or edited, captured from ACP `diff` tool content and from writes through the app. One entry per file per turn, with a +/− stat.
   - **Git:** uncommitted changes in the project folder, HEAD vs. working copy.

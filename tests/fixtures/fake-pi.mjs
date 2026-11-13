@@ -28,6 +28,7 @@ process.stdin.on("data", async (d) => {
         out({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: w } });
         await new Promise((r) => setTimeout(r, cmd.message.includes("SLOW") ? 120 : 1));
       }
+      if (steered) out({ type: "turn_start" });
       if (steered) out({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: ` [steered: ${steered}]` } });
       steered = null;
       out({ type: "message_end", message: { role: "assistant", stopReason: aborted ? "aborted" : "stop", usage: { input: 200, output: 40, cacheRead: 50, cacheWrite: 0 } } });

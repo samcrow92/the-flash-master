@@ -10,7 +10,7 @@ import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Square, Trash2, Info, X, Zap } from "../components/icons";
+import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap } from "../components/icons";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -143,6 +143,25 @@ function EmptyChat({ isMaster }: { isMaster: boolean }) {
   );
 }
 
+const DELIVERY = {
+  sent: { icon: Clock, label: "sending", tip: "Waiting for the agent to take it" },
+  queued: { icon: Hourglass, label: "queued", tip: "Will be sent when the agent finishes its current turn" },
+  delivered: { icon: Check, label: "delivered", tip: "The agent received it" },
+  seen: { icon: CheckCheck, label: "seen", tip: "The model continued with this message in its context" },
+} as const;
+
+/** Steering / queued message status: sending → delivered → seen (or queued → delivered → seen). */
+function DeliveryBadge({ steer, state }: { steer: boolean; state?: keyof typeof DELIVERY }) {
+  const d = DELIVERY[state ?? (steer ? "sent" : "queued")];
+  const I = d.icon;
+  return (
+    <span className={`steer-badge dl-${state ?? "sent"}`} title={`${steer ? "Steering message" : "Queued message"} — ${d.tip}`}>
+      {steer && <><CornerUpLeft size={11} /> steering <span className="dl-sep">·</span></>}
+      <span key={state} className="dl-state"><I size={12} strokeWidth={2.4} /> {d.label}</span>
+    </span>
+  );
+}
+
 export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: () => void; inThread?: boolean }) {
   const role = roleOf(m.role);
   const agent = useStore((s) => (m.agentId ? s.agents[m.agentId] : undefined));
@@ -173,7 +192,7 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
           )}
         </div>
         <div className="msg-content">
-          {m.steer && <span className="steer-badge" title="Sent while the agent was working, to steer it"><CornerUpLeft size={11} /> steering</span>}
+          {(m.steer || m.delivery) && <DeliveryBadge steer={m.steer} state={m.delivery} />}
           {m.author === "user" ? <div className="plain">{m.content}</div> : <Markdown text={m.content || (m.status === "streaming" ? "" : "")} />}
           {m.attachments.length > 0 && (
             <div className="msg-atts">

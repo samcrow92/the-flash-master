@@ -24,6 +24,8 @@ export class PiSession implements HarnessSession {
   private nextId = 1;
   private toolTitles = new Map<string, string>(); // tool_execution_end carries no args: reuse the title from start
   private pending = new Map<string, (r: Json) => void>();
+  private pendingSteers = 0;
+  private userMsgsThisTurn = 0;
   private turn: { resolve: (r: TurnResult) => void; tokensIn: number; tokensOut: number; stop: string; error?: string } | null = null;
 
   constructor(exe: string, args: string[], private o: SessionOptions) {
@@ -76,6 +78,7 @@ export class PiSession implements HarnessSession {
     const message = files.length ? `${text}\n\nAttached files (read only what you need):\n${files.join("\n")}` : text;
     return new Promise((resolve) => {
       this.turn = { resolve, tokensIn: 0, tokensOut: 0, stop: "end_turn" };
+      this.userMsgsThisTurn = 0;
       void this.command({ type: "prompt", message, ...(images.length ? { images } : {}) }).then((r) => {
         if (!r.success && this.turn) { this.turn.resolve({ stopReason: "error", error: r.error ?? "prompt rejected" }); this.turn = null; }
       });
@@ -90,6 +93,7 @@ export class PiSession implements HarnessSession {
   async steer(text: string): Promise<boolean> {
     if (this.exited || !this.turn) return false;
     const r = await this.command({ type: "steer", message: text });
+    if (r.success) this.pendingSteers++;
     return !!r.success;
   }
 
@@ -135,6 +139,14 @@ export class PiSession implements HarnessSession {
     }
     const t = this.turn;
     switch (m.type) {
+      case "message_start":
+      case "turn_start": {
+        // Pi injects steering before the next model call: either it reports the injected user message
+        // (the first user message of a run is the prompt itself) or a new model turn starts with it in context.
+        const injected = m.type === "message_start" ? m.message?.role === "user" && ++this.userMsgsThisTurn > 1 : true;
+        if (injected && this.pendingSteers > 0) { this.pendingSteers--; this.o.onEvent({ type: "steer_ack" }); }
+        break;
+      }
       case "message_update": {
         const ev = m.assistantMessageEvent ?? {};
         if (ev.type === "text_delta" && ev.delta) this.o.onEvent({ type: "text", text: ev.delta });

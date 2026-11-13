@@ -22,6 +22,7 @@ export type HarnessEvent =
   | { type: "tool"; title: string; status: string; kind: ToolKind }
   | { type: "plan"; entries: { title: string; status: "pending" | "in_progress" | "completed" | "failed" }[] }
   | { type: "log"; text: string }
+  | { type: "steer_ack" } // the harness put a steering message into the model's context
   | { type: "diff"; path: string; oldText: string | null; newText: string };
 
 export interface TurnResult {

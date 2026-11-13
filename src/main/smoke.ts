@@ -152,6 +152,17 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await shot(join(demo, "27-artifacts-code.png"));
       await click("Artifacts", ".chat-controls button");
       await sleep(200);
+      // Steering delivery states
+      await send("Review the CAN matrix for the BCM and list unused signals");
+      await sleep(700);
+      await send("focus on BCM_Status only");
+      await sleep(250);
+      await js(`(()=>{const l=document.querySelector('.chat .messages');l.scrollTop=l.scrollHeight})()`);
+      await shot(join(demo, "28-steer-sent.png"));
+      await sleep(6000);
+      await js(`(()=>{const l=document.querySelector('.chat .messages');const b=[...document.querySelectorAll('.steer-badge')].pop();b?.scrollIntoView({block:'center'});})()`);
+      await sleep(300);
+      await shot(join(demo, "29-steer-seen.png"));
       // Profile: initials first, then a generated picture
       await click("Settings", ".sidebar button");
       await sleep(400);

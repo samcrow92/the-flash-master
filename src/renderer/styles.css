@@ -670,3 +670,13 @@ p .doc-link, .doc-note .doc-link { padding: 0 4px; border: none; background: non
 mark.wd { background: color-mix(in srgb, var(--red) 38%, transparent); color: inherit; border-radius: 2px; }
 mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: inherit; border-radius: 2px; }
 .diff-gap { padding: 3px 12px; font-size: 11.5px; color: var(--muted); background: var(--bg2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+/* steering / queued delivery status */
+.steer-badge .dl-sep { opacity: .5; }
+.steer-badge .dl-state { display: inline-flex; align-items: center; gap: 3px; animation: pop .35s cubic-bezier(.2,.9,.3,1.5); }
+.steer-badge.dl-sent .dl-state, .steer-badge.dl-queued .dl-state { color: var(--muted); }
+.steer-badge.dl-sent .dl-state svg { animation: spin 2.4s linear infinite; }
+.steer-badge.dl-queued .dl-state svg { animation: breathe 1.6s ease-in-out infinite; }
+.steer-badge.dl-delivered .dl-state { color: var(--blue); }
+.steer-badge.dl-seen { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
+.steer-badge.dl-seen .dl-state { color: var(--green); font-weight: 600; }

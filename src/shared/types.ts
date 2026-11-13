@@ -61,6 +61,8 @@ export interface Message {
   seq: number; // server-assigned order: the UI always sorts by this
   attachments: Attachment[];
   steer: boolean; // sent as a steering message into a running turn
+  /** Steering / queued messages: sent → delivered to the agent → seen (the model continued with it in context). */
+  delivery?: "sent" | "queued" | "delivered" | "seen";
   marker?: "context-reset"; // divider rows (not sent to agents)
   reactions: string[];
   replyCount: number;
