@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, HarnessModels, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
+  AgentFlow, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -57,6 +57,13 @@ export interface FlashApi {
 
   // harnesses / mcp
   detectHarnesses(): Promise<HarnessStatus[]>;
+  marketplaceList(refresh?: boolean): Promise<{ listings: MarketplaceListing[]; installed: InstalledPlugin[]; updates: { id: string; from: string; to: string }[] }>;
+  marketplaceInstall(sourceId: string, pluginId: string): Promise<InstalledPlugin>;
+  marketplaceUninstall(pluginId: string): Promise<void>;
+  marketplaceUpdateAll(): Promise<{ id: string; ok: boolean; error?: string }[]>;
+  marketplaceSetToken(sourceId: string, token: string): Promise<void>;
+  marketplaceTest(sourceId: string): Promise<{ ok: boolean; detail: string }>;
+  pluginInstructions(pluginId: string, enabled: boolean): Promise<void>;
   listModels(harness: HarnessId, refresh?: boolean): Promise<HarnessModels>;
   instructionSetup(): Promise<{ harness: HarnessId; args: string[]; env: Record<string, string>; coverage: "full" | "partial" | "none"; note: string }[]>;
   allModels(): Promise<HarnessModels[]>;
@@ -82,7 +89,8 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "deleteChat", "listMessages", "sendMessage", "toggleReaction", "listAgents", "startAgent",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "listModels", "instructionSetup", "allModels",
+  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "marketplaceSetToken", "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];

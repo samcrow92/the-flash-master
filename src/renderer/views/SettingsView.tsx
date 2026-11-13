@@ -8,7 +8,7 @@ import { ModelInput } from "../components/ModelInput";
 
 const TABS = [
   ["general", "General"], ["harnesses", "Harnesses"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["permissions", "Permissions"],
-  ["mcp", "MCP servers"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
+  ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
 ] as const;
 
 type Path = string;
@@ -40,6 +40,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
           {tab === "tokens" && <Tokens {...f} />}
           {tab === "permissions" && <Permissions {...f} />}
           {tab === "mcp" && <Mcp {...f} />}
+          {tab === "marketplace" && <MarketplaceSettings {...f} />}
           {tab === "integrations" && <Integrations {...f} />}
           {tab === "network" && <Network {...f} />}
           {tab === "data" && <Data {...f} />}
@@ -249,6 +250,51 @@ function Mcp(f: F) {
         <input defaultValue={e[k]} onBlur={(ev) => setExt(ext.map((x, j) => (j === i ? { ...x, [k]: ev.target.value } : x)))} /></label>)}
       <button className="danger ghost" onClick={() => setExt(ext.filter((_, j) => j !== i))}>Remove</button>
     </div>)}
+  </>;
+}
+
+function MarketplaceSettings(f: F) {
+  const st = useStore();
+  const list = f.s.marketplace.sources;
+  const lockedSources = f.locked("marketplace.sources");
+  const [tokens, setTokens] = useState<Record<string, string>>({});
+  const [tests, setTests] = useState<Record<string, string>>({});
+  const setList = (next: typeof list) => f.set("marketplace.sources", next);
+  const patch = (id: string, p: Partial<(typeof list)[number]>) => setList(list.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const add = () => {
+    const id = `mp-${Date.now().toString(36)}`;
+    void setList([...list, { id, name: "New marketplace", url: "http://192.168.0.10:8080", department: "", enabled: true, hasToken: false }]);
+  };
+  return <>
+    <p className="muted">A marketplace is a catalogue of plugins (custom agents, workflows, instructions, optionally tools) that a team or department hosts on a
+      local server — any static web server at an IP works, e.g. <code>python -m http.server 8080</code> in the published folder. Add one per department.</p>
+    <div className="row between"><h4>Marketplaces</h4><button className="primary" disabled={lockedSources} onClick={add}>＋ Add marketplace</button></div>
+    {lockedSources && <div className="muted small">🔒 The marketplace list is managed by your organisation.</div>}
+    {list.length === 0 && <div className="muted">None yet.</div>}
+    {list.map((m) => (
+      <div key={m.id} className="panel mp-source">
+        <div className="grid3">
+          <label className="field"><span>Name</span><input defaultValue={m.name} disabled={lockedSources} onBlur={(e) => e.target.value !== m.name && patch(m.id, { name: e.target.value })} /></label>
+          <label className="field"><span>Department / team</span><input defaultValue={m.department} placeholder="e.g. Body Electronics" disabled={lockedSources} onBlur={(e) => e.target.value !== m.department && patch(m.id, { department: e.target.value })} /></label>
+          <label className="field"><span>Server (IP:port or URL)</span><input defaultValue={m.url} placeholder="http://10.20.30.40:8080" disabled={lockedSources} onBlur={(e) => e.target.value !== m.url && patch(m.id, { url: e.target.value.trim() })} /></label>
+        </div>
+        <div className="row gap wrap">
+          <label className="row gap-s small"><input type="checkbox" checked={m.enabled} disabled={lockedSources} onChange={(e) => patch(m.id, { enabled: e.target.checked })} /> Enabled</label>
+          <input type="password" placeholder={m.hasToken ? "token saved (••••)" : "access token (optional)"} value={tokens[m.id] ?? ""} onChange={(e) => setTokens({ ...tokens, [m.id]: e.target.value })} />
+          <button onClick={async () => { await api().marketplaceSetToken(m.id, tokens[m.id] ?? ""); setTokens({ ...tokens, [m.id]: "" }); st.setSettings((await api().getSettings()).settings); st.toast("info", tokens[m.id] ? "Token saved (encrypted)" : "Token removed"); }}>
+            {tokens[m.id] ? "Save token" : m.hasToken ? "Remove token" : "Save token"}</button>
+          <button onClick={async () => { setTests({ ...tests, [m.id]: "Testing…" }); const r = await api().marketplaceTest(m.id); setTests({ ...tests, [m.id]: (r.ok ? "✅ " : "❌ ") + r.detail }); }}>Test</button>
+          <span className="small">{tests[m.id]}</span>
+          <button className="ghost danger" disabled={lockedSources} onClick={() => confirm(`Remove marketplace "${m.name}"? Installed plugins stay installed.`) && setList(list.filter((x) => x.id !== m.id))}>Remove</button>
+        </div>
+      </div>
+    ))}
+    <h4>Policies</h4>
+    <Row label="Check for plugin updates at startup"><Bool f={f} path="marketplace.autoCheckUpdates" /></Row>
+    <Row label="Install updates automatically" hint="Otherwise you get a notice and an ‘Update all’ button in the Marketplace."><Bool f={f} path="marketplace.autoUpdate" /></Row>
+    <Row label="Require integrity checksums" hint="Only install packages whose sha256 is published in the marketplace index (the publishing script adds it)."><Bool f={f} path="marketplace.requireIntegrity" /></Row>
+    <Row label="Allow plugins to add MCP tool servers" hint="MCP servers run programs on this PC. When off, plugin servers are added but stay disabled until you enable them in Settings → MCP."><Bool f={f} path="marketplace.allowMcpServers" /></Row>
+    <p className="muted small">Enterprise: preset and lock marketplaces for all users in the policy file, e.g. <code>{`{"settings":{"marketplace":{"sources":[…]}},"lock":["marketplace.sources"]}`}</code>.</p>
   </>;
 }
 

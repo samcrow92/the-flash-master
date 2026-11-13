@@ -1,0 +1,8 @@
+{
+  "id": "body-sw-test-pack",
+  "name": "Body SW — HIL test pack",
+  "version": "1.0.0",
+  "description": "HIL test engineer agent and a /hil-campaign workflow for the body electronics test bench (CANoe + dSPACE).",
+  "team": "Body SW Validation",
+  "tags": ["hil", "canoe", "testing"]
+}

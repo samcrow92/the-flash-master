@@ -220,3 +220,6 @@ Builder decision: "NOW" was not found as a published standard, so it is defined 
 | 34 | Animations for agents at work | CSS (reduced-motion aware): palette rings and dots, avatar ring, chip glow |
 | 35 | Challenger specialist | `agents/challenger.md`; consulted by the coordinator and the plans skill |
 | 36 | Jazz "redirect was canceled" | follow redirects + `persist:jazz` session cookies; auth detected via EWM headers |
+| 37 | Override harness preloaded instructions | `harness/instructions.ts` clean mode + team rules |
+| 38 | Marketplace with local servers per department | `marketplace.ts`, Marketplace page, Settings → Marketplace, `scripts/marketplace/build-index.mjs`, `docs/marketplace.md` |
+| 39 | Light mode | sidebar ☀/🌙 toggle, light theme polish, live "System" theme |

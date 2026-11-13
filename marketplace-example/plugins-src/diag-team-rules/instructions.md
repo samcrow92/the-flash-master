@@ -1,0 +1,3 @@
+- DIDs follow the naming `DID_<0xNNNN>_<Name>`; never reuse a DID across variants without a CDD variant note.
+- Every new service must document its negative response codes (NRCs) and the session/security level it needs.
+- Changes to the CDD must be reviewed against the diagnostic specification revision named in the Jazz work item.

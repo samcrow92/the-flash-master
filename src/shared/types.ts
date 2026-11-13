@@ -184,6 +184,7 @@ export type AppEvent =
   | { type: "roles.changed"; roles: RoleDef[] }
   | { type: "flow.updated"; agentId: string }
   | { type: "models.updated"; models: HarnessModels }
+  | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
 
 export interface AgentImportResult {
@@ -207,4 +208,60 @@ export interface HarnessModels {
   fetchedAt: number | null;
   error: string | null;
   loading: boolean;
+}
+
+// ---------------- marketplace ----------------
+export type PluginKind = "agent" | "workflow" | "instructions" | "mcp";
+
+/** One entry of a marketplace's index.json. */
+export interface PluginEntry {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  team: string;
+  kinds: PluginKind[];
+  tags: string[];
+  package: string; // path relative to the marketplace URL
+  sha256?: string;
+  updated?: string;
+}
+
+/** A plugin package (the JSON file a PluginEntry points to). Content is inline so any static file server can host it. */
+export interface PluginPackage {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  team?: string;
+  agents?: { file: string; content: string }[];
+  workflows?: { file: string; content: string }[];
+  instructions?: string;
+  mcpServers?: { id: string; label?: string; command: string; args?: string; env?: string }[];
+}
+
+export interface InstalledPlugin {
+  id: string;
+  name: string;
+  version: string;
+  team: string;
+  sourceId: string;
+  sourceName: string;
+  installedAt: number;
+  agents: string[]; // role names
+  workflows: string[]; // skill commands
+  hasInstructions: boolean;
+  instructionsEnabled: boolean;
+  mcpServers: string[];
+}
+
+export interface MarketplaceListing {
+  sourceId: string;
+  sourceName: string;
+  department: string;
+  url: string;
+  description: string;
+  plugins: PluginEntry[];
+  error: string | null;
+  fetchedAt: number | null;
 }

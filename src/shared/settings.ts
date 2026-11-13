@@ -62,6 +62,13 @@ export interface Settings {
     hasPassword: boolean; // password stored encrypted via safeStorage, never in settings
     defaultQuery: string;
   };
+  marketplace: {
+    sources: { id: string; name: string; url: string; department: string; enabled: boolean; hasToken: boolean }[];
+    autoCheckUpdates: boolean; // check all marketplaces for updates at startup
+    autoUpdate: boolean; // install updates automatically
+    requireIntegrity: boolean; // refuse packages whose sha256 does not match the index
+    allowMcpServers: boolean; // allow plugins to add MCP servers (they run programs on this PC)
+  };
   winidea: {
     installPath: string;
     workspace: string;
@@ -126,6 +133,7 @@ export const DEFAULT_SETTINGS: Settings = {
     hasPassword: false,
     defaultQuery: "",
   },
+  marketplace: { sources: [], autoCheckUpdates: true, autoUpdate: false, requireIntegrity: true, allowMcpServers: false },
   winidea: { installPath: "", workspace: "", sdkPath: "" },
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars

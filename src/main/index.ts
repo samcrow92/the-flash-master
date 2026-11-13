@@ -19,6 +19,7 @@ import { HARNESS_IDS } from "@shared/types";
 import { networkEnv } from "./orchestrator";
 import { prepareInstructions } from "./harness/instructions";
 import { makeLogger } from "./log";
+import { Marketplace, normaliseUrl } from "./marketplace";
 import { runSmoke } from "./smoke";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,8 @@ mkdirSync(dataDir, { recursive: true });
 const resources = app.isPackaged ? process.resourcesPath : app.getAppPath();
 const userRolesDir = join(dataDir, "agents");
 mkdirSync(userRolesDir, { recursive: true });
+const userSkillsDir = join(dataDir, "skills"); // workflows installed from marketplaces
+mkdirSync(userSkillsDir, { recursive: true });
 const policyFile = process.platform === "win32" ? join(process.env.PROGRAMDATA ?? "C:\\ProgramData", "TheFlashMaster", "policy.json") : join(dataDir, "policy.json");
 
 const settings = new SettingsStore(join(dataDir, "settings.json"), policyFile);
@@ -45,7 +48,9 @@ let roles: RoleDef[] = [];
 let skills: SkillDef[] = [];
 const reloadRoles = () => {
   roles = loadRoles(join(resources, "agents"), userRolesDir);
-  skills = loadSkills(join(resources, "skills", "superpowers"));
+  const builtinSkills = loadSkills(join(resources, "skills", "superpowers"));
+  const userSkills = loadSkills(userSkillsDir);
+  skills = [...builtinSkills.filter((b) => !userSkills.some((u) => u.command === b.command)), ...userSkills];
 };
 reloadRoles();
 
@@ -71,6 +76,7 @@ const mcp = new McpBootstrap({
 const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
+  extraRules: () => marketplace.instructions(),
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
     modelCache.set(h, m);
@@ -129,6 +135,67 @@ function refreshModels(h: HarnessId): Promise<HarnessModels> {
     .finally(() => { inflight.delete(h); saveModels(); });
   inflight.set(h, p);
   return p;
+}
+
+// ---------------- marketplace ----------------
+const mpSecretDir = join(dataDir, "marketplace-secrets");
+mkdirSync(mpSecretDir, { recursive: true });
+const mpToken = (id: string): string => {
+  const f = join(mpSecretDir, `${id.replace(/[^\w-]/g, "_")}.bin`);
+  try { return existsSync(f) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(f)) : ""; } catch { return ""; }
+};
+const marketplace = new Marketplace({
+  dataDir, rolesDir: userRolesDir, skillsDir: userSkillsDir,
+  fetch: (url, init) => session.defaultSession.fetch(url, { ...init, redirect: "follow" } as any) as any,
+  token: mpToken,
+  policy: () => ({ requireIntegrity: settings.get().marketplace.requireIntegrity, allowMcpServers: settings.get().marketplace.allowMcpServers }),
+  knownTools: () => [...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)],
+  builtinRoles: () => loadRoles(join(resources, "agents"), join(dataDir, "__none__")).map((r) => r.name),
+  addMcpServers: (servers, enabled) => {
+    const s = settings.get().mcp;
+    const ids = servers.map((x) => x.id);
+    settings.update({ mcp: {
+      external: [...s.external.filter((e) => !ids.includes(e.id)), ...servers],
+      disabled: enabled ? s.disabled.filter((d) => !ids.includes(d)) : [...new Set([...s.disabled, ...ids])],
+    } });
+  },
+  removeMcpServers: (ids) => {
+    const s = settings.get().mcp;
+    settings.update({ mcp: { external: s.external.filter((e) => !ids.includes(e.id)), disabled: s.disabled.filter((d) => !ids.includes(d)) } });
+  },
+});
+const mpSources = () => settings.get().marketplace.sources;
+const mpSource = (id: string) => {
+  const src = mpSources().find((x) => x.id === id);
+  if (!src) throw new Error("unknown marketplace");
+  return src;
+};
+const afterPluginChange = () => {
+  reloadRoles();
+  emit({ type: "roles.changed", roles });
+  emit({ type: "plugins.changed", installed: marketplace.installed() });
+};
+const mpState = () => ({
+  listings: marketplace.cached(),
+  installed: marketplace.installed(),
+  updates: marketplace.updates().map((u) => ({ id: u.plugin.id, from: u.plugin.version, to: u.entry.version })),
+});
+async function checkPluginUpdates(): Promise<void> {
+  const m = settings.get().marketplace;
+  if (!m.sources.some((x) => x.enabled)) return;
+  await marketplace.refresh(m.sources);
+  const ups = marketplace.updates();
+  if (!ups.length) return;
+  if (m.autoUpdate) {
+    for (const u of ups) {
+      try { await marketplace.install(mpSource(u.plugin.sourceId), u.plugin.id); log("info", `plugin updated: ${u.plugin.id} ${u.plugin.version} → ${u.entry.version}`); }
+      catch (e) { log("error", `plugin update failed: ${u.plugin.id}: ${String(e)}`); }
+    }
+    afterPluginChange();
+    emit({ type: "notice", level: "info", text: `${ups.length} plugin update(s) installed` });
+  } else {
+    emit({ type: "notice", level: "info", text: `${ups.length} plugin update(s) available — see Marketplace` });
+  }
 }
 
 // ---------------- agent import ----------------
@@ -231,6 +298,37 @@ const api: FlashApi = {
   getArtifact: async (id) => db.getArtifact(id),
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
+  marketplaceList: async (refresh) => {
+    if (refresh || !marketplace.cached().length) await marketplace.refresh(mpSources());
+    return mpState();
+  },
+  marketplaceInstall: async (sourceId, pluginId) => {
+    const rec = await marketplace.install(mpSource(sourceId), pluginId);
+    log("info", `plugin installed: ${rec.id}@${rec.version} from ${rec.sourceName}`);
+    afterPluginChange();
+    return rec;
+  },
+  marketplaceUninstall: async (pluginId) => { marketplace.uninstall(pluginId); afterPluginChange(); },
+  marketplaceUpdateAll: async () => {
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const u of marketplace.updates()) {
+      try { await marketplace.install(mpSource(u.plugin.sourceId), u.plugin.id); results.push({ id: u.plugin.id, ok: true }); }
+      catch (e: any) { results.push({ id: u.plugin.id, ok: false, error: String(e?.message ?? e) }); }
+    }
+    afterPluginChange();
+    return results;
+  },
+  marketplaceSetToken: async (sourceId, token) => {
+    if (token && !safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
+    const f = join(mpSecretDir, `${sourceId.replace(/[^\w-]/g, "_")}.bin`);
+    if (token) writeFileSync(f, safeStorage.encryptString(token)); else if (existsSync(f)) unlinkSync(f);
+    settings.update({ marketplace: { sources: mpSources().map((x) => (x.id === sourceId ? { ...x, hasToken: !!token } : x)) } });
+  },
+  marketplaceTest: async (sourceId) => {
+    const l = await marketplace.fetchIndex(mpSource(sourceId));
+    return l.error ? { ok: false, detail: l.error } : { ok: true, detail: `${l.plugins.length} plugin(s) in "${l.sourceName}"` };
+  },
+  pluginInstructions: async (pluginId, enabled) => { marketplace.setInstructionsEnabled(pluginId, enabled); emit({ type: "plugins.changed", installed: marketplace.installed() }); },
   instructionSetup: async () => {
     const a = settings.get().agents;
     return HARNESS_IDS.map((h) => ({ harness: h, ...prepareInstructions(h, { mode: a.instructionMode, keepProject: a.keepProjectInstructions, dataDir }) }));
@@ -298,7 +396,9 @@ async function applyProxy(): Promise<void> {
   const n = settings.get().network;
   const fromEnv = envProxy();
   const proxy = n.proxy || fromEnv.proxy;
-  const bypass = [n.noProxy || fromEnv.noProxy, "<local>"].filter(Boolean).join(",");
+  // Marketplaces are internal servers (IP:port): never send them through the corporate proxy.
+  const mpHosts = settings.get().marketplace.sources.map((x) => { try { return new URL(normaliseUrl(x.url)).hostname; } catch { return ""; } }).filter(Boolean);
+  const bypass = [n.noProxy || fromEnv.noProxy, ...mpHosts, "<local>"].filter(Boolean).join(",");
   if (proxy) {
     const cfg = { proxyRules: proxy.replace(/^https?:\/\//, "").replace(/\/$/, ""), proxyBypassRules: bypass };
     await session.defaultSession.setProxy(cfg);
@@ -321,6 +421,7 @@ app.whenReady().then(async () => {
     for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
   });
   void mcp.ensure().then((servers) => emit({ type: "mcp.status", servers }));
+  if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
 });
 
 app.on("before-quit", () => { void orch.stopAll(); bridge.stop(); db.close(); });

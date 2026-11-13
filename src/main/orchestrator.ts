@@ -29,6 +29,7 @@ export interface OrchestratorDeps {
   mcpServersFor: (role: RoleDef, agentId: string) => McpServerSpec[];
   homeDir: string;
   dataDir?: string;
+  extraRules?: () => string; // e.g. instructions from installed marketplace plugins
 }
 
 interface Live {
@@ -258,7 +259,8 @@ export class Orchestrator {
       // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
       const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
       promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
-        brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean", houseRules: s.agents.houseRules });
+        brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
+        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? ""].filter((x) => x.trim()).join("\n\n") });
       this.setStatus(live, "running", "Thinking…");
       const res = await live.session!.prompt(promptText);
       this.d.db.updateMessage(reply.id, { content: text });

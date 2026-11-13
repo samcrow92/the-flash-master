@@ -10,6 +10,7 @@ import { TasksView } from "./views/TasksView";
 import { JazzView } from "./views/JazzView";
 import { SettingsView } from "./views/SettingsView";
 import { FlowPage } from "./views/FlowView";
+import { MarketplaceView } from "./views/MarketplaceView";
 
 export function App() {
   const { ready, view, toasts, init, apply, toast } = useStore();
@@ -44,6 +45,7 @@ export function App() {
         {view.kind === "jazz" && <JazzView />}
         {view.kind === "settings" && <SettingsView initialTab={view.tab} />}
         {view.kind === "flow" && <FlowPage key={view.agentId} agentId={view.agentId} />}
+        {view.kind === "marketplace" && <MarketplaceView />}
       </main>
       <div className="toasts">
         {toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, useStore } from "../store";
+import { api, toggleTheme, useStore } from "../store";
 import { AgentImportDialog } from "./AgentImport";
 
 export function Sidebar() {
@@ -51,6 +51,7 @@ export function Sidebar() {
           🗂️ Tasks <span className="muted small">{Object.values(st.tasks).filter((t) => t.status !== "done").length || ""}</span>
         </button>
         <button className={view.kind === "jazz" ? "active" : ""} onClick={() => st.setView({ kind: "jazz" })}>📌 Jazz work items</button>
+        <button className={view.kind === "marketplace" ? "active" : ""} onClick={() => st.setView({ kind: "marketplace" })}>🧩 Marketplace</button>
       </nav>
 
       <div className="section-title">
@@ -102,8 +103,10 @@ export function Sidebar() {
       </div>
 
       {importing && <AgentImportDialog onClose={() => setImporting(false)} />}
-      <div className="sidebar-footer">
+      <div className="sidebar-footer row">
         <button className={view.kind === "settings" ? "active" : ""} onClick={() => st.setView({ kind: "settings" })}>⚙️ Settings</button>
+        <button className="theme-toggle" title={document.documentElement.dataset.theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+          onClick={() => void toggleTheme()}>{st.settings?.general.theme === "light" || document.documentElement.dataset.theme === "light" ? "🌙" : "☀️"}</button>
       </div>
     </aside>
   );

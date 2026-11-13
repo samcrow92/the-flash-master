@@ -1,0 +1,8 @@
+{
+  "id": "diag-team-rules",
+  "name": "Diagnostics team rules",
+  "version": "2.1.0",
+  "description": "Team conventions for UDS diagnostics work: DID naming, NRC handling and CDD review rules.",
+  "team": "Diagnostics",
+  "tags": ["uds", "cdd", "conventions"]
+}

@@ -11,7 +11,8 @@ export type View =
   | { kind: "tasks" }
   | { kind: "jazz" }
   | { kind: "settings"; tab?: string }
-  | { kind: "flow"; agentId: string };
+  | { kind: "flow"; agentId: string }
+  | { kind: "marketplace" };
 
 export interface Toast {
   id: number;
@@ -238,6 +239,9 @@ export const useStore = create<State>((set, get) => ({
       case "roles.changed":
         set({ roles: e.roles });
         break;
+      case "plugins.changed":
+        void api().listSkills().then((skills) => set({ skills }));
+        break;
       case "notice":
         st.toast(e.level, e.text);
         break;
@@ -245,9 +249,20 @@ export const useStore = create<State>((set, get) => ({
   },
 }));
 
+let currentTheme: "dark" | "light" | "system" = "dark";
 export function applyTheme(theme: "dark" | "light" | "system"): void {
+  currentTheme = theme;
   const t = theme === "system" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : theme;
   document.documentElement.dataset.theme = t;
+}
+// "System" follows Windows' light/dark setting live.
+matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (currentTheme === "system") applyTheme("system"); });
+
+/** One-click switch used by the sidebar: flips between light and dark (leaving "system" for Settings). */
+export async function toggleTheme(): Promise<void> {
+  const shown = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const next = shown === "light" ? "dark" : "light";
+  useStore.getState().setSettings(await api().updateSettings({ general: { theme: next } }));
 }
 
 export function roleOf(name: string | null | undefined): RoleDef | undefined {

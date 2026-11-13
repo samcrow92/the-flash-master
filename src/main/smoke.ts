@@ -71,6 +71,39 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await sleep(1200);
         await shot(join(demo, `${name}.png`));
       }
+      const mpUrl = process.env.FLASH_SMOKE_MARKET_URL;
+      if (mpUrl) {
+        await js(`window.flash.api.updateSettings({ marketplace: { sources: [{ id: "body", name: "Body Electronics", department: "Body", url: ${JSON.stringify(mpUrl)}, enabled: true, hasToken: false }] } }).then(s=>{})`);
+        win.webContents.reload();
+        await sleep(2500);
+        await click("Marketplace", ".sidebar button");
+        await sleep(1500);
+        await js(`[...document.querySelectorAll('.mp-card button.primary')][0]?.click()`);
+        await sleep(1500);
+        await js(`document.querySelector('.mp-card')?.click()`);
+        await sleep(600);
+        await shot(join(demo, "9-marketplace.png"));
+        await click("Settings", ".sidebar button");
+        await sleep(600);
+        await click("Marketplace", ".tabs button");
+        await sleep(600);
+        await shot(join(demo, "9b-settings-marketplace.png"));
+        await js(`document.querySelector('.theme-toggle')?.click()`);
+        await sleep(800);
+        await click("Marketplace", ".sidebar button");
+        await sleep(1200);
+        await shot(join(demo, "9c-light-marketplace.png"));
+        await js(`(async()=>{const p=(await window.flash.api.listProjects())[0];const c=(await window.flash.api.listChats(p.id))[0];return c.id})()`).then(() => undefined);
+        await click("brake-ecu", ".project-name");
+        await sleep(300);
+        await click("General", ".chat-link");
+        await sleep(1200);
+        await shot(join(demo, "9d-light-chat.png"));
+        await js(`document.querySelector('.theme-toggle')?.click()`);
+        await sleep(400);
+        await click("Settings", ".sidebar button");
+        await sleep(600);
+      }
       await click("Token efficiency", ".tabs button");
       await sleep(400);
       await shot(join(demo, "7-settings-tokens.png"));

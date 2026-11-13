@@ -20,6 +20,10 @@ The app calls no model API itself and stores no model credentials. There's no lo
 |---|---|---|
 | ![](docs/screenshots/2c-progress-live.png) | ![](docs/screenshots/2d-rca-ishikawa.png) | ![](docs/screenshots/2e-import-agent.png) |
 
+| Marketplace | Light mode |
+|---|---|
+| ![](docs/screenshots/9-marketplace.png) | ![](docs/screenshots/9d-light-chat.png) |
+
 ## Features
 
 - **Projects:** pick a local folder; agents work inside it. Each project has any number of **chats**.
@@ -49,6 +53,8 @@ The app calls no model API itself and stores no model credentials. There's no lo
 - **Superpowers workflow on demand:** off by default.
   - Toggle it per chat (`/superpowers`), or load one phase: `/brainstorm`, `/plan`, `/execute`, `/tdd`, `/debug`, `/review`, `/verify`.
 - **Custom tools as MCP servers.** They're auto-installed at startup when missing and attached **per session**, so your global harness configs stay untouched.
+- **🧩 Marketplace for teams:** each department hosts a catalogue of plugins (custom agents, workflows, team instructions, optional tool servers) on a local server at an IP, using any static web server. Add several marketplaces in Settings → Marketplace (with an optional encrypted token). Browse by department, search, install, update and uninstall in the Marketplace page. Packages are checked against their sha256, nothing half-installs, and plugin tool servers are opt-in by policy. Teams publish with `scripts/marketplace/build-index.mjs`; see [docs/marketplace.md](docs/marketplace.md).
+- **Light and dark mode:** one click with ☀/🌙 in the sidebar, or follow Windows (Settings → General → Theme).
 - **Comprehensive settings,** plus an **enterprise policy file** to preset and lock them.
 
 ## Token efficiency, designed in

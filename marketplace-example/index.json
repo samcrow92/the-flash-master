@@ -1,0 +1,43 @@
+{
+  "name": "Example department",
+  "description": "Sample plugins",
+  "plugins": [
+    {
+      "id": "body-sw-test-pack",
+      "name": "Body SW — HIL test pack",
+      "version": "1.0.0",
+      "description": "HIL test engineer agent and a /hil-campaign workflow for the body electronics test bench (CANoe + dSPACE).",
+      "team": "Body SW Validation",
+      "kinds": [
+        "agent",
+        "workflow"
+      ],
+      "tags": [
+        "hil",
+        "canoe",
+        "testing"
+      ],
+      "package": "plugins/body-sw-test-pack-1.0.0.json",
+      "sha256": "52acd722177f294794842328b8d3245217c09ee4ca04dec3b832b0cb75414bba",
+      "updated": "2026-11-13"
+    },
+    {
+      "id": "diag-team-rules",
+      "name": "Diagnostics team rules",
+      "version": "2.1.0",
+      "description": "Team conventions for UDS diagnostics work: DID naming, NRC handling and CDD review rules.",
+      "team": "Diagnostics",
+      "kinds": [
+        "instructions"
+      ],
+      "tags": [
+        "uds",
+        "cdd",
+        "conventions"
+      ],
+      "package": "plugins/diag-team-rules-2.1.0.json",
+      "sha256": "d93d21f375edceeb76722899ed30753cae51c9aa875aa18a096828f11e632f77",
+      "updated": "2026-11-13"
+    }
+  ]
+}
