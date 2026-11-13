@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, useStore } from "../store";
 import {
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
   KeyRound, LifeBuoy, ListChecks, Package, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
-  CornerDownRight, Leaf,
+  CornerDownRight, Leaf, Users, Lightbulb, FileText, FlaskConical, ScanSearch, ShieldCheck, Bug, Swords,
+  RoleIcon,
 } from "../components/icons";
 
 const DL = {
@@ -22,9 +23,18 @@ const PAGES = [
   { id: "install", label: "Install Copilot CLI", icon: Download },
   { id: "login", label: "Sign in to Copilot", icon: LogIn },
   { id: "use", label: "Using TheFlashMaster", icon: BookOpen },
+  { id: "agents", label: "Agents & when to use them", icon: Users },
+  { id: "superpowers", label: "Superpowers workflow", icon: Sparkles },
   { id: "trouble", label: "Troubleshooting", icon: LifeBuoy },
 ] as const;
 type PageId = (typeof PAGES)[number]["id"];
+
+/** Lets pages link to each other without threading a callback through every component. */
+const DocsNav = createContext<(p: PageId) => void>(() => {});
+const PageLink = ({ to, children }: { to: PageId; children: ReactNode }) => {
+  const go = useContext(DocsNav);
+  return <button className="link" onClick={() => go(to)}>{children}</button>;
+};
 
 type Check = { found: boolean; path: string | null; version: string | null; signedIn: boolean; detail: string } | null;
 
@@ -48,13 +58,17 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
           ))}
           <StatusCard check={check} checking={checking} onCheck={run} onGo={setPage} />
         </nav>
+        <DocsNav.Provider value={setPage}>
         <article className="docs-body" key={page}>
           {page === "start" && <Start check={check} go={setPage} />}
           {page === "install" && <Install check={check} onChanged={run} />}
           {page === "login" && <Login check={check} checking={checking} onCheck={run} />}
           {page === "use" && <Use />}
+          {page === "agents" && <Agents />}
+          {page === "superpowers" && <Superpowers />}
           {page === "trouble" && <Trouble />}
         </article>
+        </DocsNav.Provider>
       </div>
     </div>
   );
@@ -107,6 +121,7 @@ function Start({ check, go }: { check: Check; go: (p: PageId) => void }) {
       <button className="doc-card" onClick={() => go("login")}><LogIn size={22} /><b>2. Sign in</b><span>Connect Copilot CLI to your GitHub account once.</span>{check?.signedIn && <CircleCheck className="done" size={18} />}</button>
       <button className="doc-card" onClick={() => go("use")}><Rocket size={22} /><b>3. Start working</b><span>Add a project folder, open a chat and describe the task.</span></button>
     </div>
+    <p>Not sure which specialist to ask? See <PageLink to="agents">Agents &amp; when to use them</PageLink>. For feature work that must be right the first time, turn on the <PageLink to="superpowers">Superpowers workflow</PageLink>.</p>
     <Note>You need an active GitHub Copilot subscription. If you get Copilot through your company, the <b>Copilot CLI</b> policy must be enabled by your organization’s admins. <Ext href={DL.plans}>Copilot plans</Ext></Note>
   </>;
 }
@@ -199,7 +214,7 @@ function Use() {
       <Item icon={<CornerDownRight size={18} />} title="Steer or queue">While an agent works, sending a message either steers it right away or queues it for afterwards.</Item>
       <Item icon={<RotateCcw size={18} />} title="Reset context">The ↺ button next to the chat box gives the agents a fresh start: earlier messages stay visible but are no longer sent. Saves tokens when the topic changes.</Item>
       <Item icon={<Paperclip size={18} />} title="Attachments">Attach, paste or drop images and files; agents can read them.</Item>
-      <Item icon={<Sparkles size={18} />} title="Superpowers">On demand, a disciplined workflow: brainstorm → plan → test-driven implementation → review → verify.</Item>
+      <Item icon={<Sparkles size={18} />} title="Superpowers">On demand, a disciplined workflow: brainstorm → plan → test-driven implementation → review → verify. <PageLink to="superpowers">How it works</PageLink></Item>
       <Item icon={<Package size={18} />} title="Artifacts & diffs">The <b>Artifacts</b> button in a chat lists every file the agents changed (with a side-by-side or unified diff), the project’s uncommitted git changes, saved reports and code blocks. Download single files, patches or everything as one .patch.</Item>
       <Item icon={<Compass size={18} />} title="Progress">The Progress panel shows each agent’s plan, delegations and approvals as a flow chart.</Item>
       <Item icon={<Bot size={18} />} title="Agents overview">See every running agent, pause, resume or stop it.</Item>
@@ -228,5 +243,363 @@ function Trouble() {
     <Q q="Commands fail on Windows">Copilot CLI needs PowerShell 7. Install it from the official PowerShell releases on GitHub (see Install page).</Q>
     <Q q="The usage bar doesn’t show">The bar uses Copilot CLI’s own <code>/usage</code>. Older versions don’t offer it to apps — update Copilot CLI. Details in Settings → Usage.</Q>
     <Q q="An agent got confused or the chat is very long">Click <b>Reset context</b> (↺ next to the chat box) to start the agents fresh, keeping the messages visible.</Q>
+  </>;
+}
+
+/* ───────────────────────── Agents ───────────────────────── */
+
+type AgentDoc = { name: string; title: string; summary: string; can: string[]; when: string[]; instead?: ReactNode; tools: string[] };
+
+/** Built-in agents as documented for people. The agent's own instructions live in agents/<name>.md. */
+const AGENT_DOCS: AgentDoc[] = [
+  {
+    name: "flashmaster", title: "TheFlashMaster", tools: ["flashmaster-core", "jazz"],
+    summary: "The coordinator of the master chat. It plans, delegates and integrates. It never does the work itself.",
+    can: [
+      "Splits a request into sub-tasks and delegates each one to the best specialist, in parallel when they are independent.",
+      "Creates custom agents on the fly when no specialist fits (for example a CAN-log analyst or a MISRA checker), and keeps them for later.",
+      "Tracks multi-step work on the task board and links Jazz work items.",
+      "Sends non-trivial plans and finished work to the Challenger before declaring them done.",
+      "Runs specialists on another harness (Copilot, OpenCode, Pi, GitLab Duo) when you ask for it.",
+    ],
+    when: [
+      "You have a goal rather than a single step: “add the new DID and test it”, “analyse this defect and prepare a deck”.",
+      "The work spans several skills, such as analysis, code, tests and a review.",
+      "You don’t know which specialist to pick. Start here and let it choose.",
+    ],
+    instead: <>For one focused question to one expert, <code>@mention</code> the specialist directly. It is faster and uses fewer requests.</>,
+  },
+  {
+    name: "challenger", title: "Challenger", tools: ["flashmaster-core", "jazz"],
+    summary: "A constructive devil’s advocate that tries to break a plan, design or implementation before reality does.",
+    can: [
+      "Restates the claim, lists the load-bearing assumptions and how to check each one cheaply.",
+      "Runs a pre-mortem: the three most likely reasons this fails.",
+      "Finds gaps: edge cases, error paths, timing, safety (ASIL), security, testability, rollback.",
+      "Proposes at least one materially different alternative and gives a clear verdict: Proceed, Proceed with changes, or Rethink.",
+    ],
+    when: [
+      "Before you commit to a plan, a design or an estimate.",
+      "Before significant work is declared done. TheFlashMaster does this automatically.",
+      "When a solution feels too easy, or the stakes (safety, release, customer) are high.",
+    ],
+    instead: <>It doesn’t rewrite the work. For a line-by-line code review, use the <b>Code Reviewer</b>.</>,
+  },
+  {
+    name: "analyst", title: "Requirements Analyst", tools: ["flashmaster-core", "jazz"],
+    summary: "Turns requests and work items into clear requirements, acceptance criteria and impact analysis.",
+    can: [
+      "Clarifies goal, scope, assumptions and open questions.",
+      "Writes testable acceptance criteria (Given/When/Then).",
+      "Impact analysis: affected modules, interfaces, signals, configurations and tests, with paths.",
+      "Reads Jazz work items, DOORS Next requirements (rm_search / rm_get) and Word/Excel/PDF specs.",
+    ],
+    when: [
+      "A request or work item is vague and needs to be made testable before anyone builds.",
+      "You need to know what a change touches before estimating or planning it.",
+      "You need traceability from requirement ids to code and tests.",
+    ],
+  },
+  {
+    name: "architect", title: "Software Architect", tools: ["flashmaster-core", "jazz"],
+    summary: "Designs and evaluates architecture, module boundaries, interfaces and trade-offs.",
+    can: [
+      "Maps the current structure with targeted searches and describes it briefly.",
+      "Proposes 2–3 options with trade-offs and a recommendation, including risks and migration steps.",
+      "Respects AUTOSAR layering (ASW / RTE / BSW), ASIL partitioning, timing and memory constraints.",
+      "Saves long design documents as artifacts.",
+    ],
+    when: [
+      "A new feature or refactoring changes module boundaries or interfaces.",
+      "You need to choose between approaches and want the trade-offs written down.",
+      "Before a large implementation, to agree on the shape of the solution.",
+    ],
+    instead: <>For small, local changes, go straight to the <b>Software Expert</b>.</>,
+  },
+  {
+    name: "software-expert", title: "Software Expert", tools: ["flashmaster-core"],
+    summary: "Implements and refactors code, with deep C/C++, Python, TypeScript and embedded expertise.",
+    can: [
+      "Makes minimal, focused changes that follow the existing style.",
+      "Builds and runs the relevant tests after a change and reports the exact commands and results.",
+      "Applies embedded rules: no dynamic allocation at runtime, careful integer promotion and volatile use, short ISRs.",
+    ],
+    when: [
+      "The task is clear and you need code written, fixed or refactored.",
+      "Executing the tasks of an approved plan.",
+    ],
+    instead: <>If the cause of a bug is still unknown, start with the <b>winIDEA Debug Engineer</b> (on target) or the Superpowers <code>/debug</code> skill.</>,
+  },
+  {
+    name: "reviewer", title: "Code Reviewer", tools: ["flashmaster-core", "jazz"],
+    summary: "Reviews changes for correctness, safety, maintainability and project conventions.",
+    can: [
+      "Reviews only the given scope (a diff, files or a feature), starting from git diff.",
+      "Ranks findings as blocker, major, minor or nit, each with file:line and a concrete fix.",
+      "Checks error handling, concurrency, resource leaks, security, tests, and MISRA-relevant issues in embedded C.",
+    ],
+    when: [
+      "Before you commit or open a merge request.",
+      "After each task of a Superpowers plan, to catch problems while they are still small.",
+    ],
+    instead: <>To question whether the approach itself is right, ask the <b>Challenger</b>.</>,
+  },
+  {
+    name: "tester", title: "Test Engineer", tools: ["flashmaster-core", "vector-autosar", "jazz"],
+    summary: "Designs and writes tests, runs suites, analyses failures and coverage.",
+    can: [
+      "Derives test cases from requirements and code paths: equivalence classes, boundaries, error paths.",
+      "Writes tests in the project’s framework: pytest, GoogleTest, Unity/CMock, vitest, CANoe test modules / CAPL.",
+      "Runs suites and reports pass/fail counts, with a root-cause hypothesis for each failure.",
+    ],
+    when: [
+      "New code needs tests, or coverage of a requirement must be shown.",
+      "A suite fails and you need the failures sorted and explained.",
+    ],
+    instead: <>For HiL/SiL test cases in EXAM, use the <b>EXAM Test Agent</b>.</>,
+  },
+  {
+    name: "autosar-vector", title: "AUTOSAR & Vector Expert", tools: ["flashmaster-core", "vector-autosar", "jazz"],
+    summary: "Expert in AUTOSAR and the Vector toolchain: DBC, ARXML, CDD, DaVinci, CANoe and CAPL.",
+    can: [
+      "Answers targeted questions about DBC messages and signals, ARXML elements and references, and CDD diagnostics (DIDs, routines, DTCs) without dumping whole files.",
+      "Indexes and lints CAPL, runs CANoe tests over COM automation, and validates or generates with the DaVinci Configurator command line.",
+      "Knows SWC/port design, RTE, BSW configuration (Com, PduR, CanIf, CanTp, Dcm, Dem, NvM, Os), E2E and UDS.",
+      "Flags inconsistencies between DBC, ARXML and CDD.",
+    ],
+    when: [
+      "Questions about signals, PDUs, ECU extracts or diagnostic services.",
+      "Changing a communication or BSW configuration.",
+      "Writing or checking CAPL and CANoe test modules.",
+    ],
+  },
+  {
+    name: "winidea-debugger", title: "winIDEA Debug Engineer", tools: ["flashmaster-core", "winidea"],
+    summary: "Debugs embedded software on real hardware through iSYSTEM/TASKING winIDEA.",
+    can: [
+      "Connects, downloads, resets, runs, halts and steps the target.",
+      "Sets breakpoints, reads and writes variables and memory, reads the call stack, evaluates expressions.",
+      "Follows systematic debugging: reproduce, 2–3 hypotheses, instrument to tell them apart, conclude with evidence.",
+    ],
+    when: [
+      "A defect only shows on target, or depends on timing, registers or memory.",
+      "You need evidence (values, call stacks) rather than a guess from reading code.",
+    ],
+    instead: <>It states what it will write before touching memory or flash. Without winIDEA and its SDK installed, use the <b>Software Expert</b> with <code>/debug</code>.</>,
+  },
+  {
+    name: "exam-test-agent", title: "EXAM Test Agent", tools: ["flashmaster-core", "exam", "jazz"],
+    summary: "Expert in EXAM (MicroNova) HiL/SiL test automation: designs and creates test cases, runs suites, analyses results.",
+    can: [
+      "Checks that EXAM is up, installs the RESTapi plugin if needed, and opens models.",
+      "Designs test cases from DOORS Next requirements or Jazz items, with boundaries, state transitions and fault cases.",
+      "Creates them through the Test Case Generator or Groovy, filters and runs suites, and reads failures from JUnit results.",
+      "Separates test defects (expectation, timing, mapping) from real findings in the system under test.",
+    ],
+    when: [
+      "You test on a HiL, SiL or test bench driven by EXAM.",
+      "You need EXAM test cases created from requirements, or a campaign run and analysed.",
+    ],
+  },
+  {
+    name: "jazz-analyst", title: "Jazz Work Item Analyst", tools: ["flashmaster-core", "jazz"],
+    summary: "Fetches IBM Jazz/EWM work items, analyses them against the code, and updates them.",
+    can: [
+      "Queries and reads work items and summarises each in two or three lines.",
+      "Finds the likely affected files and estimates effort and risk.",
+      "Creates board tasks linked to work items, and comments or updates items when asked, quoting what it wrote.",
+    ],
+    when: [
+      "Triage: “what is in my queue and how big is each item?”",
+      "Linking work items to the code they affect.",
+    ],
+    instead: <>It changes work items only when your request says so.</>,
+  },
+  {
+    name: "rca-analyst", title: "NOW Analysis & RCA (Ishikawa)", tools: ["flashmaster-core", "office", "jazz"],
+    summary: "Structured problem analysis in NOW format with an Ishikawa root-cause analysis, following INCOSE practice.",
+    can: [
+      "Writes the NOW analysis: current situation, measurable objective, way forward with owners and verification methods.",
+      "Builds an Ishikawa diagram (drawn in the chat) with systems-engineering categories and 5 Whys.",
+      "Marks each cause confirmed, plausible or ruled out, with evidence, and asks why the defect escaped verification.",
+      "Exports to PowerPoint or SVG with the office tools.",
+    ],
+    when: [
+      "A field issue, escalation or recurring defect needs a root cause and corrective actions.",
+      "Management or a customer expects a structured 8D-style analysis.",
+    ],
+  },
+  {
+    name: "presentation-expert", title: "Presentation Expert", tools: ["flashmaster-core", "office"],
+    summary: "Creates and edits PowerPoint decks: storyline, clean slides, speaker notes and corporate templates.",
+    can: [
+      "Builds a storyline for the audience and decision, with takeaway titles and at most five bullets a slide.",
+      "Creates new decks in one pass, using a corporate template when you name one.",
+      "Edits existing decks slide by slide instead of rebuilding them, and adds Ishikawa slides.",
+    ],
+    when: [
+      "Results need to be presented: status, analysis, design review, steering committee.",
+      "An existing deck needs updating with new numbers or findings.",
+    ],
+  },
+];
+
+function Agents() {
+  const roles = useStore((s) => s.roles);
+  const custom = roles.filter((r) => r.source === "user" && !AGENT_DOCS.some((a) => a.name === r.name));
+  const overridden = new Set(roles.filter((r) => r.source === "user").map((r) => r.name));
+  return <>
+    <h3>Agents &amp; when to use them</h3>
+    <p>Every agent is a role with its own instructions and tools. In the master chat <b>TheFlashMaster</b> picks agents for you; you can also talk to one directly by typing <code>@name</code> or clicking it in the sidebar.</p>
+
+    <h4>Quick picker</h4>
+    <table className="docs-table">
+      <thead><tr><th>You want to…</th><th>Ask</th></tr></thead>
+      <tbody>
+        <tr><td>Get a multi-step goal done, or you aren’t sure who to ask</td><td><code>TheFlashMaster</code> (master chat)</td></tr>
+        <tr><td>Make a vague request or work item testable; see what a change affects</td><td><code>@analyst</code></td></tr>
+        <tr><td>Decide on a design or module structure</td><td><code>@architect</code></td></tr>
+        <tr><td>Stress-test a plan, design or result before committing to it</td><td><code>@challenger</code></td></tr>
+        <tr><td>Write, fix or refactor code</td><td><code>@software-expert</code></td></tr>
+        <tr><td>Review a diff before committing</td><td><code>@reviewer</code></td></tr>
+        <tr><td>Write or run unit / integration / CAPL tests</td><td><code>@tester</code></td></tr>
+        <tr><td>Create or run HiL/SiL tests in EXAM</td><td><code>@exam-test-agent</code></td></tr>
+        <tr><td>Work with DBC, ARXML, CDD, DaVinci, CANoe or CAPL</td><td><code>@autosar-vector</code></td></tr>
+        <tr><td>Debug on the target hardware</td><td><code>@winidea-debugger</code></td></tr>
+        <tr><td>Triage or update Jazz work items</td><td><code>@jazz-analyst</code></td></tr>
+        <tr><td>Find the root cause of a problem (NOW + Ishikawa)</td><td><code>@rca-analyst</code></td></tr>
+        <tr><td>Build or update a PowerPoint deck</td><td><code>@presentation-expert</code></td></tr>
+      </tbody>
+    </table>
+
+    <h4>Built-in agents</h4>
+    <div className="agent-docs">
+      {AGENT_DOCS.map((a) => (
+        <section key={a.name} className="agent-doc">
+          <header>
+            <RoleIcon role={a.name} size={30} />
+            <div><b>{a.title}</b> <code>@{a.name}</code>{overridden.has(a.name) && <span className="pill">customised</span>}<div className="muted small">{a.summary}</div></div>
+          </header>
+          <div className="agent-doc-cols">
+            <div><h5><Wrench size={14} /> What it can do</h5><ul>{a.can.map((c) => <li key={c}>{c}</li>)}</ul></div>
+            <div><h5><Lightbulb size={14} /> Use it when</h5><ul>{a.when.map((c) => <li key={c}>{c}</li>)}</ul></div>
+          </div>
+          {a.instead && <p className="agent-doc-instead small"><CornerDownRight size={13} /> <span>{a.instead}</span></p>}
+          <div className="agent-doc-tools">{a.tools.map((t) => <span key={t} className="pill">{t}</span>)}</div>
+        </section>
+      ))}
+    </div>
+
+    {custom.length > 0 && <>
+      <h4>Your custom agents</h4>
+      <p className="muted small">Agents you imported, installed from the Marketplace, or that TheFlashMaster created for you.</p>
+      <div className="use-grid">
+        {custom.map((r) => (
+          <UseItem key={r.name} icon={<RoleIcon role={r.name} emoji={r.icon} size={22} />} title={`${r.title} (@${r.name})`}>{r.description}</UseItem>
+        ))}
+      </div>
+    </>}
+
+    <h4>Tips</h4>
+    <ul className="docs-list">
+      <li><b>One expert or a team?</b> A direct <code>@mention</code> runs one agent. The master chat may run several, which costs more requests but covers more ground.</li>
+      <li><b>Tools follow the agent.</b> Each agent only gets the tool servers listed under its card (shown above as tags). Add or change tools in Settings → Agents.</li>
+      <li><b>Short results.</b> Specialists return a compact summary to whoever delegated to them; long output goes into Artifacts.</li>
+      <li><b>Make your own.</b> Import an agent file (<code>agents/_template.md</code>) from Settings → Agents, the ＋ next to Specialists, or by dropping the .md onto the window. Reusing a built-in name overrides it.</li>
+      <li><b>Workflow skills per agent.</b> An agent file can list <code>skills:</code> (brainstorm, plan, execute, tdd, debug, review, verify) that load on its first turn. See <PageLink to="superpowers">Superpowers workflow</PageLink>.</li>
+    </ul>
+  </>;
+}
+
+/* ───────────────────────── Superpowers ───────────────────────── */
+
+const SP_PHASES: { n: number; cmd: string; title: string; icon: ReactNode; who: string; body: ReactNode }[] = [
+  {
+    n: 1, cmd: "brainstorm", title: "Brainstorm: agree on what to build", icon: <Lightbulb size={16} />, who: "TheFlashMaster with you; Analyst or Architect for research",
+    body: <>The agent reads the relevant code first, then asks one question at a time, only when the answer changes what gets built. It offers 2–3 genuinely different approaches with trade-offs, recommends one, and writes a short design: intent, goals and non-goals, the chosen approach, open points. <b>No code, scaffolding or installs until you approve the design.</b></>,
+  },
+  {
+    n: 2, cmd: "plan", title: "Plan: small, verifiable tasks", icon: <FileText size={16} />, who: "TheFlashMaster or Architect; reviewed by the Challenger",
+    body: <>The approved design becomes a plan any engineer could follow: tasks of 2–10 minutes in dependency order, each with the files to touch, the test to write first and the exact command that proves it works. Independent tasks are marked so they can run in parallel. Nothing beyond the design (YAGNI). The <b>Challenger</b> reviews the plan and its must-fix items are resolved before execution. The plan is saved as an artifact or in <code>docs/plans/</code>.</>,
+  },
+  {
+    n: 3, cmd: "execute", title: "Execute: task by task, delegated", icon: <Zap size={16} />, who: "TheFlashMaster delegates to the Software Expert, Tester and others",
+    body: <>Tasks run in order; independent ones are delegated in parallel with a precise brief (task text, files, acceptance). After each task its verification command runs and non-trivial changes go to the Reviewer. The task board is updated as work moves. If a task’s assumptions turn out wrong, the agent stops and reports instead of improvising scope.</>,
+  },
+  {
+    n: 4, cmd: "tdd", title: "Test-driven development inside each task", icon: <FlaskConical size={16} />, who: "Software Expert and Tester",
+    body: <><b>Red:</b> write one small test for the next behaviour and watch it fail for the right reason. <b>Green:</b> write the minimum code to pass. <b>Refactor:</b> clean up with all tests green. No production code without a failing test that demands it. For embedded targets the logic is tested on the host and the hardware layers are kept thin.</>,
+  },
+  {
+    n: 5, cmd: "review", title: "Review against the plan", icon: <ScanSearch size={16} />, who: "Code Reviewer (and Challenger for the overall result)",
+    body: <>Each completed task is checked against the plan: does it do what was asked, no more and no less; are there correctness, error-handling, security or concurrency issues; do the tests test behaviour? Findings come as blockers, majors and minors with file:line and a fix. Blockers are fixed before moving on. When an agent receives a review, it verifies each point and pushes back with evidence when a suggestion is wrong.</>,
+  },
+  {
+    n: 6, cmd: "verify", title: "Verify: evidence before claims", icon: <ShieldCheck size={16} />, who: "Whoever claims the work is done",
+    body: <>Before saying anything is done, fixed or passing, the agent runs the real build, test and lint commands, reads the output and reports the exact commands and results (counts, exit codes). Anything that could not be verified is said plainly.</>,
+  },
+];
+
+function Superpowers() {
+  const skills = useStore((s) => s.skills);
+  const extra = skills.filter((k) => k.command !== "superpowers-index" && !SP_PHASES.some((p) => p.cmd === k.command) && k.command !== "debug");
+  return <>
+    <h3>Superpowers workflow</h3>
+    <p>Superpowers is a disciplined way of working for feature work and bug fixes: <b>brainstorm → plan → execute with TDD → review → verify</b>. It trades a little speed up front for work that is right the first time: agreed intent, small tested steps, reviewed changes and proof that it works. It is adapted from the open-source <Ext href="https://github.com/obra/superpowers">obra/superpowers</Ext> workflow (MIT).</p>
+
+    <div className="doc-cards">
+      <div className="doc-card static"><Sparkles size={22} /><b>Turn it on for a chat</b><span>Click <b>Superpowers</b> under the chat box, or type <code>/superpowers</code>. Type it again to turn it off. It is off by default.</span></div>
+      <div className="doc-card static"><Zap size={22} /><b>Or load one phase</b><span>Type <code>/brainstorm</code>, <code>/plan</code>, <code>/execute</code>, <code>/tdd</code>, <code>/debug</code>, <code>/review</code> or <code>/verify</code> before a message to apply just that skill to it.</span></div>
+      <div className="doc-card static"><Bot size={22} /><b>Or give it to an agent</b><span>List skills in an agent file (<code>skills: [tdd, verify]</code>) and they load on that agent’s first turn.</span></div>
+    </div>
+
+    <Note>It costs little: with Superpowers on, only a short index of the workflow is sent to the agents when a session starts. The full guidance for a phase is loaded only when that phase’s command is used.</Note>
+
+    <h4>The phases</h4>
+    <p>With Superpowers on, the agents tell you which phase they are in. Each phase has a slash command that loads its full guidance.</p>
+    {SP_PHASES.map((p) => (
+      <Step key={p.cmd} n={p.n} title={p.title}>
+        <p className="sp-meta"><span className="pill">{p.icon} /{p.cmd}</span> <span className="muted small">{p.who}</span></p>
+        <p>{p.body}</p>
+      </Step>
+    ))}
+
+    <h4 className="opt"><Bug size={16} /> Bugs: systematic debugging <span className="pill">/debug</span></h4>
+    <p>For a defect, the workflow replaces guessing with evidence: reproduce reliably and capture the exact symptom; read the code path and list 2–3 ranked hypotheses; design the cheapest observation (log, assert, breakpoint, test) that tells them apart; confirm the root cause; then write a failing test for the bug, fix it, run the full relevant suite and explain why it happened. On hardware, the <b>winIDEA Debug Engineer</b> follows the same method on target.</p>
+
+    <h4>Who does what</h4>
+    <table className="docs-table">
+      <thead><tr><th>Phase</th><th>Typical agents</th></tr></thead>
+      <tbody>
+        <tr><td>Brainstorm</td><td>TheFlashMaster (talks with you), Analyst for requirements and impact, Architect for options</td></tr>
+        <tr><td>Plan</td><td>TheFlashMaster or Architect writes it; <b>Challenger</b> must approve it</td></tr>
+        <tr><td>Execute + TDD</td><td>Software Expert, Tester, AUTOSAR &amp; Vector Expert, EXAM Test Agent, as the task needs</td></tr>
+        <tr><td>Review</td><td>Code Reviewer per task; Challenger for the finished result</td></tr>
+        <tr><td>Verify</td><td>The agent that did the work, showing real command output</td></tr>
+      </tbody>
+    </table>
+
+    <h4>When to use it</h4>
+    <div className="use-grid">
+      <UseItem icon={<CircleCheck size={18} />} title="Turn it on for">New features, changes to interfaces or configuration, refactorings, anything safety-relevant or hard to undo, and bugs whose cause is unknown.</UseItem>
+      <UseItem icon={<CircleAlert size={18} />} title="Leave it off for">Questions, quick lookups, one-line fixes, reviews of existing work, and documents or decks. The extra phases add requests without adding value there.</UseItem>
+      <UseItem icon={<Swords size={18} />} title="Use single phases">Just want a second opinion? <code>/review</code>. About to say “done”? <code>/verify</code>. Unsure what to build? <code>/brainstorm</code>. They work with Superpowers on or off.</UseItem>
+      <UseItem icon={<Plane size={18} />} title="With Autopilot">Autopilot approves tool calls automatically, but Superpowers still stops for your approval of the design. That decision is yours.</UseItem>
+    </div>
+
+    <h4>Example</h4>
+    <ol className="docs-list">
+      <li>You type <code>/superpowers</code>, then “Add a DID that reports the cold-start counter.”</li>
+      <li>TheFlashMaster asks the Analyst and AUTOSAR &amp; Vector Expert for the impact (CDD, Dcm config, NvM), offers two approaches and asks you to pick one. You approve the short design.</li>
+      <li>It writes a plan of six tasks; the Challenger flags a missing NvM write-cycle limit, and the plan is updated.</li>
+      <li>The Software Expert implements each task test-first; the Reviewer checks each one.</li>
+      <li>Before reporting back, the build and tests are run and their output is shown in the reply.</li>
+    </ol>
+
+    {extra.length > 0 && <>
+      <h4>Other workflow skills</h4>
+      <div className="use-grid">{extra.map((k) => <UseItem key={k.command} icon={<Sparkles size={18} />} title={`/${k.command}`}>{k.description}</UseItem>)}</div>
+    </>}
+    <p className="muted small">The skill texts live in <code>skills/superpowers/</code>. Type <code>/help</code> in any chat to list every command.</p>
   </>;
 }
