@@ -130,6 +130,9 @@ const asKind = (k: unknown): ToolKind => (KINDS.includes(k as ToolKind) ? (k as 
 export class AcpSession implements HarnessSession {
   sessionId: string | null = null;
   models: ModelInfo[] = [];
+  /** Slash commands the agent advertised (available_commands_update), without the leading "/". */
+  commands: string[] = [];
+  private commandWaiters: (() => void)[] = [];
   private modelOptionId: string | null = null;
   private caps = { image: false };
   private child: ChildProcess;
@@ -205,6 +208,15 @@ export class AcpSession implements HarnessSession {
     }
   }
 
+  /** Resolves once the agent has advertised its slash commands, or after `ms`. */
+  waitForCommands(ms: number): Promise<string[]> {
+    if (this.commands.length) return Promise.resolve(this.commands);
+    return new Promise((resolve) => {
+      const t = setTimeout(() => resolve(this.commands), ms);
+      this.commandWaiters.push(() => { clearTimeout(t); resolve(this.commands); });
+    });
+  }
+
   async cancel(): Promise<void> {
     if (this.sessionId && this.alive) this.peer.notify("session/cancel", { sessionId: this.sessionId });
   }
@@ -218,6 +230,10 @@ export class AcpSession implements HarnessSession {
     if (method !== "session/update") return;
     const u = p.update ?? {};
     switch (u.sessionUpdate) {
+      case "available_commands_update":
+        this.commands = (u.availableCommands ?? []).map((c: Json) => String(c?.name ?? "").replace(/^\//, "")).filter(Boolean);
+        for (const w of this.commandWaiters.splice(0)) w();
+        break;
       case "agent_message_chunk":
         if (u.content?.type === "text") this.o.onEvent({ type: "text", text: u.content.text });
         break;
@@ -301,6 +317,31 @@ export class AcpAdapter implements HarnessAdapter {
       return r.out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[\w.-]+\/[\w.:@-]+$/.test(l)).slice(0, 256).map((id) => ({ id, name: id }));
     }
     return [];
+  }
+
+  /**
+   * Run one slash command (e.g. "usage") in a throw-away session and return the text it printed.
+   * With `onlyIfAdvertised` the command is sent only when the agent lists it, so it is handled locally by the CLI
+   * and never reaches a model (no premium request is spent).
+   */
+  async runCommand(p: ProbeOptions, command: string, onlyIfAdvertised: boolean): Promise<{ advertised: boolean; commands: string[]; text: string }> {
+    let text = "";
+    const s = new AcpSession(p.executable ?? this.candidates[0]!, [...this.baseArgs, ...splitArgs(p.extraArgs)], {
+      cwd: p.cwd, model: null, extraArgs: "", executable: p.executable, mcpServers: [], env: p.env, resumeSessionId: null,
+      policy: { approval: "ask", readOnly: true, blocked: [], projectRoot: null },
+      onEvent: (e) => { if (e.type === "text") text += e.text; }, askPermission: async () => false,
+    });
+    try {
+      await withTimeout(s.init(), 45000, `${this.label} did not start within 45s`);
+      const commands = await s.waitForCommands(4000);
+      const advertised = commands.includes(command);
+      if (!advertised && onlyIfAdvertised) return { advertised, commands, text: "" };
+      const r = await withTimeout(s.prompt(`/${command}`), 60000, `/${command} did not answer within 60s`);
+      if (r.stopReason === "error") throw new Error(r.error ?? `/${command} failed`);
+      return { advertised, commands, text };
+    } finally {
+      s.close();
+    }
   }
 
   async start(o: SessionOptions): Promise<HarnessSession> {

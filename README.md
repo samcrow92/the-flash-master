@@ -49,7 +49,8 @@ The app calls no model API itself and stores no model credentials. There's no lo
 - **Agents overview:** every running agent, with **pause / resume / stop** and Stop all.
 - **Dashboard:** token usage across agents, projects, roles, harnesses and days, plus budgets.
 - **Task board** in SQLite: kanban with priorities, an assignee agent and Jazz links. **Run with agent** starts the assigned specialist with the task as its brief.
-- **IBM Jazz (EWM/RTC):** query work items, analyse them with an agent, create tasks from them, and let agents update or comment through MCP tools.
+- **IBM Jazz (EWM/RTC):** search work items across several project areas (pick the area right in the Jazz page), view details and discussion, comment, edit and run workflow actions, analyse an item with an agent, create tasks from items, and let agents query, update or comment through MCP tools. Form, Basic or Windows (integrated) sign-in, with clear HTTP 401 guidance.
+- **Copilot usage meter:** premium requests from Copilot's own `/usage`, shown as a bar under the chat box, with a detailed view in Settings → Usage.
 - **Superpowers workflow on demand:** off by default.
   - Toggle it per chat (`/superpowers`), or load one phase: `/brainstorm`, `/plan`, `/execute`, `/tdd`, `/debug`, `/review`, `/verify`.
 - **Custom tools as MCP servers.** They're auto-installed at startup when missing and attached **per session**, so your global harness configs stay untouched.
@@ -117,7 +118,7 @@ Electron main (TypeScript)
 ├─ Orchestrator    ─ turns, streaming, threads, @mentions, pause/resume/stop, delegation, budgets, approvals, compaction
 ├─ Bridge (127.0.0.1 + token) ◄── flashmaster-core / jazz MCP servers (stdio, run with Electron-as-Node)
 ├─ McpBootstrap    ─ bundled Node servers + Python venv for vector-autosar / winidea
-└─ JazzClient      ─ reportable REST + OSLC, form/basic auth, Electron net (system proxy + Windows cert store)
+└─ JazzClient      ─ reportable REST + OSLC, form/basic/Windows auth with 401 recovery, Electron net (system proxy + Windows cert store)
 React renderer (Vite, Zustand) ── typed IPC (contextIsolation, sandbox) ── event stream for live updates
 ```
 

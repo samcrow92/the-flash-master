@@ -16,7 +16,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   const reply = (result) => send({ id: msg.id, result });
   switch (msg.method) {
     case "initialize": return reply({ protocolVersion: 1, agentCapabilities: { loadSession: false, promptCapabilities: { image: true, embeddedContext: false } } });
-    case "session/new": return reply({ sessionId: "sess-" + (msg.params.mcpServers?.length ?? 0),
+    case "session/new":
+      if (process.env.FAKE_COMMANDS !== "none") setTimeout(() => send({ method: "session/update", params: { sessionId: "sess-0",
+        update: { sessionUpdate: "available_commands_update", availableCommands: [{ name: "usage", description: "Show usage" }, { name: "model", description: "" }] } } }), 20);
+      return reply({ sessionId: "sess-" + (msg.params.mcpServers?.length ?? 0),
       models: { currentModelId: "gpt-5", availableModels: [{ modelId: "gpt-5", name: "GPT-5" }, { modelId: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" }] },
       configOptions: [{ id: "reasoning_effort", name: "Reasoning", type: "select", category: "thought_level", currentValue: "medium",
         options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }] }] });
@@ -28,6 +31,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       const sid = msg.params.sessionId;
       const text = msg.params.prompt[0].text;
       const upd = (update) => send({ method: "session/update", params: { sessionId: sid, update } });
+      if (text === "/usage") {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Usage\n  Premium requests: 123 / 300 (41%)\n  Resets: Dec 1, 2026\n" } });
+        return reply({ stopReason: "end_turn" });
+      }
       upd({ sessionUpdate: "tool_call", toolCallId: "t1", title: "Read file", kind: "read", status: "pending" });
       if (text.includes("READFILE:")) {
         const path = text.split("READFILE:")[1].trim().split(/\s/)[0];

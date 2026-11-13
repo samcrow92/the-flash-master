@@ -373,3 +373,15 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 .mode-gear { padding: 0 10px; }
 .mode-pill { font-weight: 700; letter-spacing: .5px; }
 .mode-pill.mode-local { color: #8b5cf6; } .mode-pill.mode-eco { color: var(--green); } .mode-pill.mode-comfort { color: var(--blue); } .mode-pill.mode-sport { color: var(--red); }
+
+/* Copilot usage meter */
+.usage-meter { display: flex; align-items: center; gap: 6px; padding: 0 14px 6px; }
+.usage-bar-btn { flex: 1; display: flex; align-items: center; gap: 8px; background: none; border: none; padding: 2px 0; min-width: 0; }
+.usage-bar { flex: 0 0 140px; height: 5px; border-radius: 3px; background: var(--bg3); overflow: hidden; }
+.usage-bar.big { height: 9px; border-radius: 5px; flex: none; width: 100%; }
+.usage-fill { height: 100%; background: var(--green); transition: width .4s; }
+.usage-fill.warn { background: var(--amber); } .usage-fill.crit { background: var(--red); }
+.usage-text { font-size: 11.5px; color: var(--muted, #8a8f98); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.tiny { padding: 0 6px; font-size: 12px; }
+.usage-detail { display: grid; gap: 10px; }
+table.kv { border-collapse: collapse; font-size: 12.5px; } table.kv td { padding: 3px 12px 3px 0; vertical-align: top; }

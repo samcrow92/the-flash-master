@@ -198,6 +198,21 @@ export interface JazzWorkItem {
   tags?: string;
 }
 
+export interface CopilotUsage {
+  ok: boolean;
+  fetchedAt: number;
+  error: string | null;
+  /** Premium requests: used of limit (limit null when unknown or unlimited). */
+  premium: { used: number | null; limit: number | null; percent: number | null; unlimited: boolean };
+  resetAt: string | null;
+  /** Every "label: value" line /usage printed, for the detailed view. */
+  entries: { label: string; value: string }[];
+  raw: string;
+  loading?: boolean;
+  /** false when Copilot did not list /usage over ACP and the meter refused to send it (would cost a request). */
+  advertised?: boolean;
+}
+
 export interface JazzComment {
   author: string;
   date: string;
@@ -227,6 +242,7 @@ export type AppEvent =
   | { type: "roles.changed"; roles: RoleDef[] }
   | { type: "flow.updated"; agentId: string }
   | { type: "models.updated"; models: HarnessModels }
+  | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
 

@@ -17,7 +17,7 @@ Create `%PROGRAMDATA%\TheFlashMaster\policy.json`:
     "network": { "proxy": "http://proxy.corp.example:8080", "caBundlePath": "C:\\Corp\\ca-bundle.pem" },
     "mcp": { "pipIndexUrl": "https://artifactory.corp.example/api/pypi/pypi/simple" },
     "permissions": { "approval": "auto-read", "blockedCommands": "git push --force\nformat c:" },
-    "jazz": { "enabled": true, "serverUrl": "https://jazz.corp.example/ccm", "authType": "form" },
+    "jazz": { "enabled": true, "serverUrl": "https://jazz.corp.example/ccm", "authType": "form", "projectAreas": ["Body Electronics", "Powertrain"] },
     "tokens": { "dailyBudget": 2000000, "onBudgetExceeded": "pause" }
   },
   "lock": ["network", "mcp.pipIndexUrl", "permissions.blockedCommands", "jazz.serverUrl"]
@@ -68,3 +68,17 @@ SQLite database: `%APPDATA%\TheFlashMaster\flashmaster.db`. Logs: `…\logs\main
 
 - **Retention:** *Settings → Data → Retention* removes old usage records, artifacts and finished agent runs at startup.
 - **Export:** *Export JSON* dumps everything.
+
+## IBM Jazz sign-in
+
+| `jazz.authType` | When to use |
+|---|---|
+| `form` | Default EWM/RTC login page (j_security_check). Expired sessions are renewed automatically. |
+| `basic` | Servers that answer `WWW-Authenticate: Basic`, or an application password. |
+| `windows` | Kerberos/NTLM single sign-on with the user's domain login (no password stored). The server host is allow-listed for Chromium's integrated auth. Restart the app after changing the URL. |
+
+If a request returns HTTP 401, TheFlashMaster reads the server's `WWW-Authenticate` header and tells the user which mode to pick. Servers behind the Jazz Authorization Server (OIDC) cannot use form login. Use `windows`, or `basic` with an application password.
+
+## Copilot usage meter
+
+`usage.copilotMeter`, `usage.refreshMinutes` and `usage.onlyIfAdvertised` can be preset or locked. With `onlyIfAdvertised: true` (the default), `/usage` is sent only when Copilot CLI lists it as a built-in command, so no premium request is spent.

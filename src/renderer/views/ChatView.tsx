@@ -5,6 +5,7 @@ import { api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
 import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
+import { UsageMeter } from "../components/UsageMeter";
 import { Composer } from "../components/Composer";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
@@ -101,6 +102,7 @@ export function ChatView({ chatId }: { chatId: string }) {
           {messages.map((m) => <MessageItem key={m.id} m={m} onReply={() => st.openThread(chatId, m.id)} />)}
         </div>
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
+        <UsageMeter />
       </section>
       {st.thread && st.thread.chatId === chatId && <ThreadPanel />}
       {!st.thread && st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}

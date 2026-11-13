@@ -14,6 +14,9 @@ import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
 import { McpBootstrap } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
+import { parseCopilotUsage } from "./copilot-usage";
+import type { AcpAdapter } from "./harness/acp";
+import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, validateRole } from "./roles";
 import type { AgentImportResult, Attachment, HarnessId, HarnessModels } from "@shared/types";
 import { randomUUID } from "node:crypto";
@@ -197,6 +200,45 @@ function refreshModels(h: HarnessId): Promise<HarnessModels> {
   return p;
 }
 
+// ---------------- Copilot usage meter (data only from Copilot CLI's /usage) ----------------
+const usageFile = join(dataDir, "copilot-usage.json");
+let copilotUsage: CopilotUsage | null = (() => { try { return JSON.parse(readFileSync(usageFile, "utf8")); } catch { return null; } })();
+let usageInflight: Promise<CopilotUsage | null> | null = null;
+const setUsage = (u: CopilotUsage) => { copilotUsage = u; emit({ type: "copilotUsage.updated", usage: u }); return u; };
+function refreshCopilotUsage(): Promise<CopilotUsage | null> {
+  if (usageInflight) return usageInflight;
+  const s = settings.get();
+  const st = harnesses.cached("copilot");
+  if (!st?.available) {
+    return Promise.resolve(setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: "Copilot CLI not found" }));
+  }
+  if (copilotUsage) setUsage({ ...copilotUsage, loading: true });
+  const adapter = harnesses.get("copilot") as AcpAdapter;
+  usageInflight = adapter.runCommand({ executable: st.path ?? (s.harnesses.copilot.path || null), cwd: homedir(), env: networkEnv(s), extraArgs: s.harnesses.copilot.args ?? "" },
+    "usage", s.usage.onlyIfAdvertised)
+    .then((r) => {
+      if (!r.advertised && s.usage.onlyIfAdvertised) {
+        return setUsage({ ...parseCopilotUsage(""), ok: false, advertised: false,
+          error: `This Copilot CLI does not offer /usage to apps (commands: ${r.commands.slice(0, 12).join(", ") || "none"}). Update Copilot CLI, or turn off “only if advertised” (may use a premium request).` });
+      }
+      return setUsage({ ...parseCopilotUsage(r.text), advertised: r.advertised });
+    })
+    .catch((e) => setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: String(e?.message ?? e) }))
+    .finally(() => {
+      usageInflight = null;
+      try { writeFileSync(usageFile, JSON.stringify({ ...copilotUsage, loading: false })); } catch { /* best effort */ }
+    });
+  return usageInflight;
+}
+let usageTimer: ReturnType<typeof setInterval> | null = null;
+const scheduleUsage = () => {
+  if (usageTimer) clearInterval(usageTimer);
+  usageTimer = null;
+  const u = settings.get().usage;
+  if (!u.copilotMeter || u.refreshMinutes <= 0) return;
+  usageTimer = setInterval(() => void refreshCopilotUsage(), Math.max(5, u.refreshMinutes) * 60000);
+};
+
 // ---------------- marketplace ----------------
 const marketplace = new Marketplace({
   dataDir, rolesDir: userRolesDir, skillsDir: userSkillsDir,
@@ -356,6 +398,7 @@ const api: FlashApi = {
   },
   getArtifact: async (id) => db.getArtifact(id),
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
+  copilotUsage: async (refresh) => (refresh ? refreshCopilotUsage() : copilotUsage),
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
   marketplaceList: async (refresh) => {
     if (refresh || !marketplace.cached().length) await marketplace.refresh(mpSources());
@@ -406,7 +449,7 @@ const api: FlashApi = {
   },
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),
-  updateSettings: async (patch) => settings.update(patch),
+  updateSettings: async (patch) => { const r = settings.update(patch); if ((patch as any).usage) scheduleUsage(); return r; },
   resetSettings: async () => settings.reset(),
   exportData: async () => {
     const r = await dialog.showSaveDialog(win!, { defaultPath: `theflashmaster-export-${new Date().toISOString().slice(0, 10)}.json` });
@@ -477,6 +520,10 @@ app.whenReady().then(async () => {
   // Detect harnesses, then discover models of the available ones in the background (cache refreshed daily).
   void harnesses.detectAll(settings.get()).then((list) => {
     for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
+    const u = settings.get().usage;
+    if (u.copilotMeter && list.some((h) => h.id === "copilot" && h.available)
+      && Date.now() - (copilotUsage?.fetchedAt ?? 0) > Math.max(5, u.refreshMinutes || 30) * 60000) void refreshCopilotUsage();
+    scheduleUsage();
   });
   void mcp.ensure().then((servers) => emit({ type: "mcp.status", servers }));
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);

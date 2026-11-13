@@ -7,7 +7,7 @@ import { AgentImportDialog, reportImports } from "../components/AgentImport";
 import { ModelInput } from "../components/ModelInput";
 
 const TABS = [
-  ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["permissions", "Permissions"],
+  ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["usage", "Usage"], ["permissions", "Permissions"],
   ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
 ] as const;
 
@@ -39,6 +39,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
           {tab === "modes" && <Modes {...f} />}
           {tab === "agents" && <Agents {...f} />}
           {tab === "tokens" && <Tokens {...f} />}
+          {tab === "usage" && <UsageSettings {...f} />}
           {tab === "permissions" && <Permissions {...f} />}
           {tab === "mcp" && <Mcp {...f} />}
           {tab === "marketplace" && <MarketplaceSettings {...f} />}
@@ -331,6 +332,43 @@ function MarketplaceSettings(f: F) {
     <h4>Options</h4>
     <Row label="Check for plugin updates at startup" hint="You get a notice and an ‘Update all’ button in the Marketplace."><Bool f={f} path="marketplace.autoCheckUpdates" /></Row>
     <Row label="Allow plugins to add tool servers (MCP)" hint="Tool servers run programs on this PC. When off, they are added disabled — enable them in Settings → MCP if you trust them."><Bool f={f} path="marketplace.allowMcpServers" /></Row>
+  </>;
+}
+
+function UsageSettings(f: F) {
+  const st = useStore();
+  const u = st.copilotUsage;
+  const p = u?.premium;
+  const pct = p?.percent ?? null;
+  return <>
+    <h4>GitHub Copilot — premium requests</h4>
+    <p className="muted">Read only from Copilot CLI’s own <code>/usage</code> command, in a short background session. By default the command is sent only when Copilot lists it as a built-in command, so checking never spends a premium request.</p>
+    <div className="panel usage-detail">
+      {!u && <div className="muted">Not fetched yet.</div>}
+      {u && <>
+        <div className="row between">
+          <strong>{p?.unlimited ? "Unlimited" : p?.used !== null && p?.limit !== null ? `${p!.used} of ${p!.limit} used` : p?.used !== null ? `${p!.used} used` : "—"}</strong>
+          <span className="muted small">{u.loading ? "refreshing…" : `updated ${new Date(u.fetchedAt).toLocaleString()}`}</span>
+        </div>
+        {pct !== null && <div className="usage-bar big"><div className={`usage-fill ${pct >= 90 ? "crit" : pct >= 75 ? "warn" : "ok"}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>}
+        <div className="row gap wrap small">
+          {pct !== null && <span className="chip">{pct}% used</span>}
+          {p?.limit !== null && p?.used !== null && p?.limit !== undefined && <span className="chip">{Math.max(0, p.limit - (p.used ?? 0))} left</span>}
+          {u.resetAt && <span className="chip">resets {u.resetAt}</span>}
+        </div>
+        {u.error && <div className="warn-note">{u.error}</div>}
+        {u.entries.length > 0 && <table className="kv">
+          <tbody>{u.entries.map((e, i) => <tr key={i}><td className="muted">{e.label}</td><td>{e.value}</td></tr>)}</tbody>
+        </table>}
+        {u.raw && <details><summary>Raw /usage output</summary><pre className="pre small">{u.raw}</pre></details>}
+      </>}
+      <div><button className="primary" disabled={u?.loading} onClick={() => api().copilotUsage(true)}>{u?.loading ? "Refreshing…" : "↻ Refresh now"}</button></div>
+    </div>
+    <h4>Options</h4>
+    <Row label="Show usage bar under the chat box"><Bool f={f} path="usage.copilotMeter" /></Row>
+    <Row label="Refresh every (minutes)" hint="0 = only when you press refresh. Minimum 5."><Num f={f} path="usage.refreshMinutes" /></Row>
+    <Row label="Only if Copilot lists /usage" hint="Turn off only if your Copilot CLI handles /usage locally but does not list it — otherwise the text may go to a model and use a premium request."><Bool f={f} path="usage.onlyIfAdvertised" /></Row>
+    <p className="muted small">Token usage of TheFlashMaster’s own agents (all harnesses) is on the Dashboard.</p>
   </>;
 }
 

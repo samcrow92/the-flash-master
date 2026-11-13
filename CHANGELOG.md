@@ -1,6 +1,24 @@
 # Changelog
 
 ## Unreleased
+- **Copilot usage meter:** premium-request usage taken only from Copilot CLI's own `/usage` (a short background ACP session), shown as a progress bar under the chat box (green/amber/red, reset date). The bar links to Settings → Usage, which shows the full detail, every line `/usage` printed and the raw output. Refreshes every 30 min (configurable) or manually. By default `/usage` is sent only when Copilot lists it as a built-in command, so a check never spends a premium request.
+- **IBM Jazz:**
+  - **HTTP 401 handling:** expired form sessions log in again automatically. The client falls back to Basic once when the server asks for it. For Kerberos/NTLM ("Negotiate") and Jazz Authorization Server tokens you get a message saying exactly what to change.
+  - **New authentication:** Windows (integrated). It uses your domain login with no password.
+  - **Multiple project areas:** configure several in Settings (with "↻ From server" to load them). The old single value is migrated.
+  - **Rewritten Jazz page:**
+    - always-visible project-area picker (configured areas and every area on the server)
+    - filters for open/closed/all, owner (mine/unassigned), type, and an advanced reportable-API filter; sorting
+    - detail view with all fields and the discussion
+    - actions: add comments, edit the summary, run workflow actions, analyse with an agent (scoped to the area), create a task, open in Jazz, copy link
+  - **Agent tools:** `jazz_query` accepts projectArea/state/type/owner, and `jazz_get` can include comments.
+- **Chat:**
+  - **Ordering fix:** replies no longer stream into an earlier message.
+  - **Steering for all harnesses:** native steering on Pi; interrupt-and-redirect on the others.
+  - **Attachments:** images and files (📎, paste, drop).
+  - **Refined chat bar.**
+  - **Drive modes:** LOCAL / ECO / COMFORT / SPORT buttons, configurable in Settings → Modes & chat.
+  - **Autopilot toggle:** auto-approves tool calls and tells the agent not to stop for feedback.
 - **Marketplace:** department marketplaces on local servers (IP:port), configured in Settings → Marketplace (name, department, IP:port). Plugins bundle agents, workflows (slash commands), team instructions and optional MCP servers (off unless allowed). Browse, search, install, update all, uninstall. Packages are checked against their published sha256, validated before writing and tracked for clean uninstall. Updates are checked at startup, marketplace hosts bypass the proxy, and the list is lockable by enterprise policy. Publishing script `scripts/marketplace/build-index.mjs` and `marketplace-example/`.
 - **Light mode:** one-click ☀/🌙 toggle in the sidebar, a polished light theme, and "System" follows Windows live.
 - **Clean instruction mode (default):** harness-preloaded instructions, skills and extensions are switched off per harness: Copilot `--no-custom-instructions`; OpenCode clean global-config copy + `OPENCODE_DISABLE_PROJECT_CONFIG` / `OPENCODE_DISABLE_CLAUDE_CODE`; Pi `--no-context-files --no-skills --no-extensions --no-prompt-templates`; Duo partial. Option to keep project AGENTS.md. **Team rules** are sent to every agent. Settings → Agents shows what is applied per harness.

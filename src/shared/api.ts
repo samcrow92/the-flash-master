@@ -1,5 +1,5 @@
 import type {
-  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, JazzSearch, McpServerStatus, Message,
+  AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, CopilotUsage, JazzSearch, McpServerStatus, Message,
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
@@ -57,6 +57,7 @@ export interface FlashApi {
   // artifacts / usage
   getArtifact(id: string): Promise<Artifact | null>;
   usageSummary(days: number): Promise<UsageSummary>;
+  copilotUsage(refresh: boolean): Promise<CopilotUsage | null>;
 
   // harnesses / mcp
   detectHarnesses(): Promise<HarnessStatus[]>;
@@ -96,7 +97,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "toggleReaction", "listAgents", "startAgent",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",

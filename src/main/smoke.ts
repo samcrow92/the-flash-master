@@ -104,6 +104,30 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await click("Settings", ".sidebar button");
         await sleep(600);
       }
+      const jazzUrl = process.env.FLASH_SMOKE_JAZZ_URL;
+      if (jazzUrl) {
+        await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(jazzUrl)}, authType: "basic", username: "ana", projectAreas: ["Body Electronics", "Powertrain"] } }).then(()=>{})`);
+        win.webContents.reload();
+        await sleep(2500);
+        await click("brake-ecu", ".project-name");
+        await sleep(300);
+        await click("General", ".chat-link");
+        await sleep(1000);
+        await shot(join(demo, "10-usage-meter.png"));
+        await click("Jazz", ".sidebar button");
+        await sleep(1500);
+        await js(`document.querySelector('.jazz-item')?.click()`);
+        await sleep(1200);
+        await shot(join(demo, "11-jazz-workspace.png"));
+        await click("Settings", ".sidebar button");
+        await sleep(500);
+        await click("Usage", ".tabs button");
+        await sleep(500);
+        await shot(join(demo, "12-settings-usage.png"));
+        await click("Integrations", ".tabs button");
+        await sleep(500);
+        await shot(join(demo, "13-settings-jazz.png"));
+      }
       await click("Token efficiency", ".tabs button");
       await sleep(400);
       await shot(join(demo, "7-settings-tokens.png"));

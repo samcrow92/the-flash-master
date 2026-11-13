@@ -39,6 +39,11 @@ export interface Settings {
     keepProjectInstructions: boolean; // in clean mode, still load the project's AGENTS.md / instruction files
     houseRules: string; // extra rules sent to every agent (your workflow/setup)
   };
+  usage: {
+    copilotMeter: boolean; // show Copilot premium-request usage (from Copilot's /usage) under the chat box
+    refreshMinutes: number; // 0 = only manual refresh
+    onlyIfAdvertised: boolean; // never send /usage unless Copilot lists it as a command (so no premium request is used)
+  };
   tokens: {
     dailyBudget: number; // 0 = unlimited
     projectBudget: number; // per project per day, 0 = unlimited
@@ -126,6 +131,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
+  usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true },
   tokens: {
     dailyBudget: 0,
     projectBudget: 0,
