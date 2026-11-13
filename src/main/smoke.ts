@@ -128,6 +128,22 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await click("Using TheFlashMaster", ".docs-nav button");
       await sleep(700);
       await shot(join(demo, "18-docs-use.png"));
+      // Profile: initials first, then a generated picture
+      await click("Settings", ".sidebar button");
+      await sleep(400);
+      await click("General", ".tabs button");
+      await js(`window.flash.api.updateSettings({ profile: { name: "Ana Pop", hue: 320 } }).then(()=>{})`);
+      win.webContents.reload();
+      await sleep(2200);
+      await click("Settings", ".sidebar button");
+      await sleep(400);
+      await shot(join(demo, "19-profile-initials.png"));
+      await js(`(()=>{const c=document.createElement('canvas');c.width=c.height=192;const g=c.getContext('2d');const gr=g.createLinearGradient(0,0,192,192);gr.addColorStop(0,'#ff9a3c');gr.addColorStop(1,'#6a4cff');g.fillStyle=gr;g.fillRect(0,0,192,192);g.fillStyle='rgba(255,255,255,.9)';g.beginPath();g.arc(96,76,34,0,7);g.fill();g.beginPath();g.ellipse(96,178,62,52,0,0,7);g.fill();return window.flash.api.updateSettings({ profile: { avatar: c.toDataURL('image/webp',.86) } }).then(()=>true)})()`);
+      win.webContents.reload();
+      await sleep(2200);
+      await click("Settings", ".sidebar button");
+      await sleep(500);
+      await shot(join(demo, "20-profile-picture.png"));
       const ssoUrl = process.env.FLASH_SMOKE_JAZZ_SSO_URL;
       if (ssoUrl) {
         await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(ssoUrl)}, authType: "browser" } }).then(()=>{})`);

@@ -1,10 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Settings as SettingsIcon } from "../components/icons";
 import type { DriveMode, HarnessId, HarnessStatus } from "@shared/types";
 import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { api, useStore } from "../store";
 import { MCP_CATALOG, catalogState, type CatalogServer } from "@shared/mcp-catalog";
+import { UserAvatar, toAvatarDataUrl } from "../components/UserAvatar";
+import { Camera, ImagePlus, Loader2, Trash2 } from "../components/icons";
 import { AgentImportDialog, reportImports } from "../components/AgentImport";
 import { ModelInput } from "../components/ModelInput";
 
@@ -86,8 +88,55 @@ function Area({ f, path, rows = 4 }: { f: F; path: Path; rows?: number }) {
 
 const harnessOptions: [string, string][] = HARNESS_IDS.map((h) => [h, h]);
 
+const HUES = [210, 260, 320, 0, 25, 45, 140, 175];
+
+function ProfileEditor({ f }: { f: F }) {
+  const st = useStore();
+  const p = f.s.profile;
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const locked = f.locked("profile");
+  const setPicture = async (file: Blob | null | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { st.toast("warn", "Please choose an image (PNG, JPG, WebP, GIF…)"); return; }
+    setBusy(true);
+    try { await f.set("profile.avatar", await toAvatarDataUrl(file)); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="profile-editor panel" onPaste={(e) => void setPicture([...e.clipboardData.files].find((x) => x.type.startsWith("image/")))}>
+      <button className={`profile-pic ${drag ? "drag" : ""}`} disabled={locked} title="Click to choose a picture, or drop / paste one here"
+        onClick={() => fileRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDrag(false); void setPicture(e.dataTransfer.files[0]); }}>
+        <UserAvatar size={84} key={p.avatar.slice(-24) + p.hue + p.name} className="pop-in" />
+        <span className="profile-pic-overlay">{busy ? <Loader2 size={20} className="spin" /> : <Camera size={20} />}</span>
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { void setPicture(e.target.files?.[0]); e.target.value = ""; }} />
+      <div className="profile-fields">
+        <label className="field"><span>Display name</span>
+          <input key={p.name} defaultValue={p.name} placeholder="Your name (shown instead of “You”)" disabled={locked}
+            onBlur={(e) => e.target.value.trim() !== p.name && f.set("profile.name", e.target.value.trim())} /></label>
+        <div className="row gap wrap">
+          <button disabled={locked || busy} onClick={() => fileRef.current?.click()}><ImagePlus size={15} /> {p.avatar ? "Change picture" : "Upload picture"}</button>
+          {p.avatar && <button className="ghost danger" disabled={locked} onClick={() => f.set("profile.avatar", "")}><Trash2 size={15} /> Remove picture</button>}
+        </div>
+        {!p.avatar && <div className="row gap-s wrap">
+          <span className="muted small">Colour</span>
+          {HUES.map((h) => <button key={h} className={`hue-dot ${p.hue === h ? "on" : ""}`} style={{ "--hue": h } as React.CSSProperties} disabled={locked}
+            title="Colour of your initials" onClick={() => f.set("profile.hue", h)} />)}
+        </div>}
+        <div className="muted small">Square crop, stored only on this PC. Tip: drop or paste an image onto the picture.</div>
+      </div>
+    </div>
+  );
+}
+
 function General(f: F) {
   return <>
+    <h4>Your profile</h4>
+    <ProfileEditor f={f} />
+    <h4>App</h4>
     <Row label="Theme"><Choice f={f} path="general.theme" options={[["dark", "Dark"], ["light", "Light"], ["system", "System"]]} /></Row>
     <Row label="Default harness" hint="Used when a chat or role does not pick one; falls back to the first available."><Choice f={f} path="general.defaultHarness" options={harnessOptions} /></Row>
     <Row label="Desktop notifications" hint="Approval requests, budget warnings and errors when the window is in the background."><Bool f={f} path="general.notifications" /></Row>

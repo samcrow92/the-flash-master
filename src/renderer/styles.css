@@ -554,3 +554,29 @@ p .doc-link, .doc-note .doc-link { padding: 0 4px; border: none; background: non
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* ===================== user profile ===================== */
+.user-avatar { --hue: 210; display: inline-grid; place-content: center; border-radius: 50%; flex: none; overflow: hidden; font-weight: 700; letter-spacing: .3px;
+  color: #fff; background: linear-gradient(140deg, hsl(var(--hue) 62% 56%), hsl(calc(var(--hue) + 30) 58% 40%));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 2px 8px -3px hsl(var(--hue) 60% 35% / .7); }
+.user-avatar.img { background: var(--bg3); }
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-btn, .profile-btn { background: none; border: none; padding: 0; border-radius: 50%; display: inline-grid; cursor: pointer; }
+.avatar-btn:hover .user-avatar, .profile-btn:hover .user-avatar { box-shadow: 0 0 0 2px var(--accent); }
+.profile-btn { width: auto !important; flex: none; padding: 2px !important; }
+.sidebar-footer > .profile-btn + button { flex: 1; }
+.sidebar-footer > button:first-child.profile-btn { flex: none; }
+.profile-editor { display: flex; gap: 18px; align-items: center; margin-bottom: 14px; }
+.profile-pic { position: relative; padding: 0; border: none; background: none; border-radius: 50%; cursor: pointer; }
+.profile-pic .user-avatar { box-shadow: 0 0 0 3px var(--bg2), 0 0 0 4px var(--line), 0 10px 24px -10px rgba(0,0,0,.6); transition: transform .2s; }
+.profile-pic:hover .user-avatar { transform: scale(1.03); }
+.profile-pic-overlay { position: absolute; inset: 0; border-radius: 50%; display: grid; place-content: center; color: #fff; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .15s; }
+.profile-pic:hover .profile-pic-overlay, .profile-pic.drag .profile-pic-overlay { opacity: 1; }
+.profile-pic.drag .user-avatar { box-shadow: 0 0 0 3px var(--accent); }
+.profile-fields { flex: 1; display: grid; gap: 8px; }
+.profile-fields button { display: inline-flex; align-items: center; gap: 6px; }
+.hue-dot { --hue: 210; width: 20px; height: 20px; border-radius: 50%; padding: 0; border: 2px solid transparent;
+  background: linear-gradient(140deg, hsl(var(--hue) 62% 56%), hsl(calc(var(--hue) + 30) 58% 40%)); transition: transform .15s; }
+.hue-dot:hover { transform: scale(1.15); }
+.hue-dot.on { border-color: var(--fg); transform: scale(1.1); }
+.pop-in { animation: pop .35s cubic-bezier(.2,.9,.3,1.5); }

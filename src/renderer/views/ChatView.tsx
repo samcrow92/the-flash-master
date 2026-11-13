@@ -8,7 +8,8 @@ import { ModelInput } from "../components/ModelInput";
 import { UsageMeter } from "../components/UsageMeter";
 import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
-import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Smile, Square, Trash2, User, Info, X, Zap } from "../components/icons";
+import { UserAvatar } from "../components/UserAvatar";
+import { Archive, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Smile, Square, Trash2, Info, X, Zap } from "../components/icons";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -139,13 +140,14 @@ export function MessageItem({ m, onReply, inThread }: { m: Message; onReply?: ()
   const agent = useStore((s) => (m.agentId ? s.agents[m.agentId] : undefined));
   const showTokens = useStore((s) => s.settings?.tokens.showTokenCounts);
   const [picker, setPicker] = useState(false);
-  const who = m.author === "user" ? "You" : m.author === "system" ? "System" : role?.title ?? m.role ?? "Agent";
+  const myName = useStore((s) => s.settings?.profile?.name);
+  const who = m.author === "user" ? myName || "You" : m.author === "system" ? "System" : role?.title ?? m.role ?? "Agent";
   const react = (e: string) => { setPicker(false); void api().toggleReaction(m.id, e); };
 
   if (m.marker === "context-reset") {
     return <div className="ctx-divider" title={new Date(m.createdAt).toLocaleString()}><span><RotateCcw size={13} /> Context reset — agents start fresh from here</span></div>;
   }
-  const avatar = m.author === "user" ? <span className="role-badge user"><User size={15} /></span>
+  const avatar = m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={32} /></button>
     : m.author === "system" ? <span className="role-badge sys"><Info size={15} /></span>
     : <RoleIcon role={m.role} emoji={role?.icon} size={32} />;
 

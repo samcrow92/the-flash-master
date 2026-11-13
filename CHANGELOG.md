@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Your profile:** in Settings → General you can set a display name (shown instead of "You") and a profile picture. Upload, drop or paste an image; it is centre-cropped, downscaled and stored only on this PC. Without a picture, your initials appear on a colour you choose. Your avatar shows on your chat messages and at the bottom of the sidebar; click either to change it.
 - **Chat management:**
   - **Right-click menus** on chats: rename, pin to top, reset context, copy as Markdown, archive/restore, delete. The same menu opens from the "…" button and the chat header.
   - Right-click menu on projects: new chat, rename, open folder, show archived, remove.

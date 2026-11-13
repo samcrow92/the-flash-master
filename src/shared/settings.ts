@@ -24,6 +24,8 @@ export interface Settings {
     defaultHarness: HarnessId;
     restoreLastChat: boolean;
   };
+  /** How you appear in chats. The picture is a small square image stored as a data URL (≤ ~40 KB). */
+  profile: { name: string; avatar: string; hue: number };
   harnesses: Record<HarnessId, HarnessSettings>;
   modes: Record<DriveMode, ModeProfile>;
   chat: {
@@ -119,6 +121,7 @@ const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ ena
 
 export const DEFAULT_SETTINGS: Settings = {
   general: { theme: "dark", notifications: true, confirmStop: true, defaultHarness: "copilot", restoreLastChat: true },
+  profile: { name: "", avatar: "", hue: 210 },
   harnesses: {
     copilot: harness(true),
     opencode: harness(true),

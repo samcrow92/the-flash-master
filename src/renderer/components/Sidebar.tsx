@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Chat, Project } from "@shared/types";
 import { api, toggleTheme, useStore } from "../store";
 import { AgentImportDialog } from "./AgentImport";
+import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
 import {
   Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
@@ -190,6 +191,8 @@ export function Sidebar() {
 
       {importing && <AgentImportDialog onClose={() => setImporting(false)} />}
       <div className="sidebar-footer row">
+        <button className="profile-btn" title={`${st.settings?.profile.name || "Your profile"} — change name and picture`}
+          onClick={() => st.setView({ kind: "settings", tab: "general" })}><UserAvatar size={26} /></button>
         <button className={`nav-btn ${view.kind === "settings" ? "active" : ""}`} onClick={() => st.setView({ kind: "settings" })}><span className="nav-icon"><Settings size={17} /></span> Settings</button>
         <button className="theme-toggle" title={light ? "Switch to dark mode" : "Switch to light mode"} onClick={() => void toggleTheme()}>
           <span key={light ? "moon" : "sun"} className="theme-icon">{light ? <Moon size={17} /> : <Sun size={17} />}</span>
