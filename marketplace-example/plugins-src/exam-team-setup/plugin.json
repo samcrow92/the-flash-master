@@ -1,0 +1,3 @@
+{ "id": "exam-team-setup", "name": "EXAM setup (HiL team)", "version": "1.0.0",
+  "description": "Installs the EXAM RESTapi plugin and fills in the team's EXAM server, license server and defaults for the EXAM Test Agent.",
+  "team": "HiL Validation", "tags": ["exam", "hil"] }

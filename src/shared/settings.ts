@@ -126,6 +126,9 @@ export interface Settings {
     pythonPath: string; // Python EXAM uses for test execution ("" = EXAM's own setting)
     workspace: string; // EXAM workspace folder for headless runs ("" = temp folder)
     javaOpts: string;
+    /** RESTapi plugin (.jar/.zip, licensed from MicroNova): file share path or http(s) URL, e.g. a department server. */
+    pluginPackage: string;
+    autoSetup: boolean; // at start: detect EXAM, fill the install folder, install the plugin when missing
   };
   vector: {
     canoePath: string;
@@ -201,7 +204,8 @@ export const DEFAULT_SETTINGS: Settings = {
   marketplace: { sources: [], autoCheckUpdates: true, allowMcpServers: false },
   winidea: { installPath: "", workspace: "", sdkPath: "" },
   exam: { installPath: "", restPort: 8085, licenseHost: "", licensePort: 5053, modelName: "", targetEndpoint: "", modelConfigUuid: "",
-    systemConfig: "", reportProject: "", pythonPath: "", workspace: "", javaOpts: "" },
+    systemConfig: "", reportProject: "", pythonPath: "", workspace: "", javaOpts: "",
+    pluginPackage: "", autoSetup: true },
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
   data: { retentionDays: 0 },

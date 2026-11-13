@@ -134,6 +134,14 @@ def start(install: str = "", workspace: str = "", wait_s: int = 180) -> dict[str
     args = [exe, "-data", ws, "-configuration", conf, "--launcher.appendVmargs", "-vmargs", "-DUSE_CONSOLE=true",
             "-DRESTAPI=true", f"-DRESTAPI_PORT={port()}", f"-DLICENSE_PORT={lic_port}", f"-DLICENSE_HOST={lic_host}",
             "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8"]
+    # Per-user dropins (RESTapi plugin installed without admin rights) and a one-time -clean after a plugin install.
+    udrop = env("EXAM_USER_DROPINS") or os.path.join(os.path.expanduser("~"), ".theflashmaster", "exam-dropins")
+    if os.path.isdir(udrop) and any(n for n in os.listdir(udrop) if not n.startswith(".")):
+        args.append(f"-Dorg.eclipse.equinox.p2.reconciler.dropins.directory={udrop}")
+    pending = os.path.join(udrop, ".pending-clean")
+    if os.path.exists(pending):
+        args.insert(1, "-clean")
+        os.remove(pending)
     args += [a for a in env("EXAM_JAVA_OPTS").split(" ") if a]
     log = open(os.path.join(ws, "flashmaster_exam.log"), "ab")  # noqa: SIM115 - handed to the child process
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)

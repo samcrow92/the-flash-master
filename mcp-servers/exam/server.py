@@ -12,6 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(1, os.path.join(os.path.dirname(HERE), "pycommon"))
 
+import exam_setup as SETUP  # noqa: E402
 import exam_tools as X  # noqa: E402
 from mcp_stdio import McpServer  # noqa: E402
 
@@ -35,6 +36,18 @@ def exam_status() -> dict[str, Any]:
         schema({"install": STR, "workspace": STR, "wait_s": {"type": "integer"}}))
 def exam_start(install: str = "", workspace: str = "", wait_s: int = 180) -> dict[str, Any]:
     return X.start(install, workspace, wait_s)
+
+
+@S.tool("Check the EXAM setup: installation, RESTapi plugin, license server, application server, model, RESTapi. Each item ok/warn/fail with a fix.")
+def exam_setup_check() -> dict[str, Any]:
+    r = SETUP.setup(install=False)
+    return {"home": r["home"], "ok": r["ok"], "checks": r["checks"]}
+
+
+@S.tool("Set up EXAM: detect the installation and install the RESTapi plugin from the package in Settings (or `package`), then check.",
+        schema({"package": {"type": "string", "description": "path or http(s) URL of the plugin .jar/.zip"}, "install": {"type": "boolean"}}))
+def exam_setup(package: str = "", install: bool = True) -> dict[str, Any]:
+    return SETUP.setup(package, install)
 
 
 @S.tool("Shut EXAM down (only an instance you started).")

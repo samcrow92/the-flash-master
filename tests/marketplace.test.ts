@@ -18,6 +18,7 @@ const seen: { url: string; auth?: string }[] = [];
 beforeAll(async () => {
   market = mkdtempSync(join(tmpdir(), "mp-"));
   cpSync(join(ROOT, "marketplace-example", "plugins-src"), join(market, "plugins-src"), { recursive: true });
+  cpSync(join(ROOT, "marketplace-example", "files"), join(market, "files"), { recursive: true });
   const r = spawnSync(process.execPath, [join(ROOT, "scripts", "marketplace", "build-index.mjs"), market, "--name", "Body Electronics"], { encoding: "utf8" });
   expect(r.status, r.stderr).toBe(0);
   server = createServer((req, res) => {
@@ -36,6 +37,7 @@ const fetchImpl: FetchLike = async (url, init) => {
   return { status: r.status, ok: r.ok, headers: { get: (n: string) => r.headers.get(n) }, text: () => r.text() };
 };
 
+const examPresets: unknown[] = [];
 function setup(over: Partial<{ allowMcpServers: boolean }> = {}) {
   const data = mkdtempSync(join(tmpdir(), "mpdata-"));
   const rolesDir = join(data, "agents"), skillsDir = join(data, "skills");
@@ -48,19 +50,29 @@ function setup(over: Partial<{ allowMcpServers: boolean }> = {}) {
     builtinRoles: () => loadRoles(join(ROOT, "agents"), "/none").map((r) => r.name),
     addMcpServers: (s, enabled) => mcp.added.push({ ids: s.map((x) => x.id), enabled }),
     removeMcpServers: (ids) => mcp.removed.push(...ids),
+    applyExamPreset: (p) => examPresets.push(p),
   });
   const src = { id: "body", name: "Body", url: `127.0.0.1:${port}`, department: "Body Electronics", enabled: true };
   return { mp, src, data, rolesDir, skillsDir, mcp };
 }
 
 describe("marketplace", () => {
+  it("applies a team EXAM preset with the plugin package served by the marketplace", async () => {
+    const { mp, src } = setup();
+    examPresets.length = 0;
+    const rec = await mp.install(src, "exam-team-setup");
+    expect(rec.agents).toEqual([]);
+    expect(examPresets).toEqual([{ pluginPackage: `http://127.0.0.1:${port}/files/README-exam-restapi.txt`, targetEndpoint: "http://exam-server.example.local:8080",
+      licenseHost: "license.example.local", licensePort: 5053, modelName: "BodyElectronics", systemConfig: "HIL_Rack_01", reportProject: "BodyReports" }]);
+  });
+
   it("lists a department marketplace from a plain HTTP server (IP:port)", async () => {
     const { mp, src } = setup();
     const l = await mp.fetchIndex(src);
     expect(l.error).toBeNull();
     expect(l.url).toBe(`http://127.0.0.1:${port}`);
     expect(l.plugins.map((p) => [p.id, p.version, p.kinds])).toEqual([
-      ["body-sw-test-pack", "1.0.0", ["agent", "workflow"]], ["diag-team-rules", "2.1.0", ["instructions"]]]);
+      ["body-sw-test-pack", "1.0.0", ["agent", "workflow"]], ["diag-team-rules", "2.1.0", ["instructions"]], ["exam-team-setup", "1.0.0", ["exam"]]]);
     expect(l.plugins.every((p) => /^[0-9a-f]{64}$/.test(p.sha256!))).toBe(true);
   });
 

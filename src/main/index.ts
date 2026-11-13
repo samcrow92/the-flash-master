@@ -25,6 +25,7 @@ import { loadRoles, loadSkills, parseRole, roleMarkdown, slugRole, validateRole,
 import type { AgentImportResult, Attachment, HarnessId, HarnessModels } from "@shared/types";
 import { randomUUID } from "node:crypto";
 import { HARNESS_IDS } from "@shared/types";
+import { DEFAULT_SETTINGS } from "@shared/settings";
 import { networkEnv } from "./orchestrator";
 import { prepareInstructions } from "./harness/instructions";
 import { makeLogger } from "./log";
@@ -155,6 +156,22 @@ const harnessEnv = (h: HarnessId): Record<string, string> => {
   const t = readCopilotToken();
   return t ? { GH_TOKEN: t } : {};
 };
+
+// ---------------- EXAM setup: fill the install folder, install the RESTapi plugin, report what's missing ----------------
+async function runExamSetup(install: boolean, auto = false): Promise<import("@shared/api").ExamSetupResult> {
+  const r = await mcp.examSetup(install);
+  if (r.home && !settings.get().exam.installPath) settings.update({ exam: { installPath: r.home } });
+  const installed = r.actions.filter((a) => !a.startsWith("found") && !a.includes("failed"));
+  const failed = r.actions.filter((a) => a.includes("failed"));
+  if (r.error) log(auto ? "info" : "warn", `EXAM setup: ${r.error}`);
+  else log("info", `EXAM setup: ${[...r.actions, ...r.checks.map((c) => `${c.name}=${c.state}`)].join("; ")}`);
+  // At start-up only speak when something changed or broke, and only for users who have EXAM.
+  if (auto && r.home) {
+    if (installed.length) emit({ type: "notice", level: "info", text: `EXAM: ${installed.join("; ")}` });
+    if (failed.length) emit({ type: "notice", level: "warn", text: `EXAM: ${failed.join("; ")} — see Settings → Integrations → EXAM` });
+  }
+  return r;
+}
 
 // ---------------- Jazz (password encrypted with the OS keychain via safeStorage) ----------------
 const secretFile = join(dataDir, "jazz.secret");
@@ -420,6 +437,14 @@ const marketplace = new Marketplace({
   policy: () => ({ allowMcpServers: settings.get().marketplace.allowMcpServers }),
   knownTools: () => [...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)],
   builtinRoles: () => loadRoles(join(resources, "agents"), join(dataDir, "__none__")).map((r) => r.name),
+  applyExamPreset: (preset) => {
+    // Department values fill what the user hasn't set; the user's own values win.
+    const cur = settings.get().exam as unknown as Record<string, unknown>;
+    const def = DEFAULT_SETTINGS.exam as unknown as Record<string, unknown>;
+    const patch = Object.fromEntries(Object.entries(preset).filter(([k]) => cur[k] === "" || cur[k] === def[k]));
+    if (Object.keys(patch).length) settings.update({ exam: patch });
+    void runExamSetup(true, true);
+  },
   addMcpServers: (servers, enabled) => {
     const s = settings.get().mcp;
     const ids = servers.map((x) => x.id);
@@ -717,6 +742,7 @@ const api: FlashApi = {
   rmDiagnostics: async () => [`server: ${rmUrl()}`, `auth: ${settings.get().jazz.authType}`, ...requirements.lastLog],
   rmCached: async () => requirements.allCached().map((d) => ({ module: d.module, fetchedAt: d.fetchedAt, count: d.requirements.filter((r) => !r.heading).length })),
   jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; rmClient = null; },
+  examSetup: async (install) => runExamSetup(install),
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),
   updateSettings: async (patch) => { const r = settings.update(patch); if ((patch as any).usage) scheduleUsage(); return r; },
@@ -853,7 +879,7 @@ app.whenReady().then(async () => {
       && Date.now() - (copilotUsage?.fetchedAt ?? 0) > Math.max(5, u.refreshMinutes || 30) * 60000) void refreshCopilotUsage();
     scheduleUsage();
   });
-  void mcp.ensure().then((servers) => emit({ type: "mcp.status", servers }));
+  void mcp.ensure().then((servers) => { emit({ type: "mcp.status", servers }); if (settings.get().exam.autoSetup) void runExamSetup(true, true); });
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
 });
 

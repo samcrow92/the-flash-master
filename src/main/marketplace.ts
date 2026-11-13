@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { InstalledPlugin, MarketplaceListing, PluginEntry, PluginPackage } from "@shared/types";
+import { EXAM_PRESET_KEYS, type ExamPreset, type InstalledPlugin, type MarketplaceListing, type PluginEntry, type PluginPackage } from "@shared/types";
 import type { FetchLike } from "./jazz";
 import { validateRole, ROLE_NAME_RE, parseFrontmatter } from "./roles";
 
@@ -27,6 +27,21 @@ export interface MarketplaceDeps {
   builtinRoles: () => string[];
   addMcpServers: (servers: { id: string; label: string; command: string; args: string; env: string }[], enabled: boolean) => void;
   removeMcpServers: (ids: string[]) => void;
+  /** Apply a team EXAM preset (fill empty EXAM settings, run the setup). */
+  applyExamPreset?: (preset: ExamPreset) => void;
+}
+
+/** Keep only known EXAM keys with plain values; resolve a relative plugin package against the marketplace URL. */
+export function cleanExamPreset(raw: unknown, baseUrl: string): ExamPreset | null {
+  if (!raw || typeof raw !== "object") return null;
+  const out: Record<string, string | number> = {};
+  for (const k of EXAM_PRESET_KEYS) {
+    const v = (raw as Record<string, unknown>)[k];
+    if ((k === "licensePort" || k === "restPort") ? typeof v === "number" && v > 0 && v < 65536 : typeof v === "string" && v.trim()) out[k] = typeof v === "string" ? v.trim() : v as number;
+  }
+  const pkg = out.pluginPackage as string | undefined;
+  if (pkg && !/^(https?:\/\/|\\\\|[a-z]:[\\/]|\/)/i.test(pkg)) out.pluginPackage = `${baseUrl}/${pkg.replace(/^\.?\/+/, "")}`;
+  return Object.keys(out).length ? out as ExamPreset : null;
 }
 
 const MAX_PACKAGE = 2_000_000;
@@ -130,7 +145,8 @@ export class Marketplace {
     if (entry.sha256 && entry.sha256.toLowerCase() !== sha) throw new Error(`${pluginId}: package does not match the marketplace index (re-run the publishing script on the server)`);
     const pkg = JSON.parse(raw) as PluginPackage;
     if (pkg.id !== entry.id) throw new Error(`package id "${pkg.id}" does not match index id "${entry.id}"`);
-    return this.apply(src, listing.sourceName, entry, pkg);
+    const exam = cleanExamPreset(pkg.exam, listing.url);
+    return this.apply(src, listing.sourceName, entry, { ...pkg, exam: exam ?? undefined });
   }
 
   /** Validate everything first, then write — a bad plugin never half-installs. */
@@ -161,7 +177,7 @@ export class Marketplace {
     }
     const mcp = (pkg.mcpServers ?? []).filter((m) => m && ID_RE.test(m.id) && m.command);
     if (errors.length) throw new Error(`plugin ${pkg.id} was not installed:\n- ${errors.join("\n- ")}`);
-    if (!agents.length && !workflows.length && !pkg.instructions?.trim() && !mcp.length) throw new Error(`plugin ${pkg.id} contains nothing to install`);
+    if (!agents.length && !workflows.length && !pkg.instructions?.trim() && !mcp.length && !pkg.exam) throw new Error(`plugin ${pkg.id} contains nothing to install`);
 
     if (previous) this.removeFiles(previous);
     for (const a of agents) writeFileSync(join(this.d.rolesDir, `${a.name}.md`), a.content.replace(/\r\n/g, "\n"));
@@ -179,6 +195,7 @@ export class Marketplace {
       hasInstructions: !!pkg.instructions?.trim(), instructionsEnabled: previous?.instructionsEnabled ?? true, mcpServers: mcpIds,
     };
     this.saveInstalled([...list.filter((p) => p.id !== pkg.id), rec]);
+    if (pkg.exam) this.d.applyExamPreset?.(pkg.exam);
     return rec;
   }
 

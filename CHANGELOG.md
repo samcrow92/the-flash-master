@@ -7,6 +7,12 @@
   - **What it remembers:** it saves verified facts about your EXAM setup to `exam-notes.md` in the app data folder, so later sessions don't have to find them again.
   - **New `exam` tool server (Python, no extra packages):** reaches the EXAM RESTapi plugin, using the same endpoints as MicroNova's Jenkins plugin. It can check status, start EXAM headless, load models, filter, run, wait, stop, convert reports to JUnit, give a compact results summary, generate test cases and run Groovy scripts.
   - **Without MCP:** the same tools are available from a command line. The agent's CLI gets `FLASH_PYTHON` and `FLASH_EXAM_CLI`, so it works in text mode where MCP is blocked.
+  - **Automatic EXAM setup:** at start the app finds the EXAM installation and fills in the install folder. It installs the RESTapi plugin when it's missing and reports anything that's still missing.
+    - **The plugin package:** the plugin is licensed MicroNova software, so it isn't shipped with the app. Set its location (company share path or http(s) URL) in Settings, or get it from a department marketplace.
+    - **How it's installed:** a `.jar`, a `.zip` with `plugins/`, or a zipped p2 update site.
+    - **Without admin rights:** the plugin goes into a per-user dropins folder, which the agent passes to EXAM when it starts it.
+    - **The checklist** covers the installation, RESTapi plugin, license server, application server, default model and RESTapi. Use **Check** / **Set up EXAM** in Settings, or the agent's `exam_setup_check` / `exam_setup` tools.
+  - **Team setup through the marketplace:** a plugin can include `exam.json` with the team's EXAM server, license server, defaults and the plugin package hosted on the marketplace server. Installing it fills in the empty EXAM settings and runs the setup. Example: `marketplace-example/plugins-src/exam-team-setup`.
   - **Settings → Integrations → EXAM:** install folder, RESTapi port, license server, application server URL, and default model, configuration, system configuration and report project.
 - **Click a command to see its output.** Every command or tool call an agent runs appears above its reply as a compact row: icon by kind (command, read, edit, search, web…), title, live spinner / ✓ / ✗ and duration.
   - **Expanding:** click a row to see the command line or arguments and its output, each with Copy. The output updates live while the command runs.

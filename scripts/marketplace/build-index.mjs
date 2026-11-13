@@ -10,6 +10,9 @@
  *          workflows/*.md     workflows (header needs `command:`; used as /command in chats)
  *          instructions.md    team instructions added to every agent's rules (optional)
  *          mcp.json           [{ "id", "label", "command", "args", "env" }] tool servers (optional, opt-in per user policy)
+ *          exam.json          team EXAM setup (optional): { "pluginPackage": "files/exam-restapi.zip", "targetEndpoint", "licenseHost",
+ *                             "licensePort", "modelName", "systemConfig", "reportProject", … } — fills empty Settings → EXAM fields
+ *                             and installs the RESTapi plugin. A relative pluginPackage is served from this marketplace folder.
  * Output <folder>/index.json and <folder>/plugins/<id>-<version>.json (with sha256 in the index)
  * Serve  cd <folder> && python -m http.server 8080      → add http://<this-PC-IP>:8080 in Settings → Marketplace
  */
@@ -44,13 +47,16 @@ for (const id of readdirSync(srcDir).sort()) {
   for (const w of workflows) if (!/^---\n(?:[\s\S]*?\n)?command:\s*[a-z][a-z0-9-]+[\s\S]*?\n---/.test(w.content)) problems.push(`workflows/${w.file}: needs a --- header with command:`);
   const instructions = existsSync(join(dir, "instructions.md")) ? readFileSync(join(dir, "instructions.md"), "utf8").replace(/\r\n/g, "\n") : "";
   const mcpServers = existsSync(join(dir, "mcp.json")) ? JSON.parse(readFileSync(join(dir, "mcp.json"), "utf8")) : [];
+  const exam = existsSync(join(dir, "exam.json")) ? JSON.parse(readFileSync(join(dir, "exam.json"), "utf8")) : null;
+  if (exam?.pluginPackage && !/^(https?:|\\\\|[a-z]:)/i.test(exam.pluginPackage) && !existsSync(join(root, exam.pluginPackage)))
+    problems.push(`exam.json: pluginPackage "${exam.pluginPackage}" not found in the marketplace folder`);
   if (problems.length) { failed = true; console.error(`✖ ${id}\n  - ${problems.join("\n  - ")}`); continue; }
   const pkg = { id: meta.id, name: meta.name ?? meta.id, version: meta.version, description: meta.description ?? "", team: meta.team ?? "",
-    agents, workflows, ...(instructions.trim() ? { instructions } : {}), ...(mcpServers.length ? { mcpServers } : {}) };
+    agents, workflows, ...(instructions.trim() ? { instructions } : {}), ...(mcpServers.length ? { mcpServers } : {}), ...(exam ? { exam } : {}) };
   const body = JSON.stringify(pkg, null, 2);
   const file = `plugins/${meta.id}-${meta.version}.json`;
   writeFileSync(join(root, file), body);
-  const kinds = [agents.length && "agent", workflows.length && "workflow", instructions.trim() && "instructions", mcpServers.length && "mcp"].filter(Boolean);
+  const kinds = [agents.length && "agent", workflows.length && "workflow", instructions.trim() && "instructions", mcpServers.length && "mcp", exam && "exam"].filter(Boolean);
   plugins.push({ id: meta.id, name: pkg.name, version: meta.version, description: pkg.description, team: pkg.team, kinds, tags: meta.tags ?? [],
     package: file, sha256: createHash("sha256").update(body).digest("hex"), updated: new Date().toISOString().slice(0, 10) });
   console.log(`✔ ${meta.id}@${meta.version}: ${agents.length} agent(s), ${workflows.length} workflow(s)${instructions.trim() ? ", instructions" : ""}${mcpServers.length ? `, ${mcpServers.length} MCP server(s)` : ""}`);

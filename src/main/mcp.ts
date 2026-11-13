@@ -11,6 +11,7 @@ import { cliProxyUrl } from "./proxy";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { McpServerStatus, RoleDef } from "@shared/types";
+import type { ExamSetupResult } from "@shared/api";
 import type { Settings } from "@shared/settings";
 import type { McpServerSpec } from "./harness/types";
 import { runCapture, splitArgs, which } from "./harness/process";
@@ -260,7 +261,23 @@ export class McpBootstrap {
     return { EXAM_HOME: e.installPath, EXAM_REST_PORT: String(e.restPort || 8085), EXAM_LICENSE_HOST: e.licenseHost,
       EXAM_LICENSE_PORT: String(e.licensePort || ""), EXAM_MODEL: e.modelName, EXAM_TARGET_ENDPOINT: e.targetEndpoint,
       EXAM_MODEL_CONFIG: e.modelConfigUuid, EXAM_SYSTEM_CONFIG: e.systemConfig, EXAM_REPORT_PROJECT: e.reportProject,
-      EXAM_PYTHON: e.pythonPath, EXAM_WORKSPACE: e.workspace, EXAM_JAVA_OPTS: e.javaOpts, EXAM_NOTES: join(this.p.dataDir, "exam-notes.md") };
+      EXAM_PYTHON: e.pythonPath, EXAM_WORKSPACE: e.workspace, EXAM_JAVA_OPTS: e.javaOpts, EXAM_NOTES: join(this.p.dataDir, "exam-notes.md"),
+      EXAM_PLUGIN_PACKAGE: e.pluginPackage, EXAM_USER_DROPINS: join(this.p.dataDir, "exam-dropins") };
+  }
+
+  /** Run the EXAM setup (detect, install the RESTapi plugin, check) with the private Python. */
+  async examSetup(install: boolean): Promise<ExamSetupResult> {
+    const root = join(this.p.dataDir, "mcp");
+    const fail = (error: string): ExamSetupResult => ({ ok: false, home: "", actions: [], checks: [], error });
+    if (!this.isInstalled("exam")) return fail("The EXAM tools aren't installed yet — they need Python 3.10+ (Settings → MCP servers).");
+    const s = this.settings();
+    const env = { ...baseEnv(), ...networkEnv(s), ...this.pyEnv("exam", root) };
+    const r = await runCapture(venvPython(join(root, ".venv")), [join(root, "exam", "exam_cli.py"), "exam_setup", JSON.stringify({ install })], 30 * 60_000, undefined, env);
+    try {
+      return JSON.parse(r.out.trim().split("\n").filter((l) => l.startsWith("{")).pop() ?? "") as ExamSetupResult;
+    } catch {
+      return fail(r.out.trim().slice(-500) || `setup exited with code ${r.code}`);
+    }
   }
 
   /**

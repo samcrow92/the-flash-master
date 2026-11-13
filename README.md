@@ -41,7 +41,7 @@ The app calls no model API itself and stores no model credentials. There's no lo
   - 🧪 Test Engineer
   - 🚗 **AUTOSAR & Vector Expert**: DBC, ARXML, CDD, DaVinci, CANoe, CAPL
   - 🐞 **winIDEA Debug Engineer**: uses the winIDEA Python SDK, `isystem.connect`
-  - 🔬 **EXAM Test Agent**: designs test cases for EXAM (MicroNova / VW Group HiL/SiL test automation), creates them with the Test Case Generator or Groovy, runs suites through the EXAM RESTapi and summarises failures. Works without MCP through a command line (`FLASH_EXAM_CLI`). Configure it in **Settings → Integrations → EXAM**.
+  - 🔬 **EXAM Test Agent**: designs test cases for EXAM (MicroNova / VW Group HiL/SiL test automation), creates them with the Test Case Generator or Groovy, runs suites through the EXAM RESTapi and summarises failures. Works without MCP through a command line (`FLASH_EXAM_CLI`). Configure it in **Settings → Integrations → EXAM**: it finds EXAM and installs the RESTapi plugin from your company's package automatically, or a department marketplace plugin (`exam.json`) sets everything up in one click.
   - 📌 Jazz Work Item Analyst
   - 📊 **Presentation Expert**: creates and edits PowerPoint decks, works with corporate templates, and adds native, editable Ishikawa slides
   - 🧭 **NOW Analysis & RCA**: structured NOW analysis (Now · Objective · Way forward) with an Ishikawa root-cause analysis and 5 Whys, following INCOSE practice. The fishbone is drawn directly in the chat.

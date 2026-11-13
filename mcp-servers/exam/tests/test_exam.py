@@ -128,3 +128,54 @@ def test_mcp_lists_tools():
                        capture_output=True, text=True, timeout=30)
     names = {t["name"] for t in json.loads(p.stdout.splitlines()[1])["result"]["tools"]}
     assert {"exam_status", "exam_start", "exam_open_model", "exam_run", "exam_generate", "exam_groovy", "exam_results"} <= names
+
+
+def _fake_install(tmp_path):
+    home = tmp_path / "MicroNova" / "EXAM 4.10"
+    (home / "plugins").mkdir(parents=True)
+    (home / "EXAM.exe").write_bytes(b"MZ")
+    (home / ".eclipseproduct").write_text("name=EXAM\nversion=4.10.2\n")
+    (home / "plugins" / "org.eclipse.core.runtime_3.20.jar").write_bytes(b"x")
+    return home
+
+
+def test_setup_installs_plugin_from_jar_and_zip(tmp_path):
+    home = _fake_install(tmp_path)
+    env = {**os.environ, "EXAM_HOME": str(home), "EXAM_REST_URL": "http://127.0.0.1:9/examRest",
+           "EXAM_USER_DROPINS": str(tmp_path / "udrop"), "EXAM_LICENSE_HOST": "", "EXAM_TARGET_ENDPOINT": ""}
+    r = cli(["exam_setup_check"], env)
+    out = json.loads(r.stdout)
+    checks = {c["name"]: c for c in out["checks"]}
+    assert checks["EXAM installation"]["state"] == "ok" and "4.10.2" in checks["EXAM installation"]["detail"]
+    assert checks["RESTapi plugin"]["state"] == "fail" and out["ok"] is False
+
+    jar = tmp_path / "com.micronova.exam.restapi_2.1.0.jar"
+    jar.write_bytes(b"PK")
+    r = cli(["exam_setup", json.dumps({"package": str(jar)})], env)
+    out = json.loads(r.stdout)
+    assert any("copied" in a for a in out["actions"]), out
+    assert (home / "dropins" / jar.name).exists()
+    assert {c["name"]: c for c in out["checks"]}["RESTapi plugin"]["state"] == "ok"
+    assert (tmp_path / "udrop" / ".pending-clean").exists()  # next exam_start runs -clean
+
+    # zip with an Eclipse plugins/ folder into a fresh install
+    import zipfile
+    home2 = _fake_install(tmp_path / "second")
+    z = tmp_path / "exam-restapi.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("plugins/de.micronova.exam.rest.api_1.0.0.jar", "PK")
+        zf.writestr("features/de.micronova.exam.rest.feature_1.0.0/feature.xml", "<feature/>")
+    r = cli(["exam_setup", json.dumps({"package": str(z)})], {**env, "EXAM_HOME": str(home2)})
+    out = json.loads(r.stdout)
+    assert (home2 / "dropins" / "exam-restapi" / "plugins" / "de.micronova.exam.rest.api_1.0.0.jar").exists(), out
+    assert {c["name"]: c for c in out["checks"]}["RESTapi plugin"]["state"] == "ok"
+
+
+def test_setup_without_package_explains_what_is_missing(tmp_path):
+    home = _fake_install(tmp_path)
+    env = {**os.environ, "EXAM_HOME": str(home), "EXAM_REST_URL": "http://127.0.0.1:9/examRest", "EXAM_USER_DROPINS": str(tmp_path / "u"),
+           "EXAM_PLUGIN_PACKAGE": "", "EXAM_LICENSE_HOST": "127.0.0.1", "EXAM_LICENSE_PORT": "9"}
+    out = json.loads(cli(["exam_setup"], env).stdout)
+    checks = {c["name"]: c for c in out["checks"]}
+    assert "plugin package" in checks["RESTapi plugin"]["detail"]
+    assert checks["License server"]["state"] == "fail"

@@ -3,6 +3,7 @@ import { Settings as SettingsIcon } from "../components/icons";
 import type { DriveMode, HarnessId, HarnessStatus } from "@shared/types";
 import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
+import type { ExamSetupResult } from "@shared/api";
 import { api, useStore } from "../store";
 import { MCP_CATALOG, catalogState, type CatalogServer } from "@shared/mcp-catalog";
 import { UserAvatar, toAvatarDataUrl } from "../components/UserAvatar";
@@ -628,6 +629,9 @@ function Integrations(f: F) {
 
     <h4>EXAM test automation (MicroNova)</h4>
     <p className="muted">Used by the EXAM Test Agent through the EXAM RESTapi plugin. Model fields are defaults the agent can override per request.</p>
+    <Row label="RESTapi plugin package" hint="The plugin is licensed MicroNova software, so it isn't shipped with the app. Paste the .jar/.zip path on your company share, or an http(s) URL (e.g. your department's marketplace server)."><Text f={f} path="exam.pluginPackage" placeholder={"\\\\server\\tools\\EXAM\\restapi-plugin.zip"} /></Row>
+    <Row label="Automatic setup" hint="At start: find EXAM, fill in the install folder, and install the RESTapi plugin when it's missing."><Bool f={f} path="exam.autoSetup" /></Row>
+    <ExamSetup />
     <Row label="Install folder" hint="Folder containing EXAM.exe. Only needed if the agent should start EXAM itself."><Text f={f} path="exam.installPath" /></Row>
     <Row label="RESTapi port" hint="Port of the EXAM RESTapi plugin (default 8085)."><Num f={f} path="exam.restPort" min={1} /></Row>
     <Row label="License server host"><Text f={f} path="exam.licenseHost" /></Row>
@@ -647,6 +651,32 @@ function Integrations(f: F) {
     <Row label="DaVinci Configurator CLI" hint="Path to DVCfgCmd.exe (or equivalent)."><Text f={f} path="vector.davinciCliPath" /></Row>
     <Row label="CAPL include paths" hint="Separated by ;"><Text f={f} path="vector.caplIncludePaths" /></Row>
   </>;
+}
+
+function ExamSetup() {
+  const st = useStore();
+  const [busy, setBusy] = useState(false);
+  const [r, setR] = useState<ExamSetupResult | null>(null);
+  const go = async (install: boolean) => {
+    setBusy(true);
+    try {
+      const res = await api().examSetup(install);
+      setR(res);
+      st.setSettings((await api().getSettings()).settings); // the install folder may have been filled in
+    } finally { setBusy(false); }
+  };
+  const mark = { ok: "✅", warn: "⚠️", fail: "❌" } as const;
+  return <Row label="Setup" hint="Check finds what's missing; Set up also installs the plugin from the package above. A plugin installed without admin rights is used when the agent starts EXAM.">
+    <div className="col gap">
+      <div className="row gap">
+        <button disabled={busy} onClick={() => void go(false)}>Check</button>
+        <button className="primary" disabled={busy} onClick={() => void go(true)}>{busy ? "Working…" : "Set up EXAM"}</button>
+      </div>
+      {r?.error && <span>❌ {r.error}</span>}
+      {r && r.actions.map((a, i) => <span key={`a${i}`}>↪ {a}</span>)}
+      {r && r.checks.map((c) => <span key={c.name}>{mark[c.state]} <b>{c.name}</b>: {c.detail}</span>)}
+    </div>
+  </Row>;
 }
 
 function Network(f: F) {

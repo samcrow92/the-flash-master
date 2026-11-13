@@ -1,0 +1,9 @@
+{
+  "pluginPackage": "files/README-exam-restapi.txt",
+  "targetEndpoint": "http://exam-server.example.local:8080",
+  "licenseHost": "license.example.local",
+  "licensePort": 5053,
+  "modelName": "BodyElectronics",
+  "systemConfig": "HIL_Rack_01",
+  "reportProject": "BodyReports"
+}

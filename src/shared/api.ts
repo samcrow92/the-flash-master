@@ -109,6 +109,8 @@ export interface FlashApi {
   jazzProjectAreas(): Promise<string[]>;
   jazzSetPassword(password: string): Promise<void>;
   jazzTest(): Promise<{ ok: boolean; detail: string }>;
+  /** Detect EXAM, install the RESTapi plugin when `install` (from Settings → EXAM → plugin package), run all checks. */
+  examSetup(install: boolean): Promise<ExamSetupResult>;
   /** Opens a sign-in window (company SSO / Jazz Authorization Server); resolves when signed in or closed. */
   jazzSignIn(): Promise<{ ok: boolean; detail: string }>;
   jazzSignOut(): Promise<void>;
@@ -140,6 +142,14 @@ export interface FlashApi {
   appInfo(): Promise<{ version: string; dataDir: string; platform: string }>;
 }
 
+export interface ExamSetupResult {
+  ok: boolean;
+  home: string;
+  actions: string[];
+  checks: { name: string; state: "ok" | "warn" | "fail"; detail: string }[];
+  error?: string;
+}
+
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
   "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "toggleReaction", "listAgents", "startAgent",
@@ -147,7 +157,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",
 ];
 

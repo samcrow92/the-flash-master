@@ -32,6 +32,7 @@ Use the `exam` MCP tools when they are listed. Otherwise (MCP blocked) call the 
 | Goal | Tool |
 |---|---|
 | Is EXAM up? versions, current run | `exam_status` (then `exam_start` if not running and an install folder is set) |
+| Something missing (plugin, license, server)? | `exam_setup_check`; `exam_setup` installs the RESTapi plugin from the package in Settings |
 | Load a model | `exam_open_model` (defaults from Settings → EXAM) |
 | Select what to run | `exam_set_filter` (test-case attributes), then `exam_run` (test object + system configuration) |
 | Long runs | `exam_run` with `wait:false`, then `exam_wait`; `exam_stop` to abort |

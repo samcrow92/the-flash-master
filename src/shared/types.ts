@@ -365,7 +365,17 @@ export interface PluginPackage {
   workflows?: { file: string; content: string }[];
   instructions?: string;
   mcpServers?: { id: string; label?: string; command: string; args?: string; env?: string }[];
+  /** Team EXAM setup: fills empty Settings → EXAM fields and triggers the automatic setup. */
+  exam?: ExamPreset;
 }
+
+/** EXAM settings a department can publish. A relative pluginPackage is resolved against the marketplace URL. */
+export interface ExamPreset {
+  pluginPackage?: string; targetEndpoint?: string; licenseHost?: string; licensePort?: number; restPort?: number;
+  modelName?: string; modelConfigUuid?: string; systemConfig?: string; reportProject?: string; pythonPath?: string;
+}
+export const EXAM_PRESET_KEYS = ["pluginPackage", "targetEndpoint", "licenseHost", "licensePort", "restPort", "modelName",
+  "modelConfigUuid", "systemConfig", "reportProject", "pythonPath"] as const;
 
 export interface InstalledPlugin {
   id: string;
