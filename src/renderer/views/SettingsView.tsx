@@ -175,6 +175,8 @@ function Harnesses(f: F) {
           </Row>
         </>}
         {h === "pi" && <div className="warn-note">Pi runs in its native RPC mode. Pi has no MCP support by design, so Pi agents cannot delegate, report progress steps or use the Vector/winIDEA/PowerPoint/Jazz tools — use Copilot or OpenCode for the coordinator and tool-heavy specialists. Read-only mode is enforced with Pi's read-only tool set.</div>}
+        {h === "cursor" && <div className="muted small">Cursor Agent runs as <code>cursor-agent acp</code> with your Cursor login (<code>cursor-agent login</code>). Models come from your Cursor plan.</div>}
+        {h === "claude" && <div className="muted small">Claude Code runs through its ACP bridge, <code>claude-agent-acp</code> (npm i -g @agentclientprotocol/claude-agent-acp), with the login of your Claude Code CLI. CLAUDE.md files still load.</div>}
         {h === "duo" && <div className="warn-note">GitLab Duo runs in headless mode (no ACP) and auto-approves its own tools. Use read-only prompts or a sandbox.</div>}
       </div>;
     })}
@@ -192,6 +194,8 @@ function Agents(f: F) {
     <Row label="Agent tools" hint="Text mode: agents delegate, create agents and use TheFlashMaster's tools (tasks, artifacts, Jazz, DOORS Next) by writing DELEGATE / AGENT / TOOL lines that the app carries out. It works everywhere, also where company policy blocks MCP. Automatic: those tools are offered as MCP tools, with text mode as the fallback when they don't load.">
       <Choice f={f} path="agents.toolMode" options={[["text", "Text mode (default)"], ["auto", "MCP tools, text fallback"]]} /></Row>
     <Row label="Delegation depth" hint="How many levels of specialists may delegate further (1 = only the coordinator delegates)."><Num f={f} path="agents.delegationDepth" min={0} /></Row>
+    <Row label="Separate copy for code-writing specialists" hint="In a git project, specialists that change code (Software Expert, Test Engineer, agents with isolate: true) each work in their own worktree and branch, so parallel agents don't overwrite each other. You merge or discard each branch from the Agents page."><Bool f={f} path="agents.isolateWriters" /></Row>
+    <Row label="Warn when an agent is silent for (minutes)" hint="A working agent that sends nothing for this long gets a warning in its chat. It keeps running. 0 = off."><Num f={f} path="agents.stuckAfterMinutes" min={0} /></Row>
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
     <InstructionSettings f={f} />
     <div className="row between">

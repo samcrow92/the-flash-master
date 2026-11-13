@@ -7,11 +7,12 @@ export function AgentsView() {
   const [filter, setFilter] = useState<"active" | "all">("active");
   const [project, setProject] = useState<string>("");
   const list = Object.values(st.agents)
-    .filter((a) => filter === "all" || ["running", "paused", "idle"].includes(a.status))
+    .filter((a) => filter === "all" || ["running", "paused", "idle", "interrupted"].includes(a.status))
     .filter((a) => !project || (project === "master" ? a.projectId === null : a.projectId === project))
     .sort((a, b) => b.startedAt - a.startedAt);
   const running = Object.values(st.agents).filter((a) => a.status === "running").length;
   const paused = Object.values(st.agents).filter((a) => a.status === "paused").length;
+  const interrupted = Object.values(st.agents).filter((a) => a.status === "interrupted").length;
   const pname = (id: string | null) => (id ? st.projects.find((p) => p.id === id)?.name ?? "—" : "Master");
 
   return (
@@ -21,6 +22,11 @@ export function AgentsView() {
         <div className="row gap">
           <span className="pill green">{running} running</span>
           <span className="pill amber">{paused} paused</span>
+          {interrupted > 0 && (
+            <button onClick={() => void api().resumeAllInterrupted()} title="Agents that were working when the app closed. Each starts a fresh session with its brief and checks what is already done.">
+              <Play size={13} /> Resume {interrupted} interrupted
+            </button>
+          )}
           <select value={project} onChange={(e) => setProject(e.target.value)}>
             <option value="">All projects</option>
             <option value="master">Master chat</option>
@@ -59,17 +65,19 @@ export function AgentsView() {
                 <td className="actions">
                   {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause" className="icon-only"><Pause size={14} /></button>}
                   {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume" className="icon-only"><Play size={14} /></button>}
-                  {["running", "paused", "idle"].includes(a.status) && <button onClick={() => api().stopAgent(a.id)} title="Stop" className="icon-only"><Square size={13} /></button>}
+                  {a.status === "interrupted" && <button onClick={() => void api().resumeInterrupted(a.id).catch((e) => st.toast("error", String(e?.message ?? e)))} title="Resume (the app closed while it was working)" className="icon-only"><Play size={14} /></button>}
+                  {["running", "paused", "idle", "interrupted"].includes(a.status) && <button onClick={() => api().stopAgent(a.id)} title="Stop" className="icon-only"><Square size={13} /></button>}
                   <button onClick={() => st.setView({ kind: "flow", agentId: a.id })} title="Progress flow chart" className="icon-only"><Compass size={14} /></button>
                   <button className="chat-btn" title={a.chatId ? "Open the chat this agent works in" : `Open a chat with ${roleOf(a.role)?.title ?? a.role}`}
                     onClick={() => (a.chatId ? st.openChat(a.chatId) : st.chatWithAgent(a.role))}><MessageCircle size={14} /> Chat</button>
+                  {a.branch && a.status !== "running" && <WorkActions id={a.id} branch={a.branch} />}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <p className="muted small">* estimated tokens (harness did not report usage). Pause interrupts the current turn at a safe point and queues new input; Resume continues.</p>
+      <p className="muted small">* estimated tokens (harness did not report usage). Pause interrupts the current turn at a safe point and queues new input; Resume continues. Interrupted agents were working when the app closed: Resume starts them again with their brief.</p>
     </div>
   );
 }
@@ -91,5 +99,27 @@ export function AgentChatStrip() {
         );
       })}
     </div>
+  );
+}
+
+/** Merge or discard a code-writing specialist's own copy of the project (its worktree and branch). */
+function WorkActions({ id, branch }: { id: string; branch: string }) {
+  const st = useStore();
+  const [busy, setBusy] = useState(false);
+  const report = (r: { ok: boolean; message: string }) => st.toast(r.ok ? "info" : "warn", r.message);
+  const run = async (fn: () => Promise<void>) => { setBusy(true); try { await fn(); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } finally { setBusy(false); } };
+  const merge = () => run(async () => report(await api().mergeAgentWork(id)));
+  const discard = () => run(async () => {
+    const w = await api().agentWorkState(id);
+    const lose = [w.unmerged ? `${w.unmerged} unmerged commit(s)` : "", w.dirty.length ? `${w.dirty.length} uncommitted change(s)` : ""].filter(Boolean).join(" and ");
+    if (lose && !confirm(`Discard ${branch}? It has ${lose}; they will be lost.`)) return;
+    report(await api().discardAgentWork(id, !!lose));
+  });
+  return (
+    <span className="work-actions" title={`Works in its own copy of the project on branch ${branch}`}>
+      <code className="small">{branch}</code>
+      <button disabled={busy} onClick={() => void merge()} title={`Merge ${branch} into your current branch`}>Merge</button>
+      <button disabled={busy} className="ghost danger" onClick={() => void discard()} title="Remove the copy and its branch">Discard</button>
+    </span>
   );
 }

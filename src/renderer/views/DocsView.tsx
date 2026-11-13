@@ -8,6 +8,13 @@ import {
 } from "../components/icons";
 import { AGENT_DOCS, type AgentDoc } from "./agentDocs";
 
+const CLI = {
+  cursorInstall: "https://cursor.com/docs/cli/installation",
+  cursorAcp: "https://cursor.com/docs/cli/overview",
+  claudeInstall: "https://code.claude.com/docs/en/setup",
+  claudeAcp: "https://github.com/agentclientprotocol/claude-agent-acp",
+};
+
 const DL = {
   x64: "https://github.com/github/copilot-cli/releases/latest/download/copilot-win32-x64.zip",
   arm64: "https://github.com/github/copilot-cli/releases/latest/download/copilot-win32-arm64.zip",
@@ -23,6 +30,7 @@ const PAGES = [
   { id: "start", label: "Getting started", icon: Rocket },
   { id: "install", label: "Install Copilot CLI", icon: Download },
   { id: "login", label: "Sign in to Copilot", icon: LogIn },
+  { id: "harnesses", label: "Cursor, Claude Code & other CLIs", icon: Bot },
   { id: "use", label: "Using TheFlashMaster", icon: BookOpen },
   { id: "agents", label: "Agents & when to use them", icon: Users },
   { id: "superpowers", label: "Superpowers workflow", icon: Sparkles },
@@ -78,6 +86,7 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
           {page === "start" && <Start check={check} go={setPage} />}
           {page === "install" && <Install check={check} onChanged={run} />}
           {page === "login" && <Login check={check} checking={checking} onCheck={run} />}
+          {page === "harnesses" && <Harnesses />}
           {page === "use" && <Use />}
           {page === "agents" && <Agents />}
           {agent && <AgentPage doc={agent} />}
@@ -214,6 +223,69 @@ function Login({ check, checking, onCheck }: { check: Check; checking: boolean; 
       <button disabled={!token.trim()} onClick={async () => { const r = await api().setCopilotToken(token); setTokenSet(r.tokenSet); setToken(""); st.toast("info", "Token saved"); onCheck(); }}>Save</button>
       {tokenSet && <button className="ghost danger" onClick={async () => { await api().setCopilotToken(""); setTokenSet(false); onCheck(); }}>Remove</button>}
     </div>
+  </>;
+}
+
+/** Commands shown with a copy button. */
+function Cmd({ children }: { children: string }) {
+  const [copied, setCopied] = useState(false);
+  return <div className="doc-cmd"><code>{children}</code>
+    <button className="link small" onClick={() => { void navigator.clipboard.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy"}</button>
+  </div>;
+}
+
+function Harnesses() {
+  const st = useStore();
+  const [status, setStatus] = useState<{ id: string; available: boolean; version: string | null; path: string | null }[] | null>(null);
+  const detect = async () => { setStatus(null); setStatus(await api().detectHarnesses()); };
+  useEffect(() => { void detect(); }, []);
+  const found = (id: string) => status?.find((h) => h.id === id);
+  const Status = ({ id }: { id: string }) => {
+    const h = found(id);
+    return <StatusRow ok={status ? !!h?.available : null} label={h?.available ? `Found ${h.version ?? ""}${h.path ? ` · ${h.path}` : ""}` : "Not found yet"} onClick={() => void detect()} />;
+  };
+  const mac = navigator.userAgent.includes("Mac");
+  return <>
+    <h3>Use Cursor Agent, Claude Code and other agent CLIs</h3>
+    <p>Besides Copilot, TheFlashMaster can run agents on <b>Cursor Agent</b>, <b>Claude Code</b>, OpenCode, Pi and GitLab Duo, on Windows and macOS. Each one uses the login of the CLI on your machine; TheFlashMaster stores no keys. Pick the harness per chat (the selector next to the model), per agent (<button className="link" onClick={() => st.setView({ kind: "settings", tab: "agents" })}>Settings → Agents</button>), or ask the coordinator in words: “have the reviewer check this on Claude”.</p>
+    <table className="doc-table">
+      <thead><tr><th>Harness</th><th>How it runs</th><th>Tools (MCP)</th><th>Clean instructions</th></tr></thead>
+      <tbody>
+        <tr><td>GitHub Copilot CLI</td><td><code>copilot --acp</code></td><td>Yes</td><td>Full</td></tr>
+        <tr><td>OpenCode</td><td><code>opencode acp</code></td><td>Yes</td><td>Full</td></tr>
+        <tr><td>Cursor Agent</td><td><code>cursor-agent acp</code></td><td>Yes</td><td>Partial: AGENTS.md and .cursor/rules still load</td></tr>
+        <tr><td>Claude Code</td><td><code>claude-agent-acp</code> (Claude Code’s ACP bridge)</td><td>Yes</td><td>Partial: CLAUDE.md still loads</td></tr>
+        <tr><td>Pi</td><td><code>pi --mode rpc</code></td><td>No</td><td>Full</td></tr>
+        <tr><td>GitLab Duo</td><td><code>duo run</code> (headless)</td><td>Yes</td><td>Partial</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Cursor Agent</h3>
+    <Status id="cursor" />
+    <Step n={1} title="Install Cursor Agent">
+      <p>{mac ? "In Terminal:" : "In PowerShell:"}</p>
+      <Cmd>{mac ? "curl https://cursor.com/install -fsS | bash" : "irm 'https://cursor.com/install?win32=true' | iex"}</Cmd>
+      <p className="muted small">Cursor’s guide: <Ext href={CLI.cursorInstall}>Installing the Cursor CLI</Ext></p>
+    </Step>
+    <Step n={2} title="Sign in once">
+      <Cmd>cursor-agent login</Cmd>
+      <p>A browser window opens for your Cursor account. Models come from your Cursor plan and show up in the model field after detection. <Ext href={CLI.cursorAcp}>Cursor CLI overview</Ext></p>
+    </Step>
+
+    <h3>Claude Code</h3>
+    <Status id="claude" />
+    <Step n={1} title="Install Claude Code and sign in">
+      <Cmd>{mac ? "curl -fsSL https://claude.ai/install.sh | bash" : "irm https://claude.ai/install.ps1 | iex"}</Cmd>
+      <p>Then run <code>claude</code> once and sign in with <code>/login</code> (Claude subscription or Console account). <Ext href={CLI.claudeInstall}>Claude Code setup</Ext></p>
+    </Step>
+    <Step n={2} title="Add Claude Code’s ACP bridge">
+      <p>TheFlashMaster talks to Claude Code over the Agent Client Protocol, through the official bridge. It needs Node.js 22 or newer.</p>
+      <Cmd>npm i -g @agentclientprotocol/claude-agent-acp</Cmd>
+      <p className="muted small">The bridge uses Claude Code’s login. <Ext href={CLI.claudeAcp}>claude-agent-acp on GitHub</Ext></p>
+    </Step>
+
+    {mac && <Note>On macOS TheFlashMaster reads your login shell’s PATH at start, so CLIs in <code>~/.local/bin</code>, Homebrew or npm’s global folder are found even when the app is opened from the Dock. If one still isn’t found, set its path in <button className="link" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}>Settings → Harnesses</button>.</Note>}
+    <p><button onClick={() => void detect()}><RotateCcw size={14} /> Detect again</button></p>
   </>;
 }
 

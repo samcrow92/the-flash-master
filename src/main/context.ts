@@ -54,6 +54,8 @@ export function parseSlash(input: string): SlashParse {
 export const RESULT_CONTRACT = (maxTokens: number) =>
   `When you finish, end your reply with a result block:
 <result>
+status: done | needs_decision | blocked | failed
+question: only for needs_decision / blocked — what you need, the options, and the one you recommend
 summary: <= ${maxTokens} tokens — what you did / found, decisions, open questions
 findings: bullet list (file:line where relevant)
 artifacts: ids of stored artifacts, if any
@@ -139,7 +141,14 @@ function firstSentences(text: string, max: number): string {
   return t.length <= max ? t : t.slice(0, max) + "…";
 }
 
+/** How an agent says its turn ended. needs_decision and blocked are surfaced to the user as well as the delegating agent. */
+export type ResultStatus = "done" | "needs_decision" | "blocked" | "failed";
+const RESULT_STATUSES: ResultStatus[] = ["done", "needs_decision", "blocked", "failed"];
+
 export interface ParsedResult {
+  /** null when the reply has no result block; "done" when the block has no (valid) status line. */
+  status: ResultStatus | null;
+  question: string | null;
   summary: string | null;
   findings: string[];
   artifacts: string[];
@@ -147,20 +156,23 @@ export interface ParsedResult {
 
 export function parseResult(text: string): ParsedResult {
   const m = /<result>([\s\S]*?)(?:<\/result>|$)/i.exec(text);
-  if (!m) return { summary: null, findings: [], artifacts: [] };
+  if (!m) return { status: null, question: null, summary: null, findings: [], artifacts: [] };
   const block = m[1]!;
+  const raw = /^\s*status:\s*([\w-]+)/im.exec(block)?.[1]?.toLowerCase().replace(/-/g, "_") ?? "";
+  const status = (RESULT_STATUSES as string[]).includes(raw) ? (raw as ResultStatus) : "done";
+  const question = /^\s*question:\s*([\s\S]*?)(?:\n\s*(?:summary|findings|artifacts):|$)/im.exec(block)?.[1]?.trim() || null;
   const summary = /summary:\s*([\s\S]*?)(?:\n\s*(?:findings|artifacts):|$)/i.exec(block)?.[1]?.trim() || null;
   const findingsBlock = /findings:\s*([\s\S]*?)(?:\n\s*artifacts:|$)/i.exec(block)?.[1] ?? "";
   const findings = findingsBlock.split("\n").map((l) => l.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
   const artifacts = (/artifacts:\s*(.*)/i.exec(block)?.[1] ?? "").split(/[,\s]+/).map((s) => s.trim()).filter((s) => s && s !== "none" && s !== "-");
-  return { summary, findings, artifacts };
+  return { status, question, summary, findings, artifacts };
 }
 
 /** Compact result that goes back to a delegating agent: summary + findings, capped. */
 export function resultForParent(text: string, maxTokens: number): string {
   const r = parseResult(text);
   const body = r.summary
-    ? [`summary: ${r.summary}`, r.findings.length ? "findings:\n" + r.findings.map((f) => `- ${f}`).join("\n") : "", r.artifacts.length ? `artifacts: ${r.artifacts.join(", ")}` : ""].filter(Boolean).join("\n")
+    ? [r.status && r.status !== "done" ? `status: ${r.status}` : "", r.question ? `question: ${r.question}` : "", `summary: ${r.summary}`, r.findings.length ? "findings:\n" + r.findings.map((f) => `- ${f}`).join("\n") : "", r.artifacts.length ? `artifacts: ${r.artifacts.join(", ")}` : ""].filter(Boolean).join("\n")
     : text;
   const maxChars = maxTokens * 4;
   return body.length > maxChars ? body.slice(0, maxChars) + "\n…[truncated to result budget]" : body;
@@ -192,7 +204,7 @@ export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
 In this session you delegate in plain text, not with a \`delegate\` tool. Write one block per sub-task,
 starting at the beginning of a line:
 DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
-DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, pi or duo, only when the user asked for one)
+DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, cursor, claude, pi or duo, only when the user asked for one)
 A brief may continue on the following lines until a blank line.
 To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
 AGENT <name>[@<harness>]: <one-line description>
@@ -210,7 +222,7 @@ export function parseTextDelegations(text: string): TextDelegation[] {
   for (const raw of text.split(/\r?\n/)) {
     if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
     if (fence) continue;
-    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
     if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), goal: m[3]!.trim() }; out.push(cur); continue; }
     if (/^\s*(?:\*\*)?(?:AGENT|END)\b/.test(raw)) { cur = null; continue; }
     if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
@@ -229,7 +241,7 @@ export function parseTextAgents(text: string): TextAgent[] {
   for (const raw of text.split(/\r?\n/)) {
     if (!cur && /^\s*```/.test(raw)) { fence = !fence; continue; }
     if (fence) continue;
-    const m = /^\s*(?:\*\*)?AGENT(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
+    const m = /^\s*(?:\*\*)?AGENT(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
     if (m) { cur = { name: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), description: m[3]!.trim(), instructions: "" }; out.push(cur); continue; }
     if (!cur) continue;
     if (/^\s*(?:\*\*)?(END|DELEGATE)\b/.test(raw) || /^\s*<result>/.test(raw)) { cur = null; continue; }

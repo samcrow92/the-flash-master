@@ -15,14 +15,17 @@ import { diffLines } from "@shared/diff";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
+import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeState, type Git, type WorkResult } from "./worktree";
 import { prepareInstructions } from "./harness/instructions";
 import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
-  parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
+  parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
 export interface OrchestratorDeps {
+  /** Git runner for agent worktrees (tests inject a fake). */
+  git?: Git;
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
   harnessEnv?: (harness: HarnessId) => Record<string, string>;
   /** Extra environment per role (e.g. FLASH_EXAM_CLI for agents that call bundled tools from a shell). */
@@ -77,6 +80,15 @@ interface Live {
   /** TheFlashMaster's tools weren't confirmed loaded (Pi, MCP blocked…): the agent may call them as TOOL lines. */
   textTools?: boolean;
   depth: number;
+  /** Isolated git worktree the agent works in (null = the project folder); undefined = not decided yet. */
+  worktree?: string | null;
+  branch?: string | null;
+  /** Last time the harness sent anything (text, tool update, plan…) during a turn; drives the stuck-agent watchdog. */
+  lastOutputAt?: number;
+  /** The watchdog already warned about this silence (cleared when output resumes). */
+  stuckSince?: number | null;
+  /** Waiting for the user to answer a permission request: silence is expected. */
+  awaitingApproval?: boolean;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
   lastResult: string | null;
@@ -114,6 +126,8 @@ function copilotMcpBlocked(homeDir: string): boolean {
     });
   } catch { return false; }
 }
+
+const SAID_LABEL: Record<Exclude<ResultStatus, "done">, string> = { needs_decision: "Needs your decision", blocked: "Blocked", failed: "Reported a failure" };
 
 export class Orchestrator {
   private live = new Map<string, Live>();
@@ -274,7 +288,7 @@ export class Orchestrator {
     const l = this.byAgent.get(agentId);
     if (!l) {
       const a = this.d.db.getAgent(agentId);
-      if (a && ["idle", "running", "paused"].includes(a.status)) this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true }));
+      if (a && ["idle", "running", "paused", "interrupted"].includes(a.status)) this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true }));
       return;
     }
     l.queue = [];
@@ -287,6 +301,160 @@ export class Orchestrator {
     this.byAgent.delete(agentId);
     this.finishWaiters(l, "stopped by user");
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", ended: true, lastActivity: "Stopped" }));
+  }
+
+  // ------------------------------------------------------------------ worktrees
+
+  private get git(): Git { return this.d.git ?? defaultGit; }
+
+  /** A delegated code-writing specialist in a git project gets its own worktree and branch; anyone else works in the project folder. */
+  private async prepareWorktree(l: Live, projectPath: string | null, chatId: string, threadRoot: string | null): Promise<void> {
+    l.worktree = null;
+    if (!projectPath || l.depth === 0 || !l.role.isolate || !this.d.settings().agents.isolateWriters) return;
+    if (!(await canIsolate(projectPath, this.git))) return;
+    const short = l.agentId.slice(0, 8);
+    const branch = `flash/${l.role.name}-${short}`;
+    const dir = join(this.d.dataDir ?? this.d.homeDir, "worktrees", short);
+    const r = await createWorktree(projectPath, dir, branch, this.git);
+    if (!r.ok) {
+      this.system(chatId, threadRoot, `⚠️ Couldn't give ${l.role.title} its own copy of the project (${r.message.split("\n")[0]}); it works in the project folder.`, "warn");
+      return;
+    }
+    l.worktree = dir;
+    l.branch = branch;
+    this.emitAgent(this.d.db.setAgentWorktree(l.agentId, dir, branch));
+    this.flow(l.agentId, { kind: "status", label: `working on branch ${branch}`, status: "isolated" });
+    this.system(chatId, threadRoot, `🌿 **${l.role.icon} ${l.role.title}** works in its own copy of the project on branch \`${branch}\`, `
+      + "so parallel agents don't overwrite each other. Merge or discard it from the Agents page when it's done.");
+  }
+
+  private agentWork(agentId: string): { repo: string; dir: string; branch: string } {
+    const a = this.d.db.getAgent(agentId);
+    if (!a?.worktree || !a.branch) throw new Error("this agent has no separate copy of the project");
+    const p = a.projectId ? this.d.db.getProject(a.projectId) : null;
+    if (!p) throw new Error("the agent's project was removed");
+    if (this.byAgent.get(agentId)?.busy) throw new Error("the agent is still working; wait for it to finish or stop it first");
+    return { repo: p.path, dir: a.worktree, branch: a.branch };
+  }
+
+  async workState(agentId: string) {
+    const w = this.agentWork(agentId);
+    return { ...(await worktreeState(w.repo, w.dir, w.branch, this.git)), branch: w.branch, dir: w.dir };
+  }
+
+  /** Merge an agent's branch into the project's current branch (user action). */
+  async mergeWork(agentId: string): Promise<WorkResult> {
+    const w = this.agentWork(agentId);
+    const r = await mergeWorktree(w.repo, w.dir, w.branch, this.git);
+    this.flow(agentId, { kind: "status", label: r.message.slice(0, 160), status: r.ok ? "merged" : "merge refused" });
+    return r;
+  }
+
+  /** Remove an agent's worktree and branch. Refuses while it holds unmerged or uncommitted work, unless `force` (user confirmed). */
+  async discardWork(agentId: string, force = false): Promise<WorkResult> {
+    const w = this.agentWork(agentId);
+    const r = await removeWorktree(w.repo, w.dir, w.branch, force, this.git);
+    if (r.ok) {
+      const l = this.byAgent.get(agentId);
+      if (l) { l.session?.close(); l.session = null; l.worktree = undefined; l.branch = null; }
+      this.emitAgent(this.d.db.setAgentWorktree(agentId, null, null));
+    }
+    this.flow(agentId, { kind: "status", label: r.message.slice(0, 160), status: r.ok ? "copy removed" : "kept" });
+    return r;
+  }
+
+  /**
+   * Stuck-agent watchdog, called every 30 s by the app. A working agent that has sent nothing for
+   * `agents.stuckAfterMinutes` gets one warning in its chat, its progress flow and a notice; it keeps running, and
+   * the warning clears as soon as output resumes. Agents waiting for an approval or for a busy specialist are not stuck.
+   */
+  checkStuck(now = Date.now()): string[] {
+    const mins = this.d.settings().agents.stuckAfterMinutes;
+    if (!mins || mins <= 0) return [];
+    const flagged: string[] = [];
+    for (const l of this.live.values()) {
+      if (!l.busy || l.paused || l.stopped || l.awaitingApproval || l.stuckSince || !l.currentMessageId || !l.lastOutputAt) continue;
+      if (now - l.lastOutputAt < mins * 60_000) continue;
+      const waitingOnSpecialist = [...this.live.values()].some((c) => c.busy && c.key.startsWith(`${l.agentId}>`));
+      if (waitingOnSpecialist) continue;
+      l.stuckSince = now;
+      const quiet = Math.round((now - l.lastOutputAt) / 60_000);
+      this.setStatus(l, "running", `⏳ No output for ${quiet} min: may be stuck`);
+      this.flow(l.agentId, { kind: "status", label: `no output for ${quiet} min`, status: "stuck" });
+      this.system(l.chatId, l.threadRoot, `⏳ **${l.role.icon} ${l.role.title}** has sent nothing for ${quiet} min. `
+        + "It is still running: keep waiting, send a message to steer it, or stop it.", "warn");
+      flagged.push(l.agentId);
+    }
+    return flagged;
+  }
+
+  private noteOutput(l: Live): void {
+    l.lastOutputAt = Date.now();
+    if (!l.stuckSince) return;
+    const quiet = Math.round((l.lastOutputAt - l.stuckSince) / 60_000);
+    l.stuckSince = null;
+    this.flow(l.agentId, { kind: "status", label: "output resumed", status: "running" });
+    this.setStatus(l, "running", quiet > 0 ? "Working again after a long silence" : "Working again");
+  }
+
+  /** After a restart: tell each affected chat which agents were interrupted and that they can be resumed. */
+  announceInterrupted(agents: AgentRun[]): void {
+    const byChat = new Map<string, AgentRun[]>();
+    for (const a of agents) if (a.chatId) byChat.set(a.chatId, [...(byChat.get(a.chatId) ?? []), a]);
+    for (const [chatId, list] of byChat) {
+      if (!this.d.db.getChat(chatId)) continue;
+      const names = list.map((a) => { const r = this.d.roles().find((x) => x.name === a.role); return r ? `${r.icon} ${r.title}` : a.role; });
+      this.system(chatId, null, `⏸ The app closed while ${names.join(", ")} ${list.length === 1 ? "was" : "were"} working. `
+        + "Resume from the agent chip above the composer or from the Agents page; nothing was lost.", "warn");
+    }
+  }
+
+  /**
+   * Resume an agent the app interrupted by closing. Its harness session is gone, so it starts a fresh one with its
+   * original brief and a note to check what is already done before continuing.
+   */
+  resumeInterrupted(agentId: string): AgentRun {
+    const a = this.d.db.getAgent(agentId);
+    if (!a || a.status !== "interrupted") throw new Error("this agent isn't waiting to be resumed");
+    const chat = a.chatId ? this.d.db.getChat(a.chatId) : null;
+    if (!chat) { this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped" })); throw new Error("its chat was deleted"); }
+    const role = this.role(a.role);
+    let depth = 0;
+    for (let p = a.parentAgentId; p && depth < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) depth++;
+    const threadRoot = this.d.db.lastThreadOf(agentId);
+    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
+    if (this.live.has(key)) {
+      this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", lastActivity: "Superseded: the same agent is already running again" }));
+      throw new Error(`${role.title} is already running again in this chat`);
+    }
+    const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
+    const l: Live = { key, agentId, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
+      worktree: a.worktree, branch: a.branch };
+    this.live.set(key, l);
+    this.byAgent.set(agentId, l);
+    this.emitAgent(this.d.db.updateAgent(agentId, { status: "idle", ended: false, lastActivity: "Resuming after the app restarted" }));
+    this.flow(agentId, { kind: "status", label: "resumed after restart", status: "running" });
+    const kids = this.d.db.childAgents(agentId).filter((c) => c.status !== "stopped");
+    const input = [
+      "The app was closed while you were working on this, and it has just been reopened. Your earlier session is gone.",
+      "Check what is already done (files, the task board, your specialists' results) and continue where you left off. Don't redo finished work.",
+      kids.length ? `Specialists you started earlier (use get_result with these ids instead of delegating again): ${kids.map((c) => `${c.role} ${c.id} (${c.status})`).join("; ")}.` : "",
+    ].filter(Boolean).join("\n");
+    void this.turn({ chat, threadRoot, role, input, skills: [], depth, brief: a.parentAgentId ? a.brief : null, liveKey: key })
+      .catch((e) => this.system(chat.id, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
+    return this.d.db.getAgent(agentId)!;
+  }
+
+  /** Resume every interrupted agent, specialists before the agents that delegated to them. */
+  resumeAllInterrupted(): number {
+    const list = this.d.db.listInterrupted();
+    const depthOf = (a: AgentRun) => { let d = 0; for (let p = a.parentAgentId; p && d < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) d++; return d; };
+    let n = 0;
+    for (const a of list.sort((x, y) => depthOf(y) - depthOf(x))) {
+      try { this.resumeInterrupted(a.id); n++; } catch { /* superseded or chat deleted: already marked stopped */ }
+    }
+    return n;
   }
 
   async stopChat(chatId: string): Promise<void> {
@@ -430,6 +598,8 @@ export class Orchestrator {
     live.tools = new Map();
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
+    live.lastOutputAt = Date.now();
+    live.stuckSince = null;
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
     let text = "";
@@ -447,7 +617,9 @@ export class Orchestrator {
         this.d.emit({ type: "message.delta", messageId: reply.id, chatId: t.chat.id, delta });
         if (Date.now() - lastFlush > 500) { lastFlush = Date.now(); this.d.db.updateMessage(reply.id, { content: text }); }
       };
-      if (firstTurn) live.session = await this.openSession(live, project?.path ?? null, t.chat);
+      if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
+      const workDir = live.worktree ?? project?.path ?? null;
+      if (firstTurn) live.session = await this.openSession(live, workDir, t.chat);
       // Coordinator: Pi has no MCP, so text mode right away; other harnesses get a few seconds to list the tools,
       // and are checked again after the first reply (some list them only when the first prompt arrives).
       let toolsPending = false;
@@ -487,9 +659,10 @@ export class Orchestrator {
       }
       // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
       const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
-      promptText = buildTurnPrompt({ role: t.role, projectPath: project?.path ?? null, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
+      promptText = buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
         brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
-        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : "", firstTurn && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
+          firstTurn && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : "", firstTurn && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       this.setStatus(live, "running", "Thinking…");
       // Autopilot is read per turn, so toggling it applies to the very next message.
       const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
@@ -535,15 +708,20 @@ export class Orchestrator {
       const final = this.d.db.updateMessage(reply.id, { content: text || (status === "paused" ? "_(paused)_" : "_(no output)_"),
         status: res.stopReason === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
       this.d.emit({ type: "message.updated", message: final });
-      const compact = resultForParent(text, t.role.maxResultTokens);
+      const compact = resultForParent(text, t.role.maxResultTokens) + (live.branch ? `\nbranch: ${live.branch} (isolated copy; the user merges it)` : "");
       live.lastResult = compact;
       const resultLine = /summary:\s*(.+)/.exec(compact)?.[1] ?? compact.replace(/\s+/g, " ");
+      // What the agent itself says about how it ended (status line of its <result> block).
+      const said = status === "done" ? (parseResult(text).status ?? "done") : "done";
+      const asks = said !== "done" ? (parseResult(text).question ?? resultLine) : null;
       this.flow(live.agentId, status === "error" ? { kind: "error", label: (res.error ?? "error").slice(0, 160) }
+        : said !== "done" ? { kind: "status", label: `${SAID_LABEL[said]}: ${asks!.slice(0, 150)}`, status: said }
         : { kind: status === "done" ? "result" : "status", label: status === "done" ? resultLine.slice(0, 160) : status, status });
       this.emitAgent(this.d.db.updateAgent(live.agentId, { status: status === "done" ? "idle" : status, resultSummary: compact.slice(0, 4000),
-        lastActivity: status === "done" ? "Waiting for input" : status, ended: status === "stopped" }));
+        lastActivity: status === "done" ? (said !== "done" ? `${SAID_LABEL[said]}: ${asks}` : "Waiting for input") : status, ended: status === "stopped" }));
+      if (said !== "done") this.surfaceSaid(live, t.chat.id, t.threadRoot, said, asks!);
       if (t.taskId) {
-        const task = this.d.db.updateTask(t.taskId, { status: status === "error" ? "blocked" : "review" });
+        const task = this.d.db.updateTask(t.taskId, { status: status === "error" || said !== "done" ? "blocked" : "review" });
         this.d.emit({ type: "task.updated", task });
       }
       this.finishWaiters(live, compact);
@@ -628,6 +806,7 @@ export class Orchestrator {
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
       },
       onEvent: (e) => {
+        this.noteOutput(live);
         if (live.awaiting.length && (e.type === "text" || e.type === "tool" || e.type === "thought")) this.markSeen(live, false);
         if (e.type === "steer_ack") this.markSeen(live, true);
         if (e.type === "text") live.sink?.(e.text);
@@ -658,10 +837,13 @@ export class Orchestrator {
       role: live.role.name, content: `🔐 **${live.role.title}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
     this.setStatus(live, "running", "Waiting for your approval");
+    live.awaitingApproval = true;
     this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "waiting" });
     this.d.emit({ type: "notice", level: "warn", text: `${live.role.title} is waiting for approval` });
     return new Promise((resolve) => {
       this.pendingPermissions.set(msg.id, (allow) => {
+        live.awaitingApproval = false;
+        live.lastOutputAt = Date.now();
         this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: allow ? "allowed" : "denied" });
         resolve(allow);
       });
@@ -875,6 +1057,17 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
 
   private finishWaiters(l: Live, result: string): void {
     for (const w of l.waiters.splice(0)) w(result);
+  }
+
+  /**
+   * A specialist reported that it needs a decision, is blocked, or failed. Its delegating agent gets this in the
+   * result as usual; the user also sees it right away in the thread and as a notice, without waiting for the coordinator.
+   */
+  private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string): void {
+    const icon = said === "needs_decision" ? "❓" : said === "blocked" ? "⛔" : "⚠️";
+    const who = `${l.role.icon} ${l.role.title}`;
+    if (l.depth > 0) this.system(chatId, threadRoot, `${icon} **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}`);
+    this.d.emit({ type: "notice", level: said === "failed" ? "error" : "warn", text: `${who} ${SAID_LABEL[said].toLowerCase()}: ${asks}`.replace(/[*`]/g, "").slice(0, 140) });
   }
 
   private setStatus(l: Live, status: AgentRun["status"], activity: string): void {

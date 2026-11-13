@@ -1,3 +1,4 @@
+import { fixPath } from "./shell-path";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, Notification } from "electron";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { extname } from "node:path";
@@ -37,6 +38,8 @@ app.setName("TheFlashMaster");
 if (!app.requestSingleInstanceLock()) app.quit();
 
 // FLASH_DATA_DIR overrides the data folder (isolated test runs, or keeping data next to a portable exe).
+// Finder/Dock launches on macOS start with a minimal PATH: take the login shell's, so agent CLIs are found.
+fixPath();
 if (process.env.FLASH_DATA_DIR) app.setPath("userData", process.env.FLASH_DATA_DIR);
 const dataDir = app.getPath("userData");
 mkdirSync(dataDir, { recursive: true });
@@ -62,7 +65,7 @@ log("info", `starting TheFlashMaster ${app.getVersion()}`);
 const db = new Db(join(dataDir, "flashmaster.db"));
 db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
 settings.onChange((st) => { db.defaultAutopilot = st.general.autopilotDefault !== false; });
-db.reapOrphans();
+const interruptedAtStart = db.interruptOrphans();
 db.applyRetention(settings.get().data.retentionDays);
 
 let roles: RoleDef[] = [];
@@ -135,6 +138,10 @@ const orch = new Orchestrator({
     saveModels();
   },
 });
+// Agents that were working when the app last closed: tell their chats they can be resumed.
+orch.announceInterrupted(interruptedAtStart);
+// Stuck-agent watchdog: warns (once per silence) about working agents that have sent nothing for a while.
+setInterval(() => orch.checkStuck(), 30_000).unref();
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {
@@ -558,6 +565,11 @@ const api: FlashApi = {
   startAgent: async (i) => orch.startAgent(i.projectId, i.role, i.brief),
   pauseAgent: async (id) => orch.pause(id),
   resumeAgent: async (id) => orch.resume(id),
+  resumeInterrupted: async (id) => orch.resumeInterrupted(id),
+  resumeAllInterrupted: async () => orch.resumeAllInterrupted(),
+  agentWorkState: async (id) => orch.workState(id),
+  mergeAgentWork: async (id) => orch.mergeWork(id),
+  discardAgentWork: async (id, force) => orch.discardWork(id, !!force),
   stopAgent: async (id) => orch.stop(id),
   stopAll: async () => orch.stopAll(),
   getAgentFlow: async (agentId) => {
@@ -946,3 +958,5 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => { void orch.stopAll(); bridge.stop(); db.close(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+// macOS: clicking the Dock icon with no window open brings the main window back.
+app.on("activate", () => { if (!app.isReady()) return; if (!win || win.isDestroyed()) createWindow(); else win.show(); });

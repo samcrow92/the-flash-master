@@ -50,6 +50,10 @@ export interface Settings {
     instructionMode: "clean" | "harness"; // clean = TheFlashMaster instructions only (harness AGENTS.md/rules/skills off)
     keepProjectInstructions: boolean; // in clean mode, still load the project's AGENTS.md / instruction files
     houseRules: string; // extra rules sent to every agent (your workflow/setup)
+    /** Warn when a working agent has produced no output for this many minutes (0 = off). */
+    stuckAfterMinutes: number;
+    /** Code-writing specialists (roles with `isolate: true`) work in their own git worktree and branch when delegated. */
+    isolateWriters: boolean;
   };
   updates: {
     autoCheck: boolean; // check at startup and every few hours
@@ -162,6 +166,8 @@ export const DEFAULT_SETTINGS: Settings = {
   harnesses: {
     copilot: harness(true),
     opencode: harness(true),
+    cursor: harness(true),
+    claude: harness(true),
     pi: harness(true),
     duo: harness(true),
     mock: harness(true),
@@ -173,7 +179,7 @@ export const DEFAULT_SETTINGS: Settings = {
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
+  agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, isolateWriters: true },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true },
   tokens: {

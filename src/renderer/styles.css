@@ -167,7 +167,8 @@ code.inline-code.copied { box-shadow: 0 0 0 1px var(--green); background: color-
 .table td.actions { white-space: nowrap; } .table td.actions button { padding: 2px 8px; margin-right: 3px; }
 .activity { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status { font-size: 11.5px; padding: 1px 8px; border-radius: 10px; background: var(--bg3); white-space: nowrap; }
-.st-running { color: var(--green); } .st-paused { color: var(--amber); } .st-error { color: var(--red); } .st-idle, .st-done { color: var(--blue); } .st-stopped { color: var(--muted); }
+.work-actions { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; } .work-actions code { opacity: .8; }
+.st-running { color: var(--green); } .st-paused, .st-interrupted { color: var(--amber); } .st-error { color: var(--red); } .st-idle, .st-done { color: var(--blue); } .st-stopped { color: var(--muted); }
 .warn-badge { display: inline-grid; place-content: center; width: 15px; height: 15px; border-radius: 50%; background: var(--amber); color: #000; font-size: 10px; font-weight: 700; margin-left: 5px; }
 .warn-note { border-left: 3px solid var(--amber); padding: 6px 10px; background: var(--bg3); border-radius: 6px; font-size: 12.5px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
@@ -294,7 +295,7 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 .branch-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 6px; }
 .branch-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
 .branch-node { text-align: left; display: grid; gap: 2px; border-left: 3px solid var(--line); }
-.branch-node.st-running { border-left-color: var(--green); } .branch-node.st-paused { border-left-color: var(--amber); }
+.branch-node.st-running { border-left-color: var(--green); } .branch-node.st-paused, .branch-node.st-interrupted { border-left-color: var(--amber); }
 .branch-node.st-error, .branch-node.st-stopped { border-left-color: var(--red); } .branch-node.st-idle, .branch-node.st-done { border-left-color: var(--blue); }
 .timeline h4 { margin: 4px 0 6px; }
 .tl-row { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 8px; align-items: center; font-size: 12.5px; padding: 3px 0; border-bottom: 1px solid var(--line); }
@@ -575,6 +576,11 @@ p .doc-link, .doc-note .doc-link { padding: 0 4px; border: none; background: non
 .doc-note > svg { color: var(--blue); margin-top: 2px; }
 .doc-note.warn { background: color-mix(in srgb, var(--amber) 10%, var(--bg2)); border-color: color-mix(in srgb, var(--amber) 35%, var(--line)); }
 .doc-note.warn > svg { color: var(--amber); }
+.doc-table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 13px; }
+.doc-table th, .doc-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.doc-table th { color: var(--muted); font-weight: 600; }
+.doc-cmd { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 6px 0; border-radius: 8px; background: var(--bg2); border: 1px solid var(--line); }
+.doc-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: none; }
 .doc-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
 .doc-card { position: relative; display: grid; gap: 6px; text-align: left; padding: 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg2); transition: transform .2s, border-color .2s, box-shadow .2s; }
 .doc-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 12px 28px -14px color-mix(in srgb, var(--accent) 60%, transparent); }

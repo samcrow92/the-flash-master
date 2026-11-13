@@ -1,9 +1,10 @@
 // Domain model shared by main process, preload and renderer.
 
-export type HarnessId = "copilot" | "opencode" | "pi" | "duo" | "mock";
-export const HARNESS_IDS: HarnessId[] = ["copilot", "opencode", "pi", "duo", "mock"];
+export type HarnessId = "copilot" | "opencode" | "cursor" | "claude" | "pi" | "duo" | "mock";
+export const HARNESS_IDS: HarnessId[] = ["copilot", "opencode", "cursor", "claude", "pi", "duo", "mock"];
 
-export type AgentStatus = "idle" | "running" | "paused" | "stopped" | "error" | "done";
+/** interrupted = the app closed while the agent was working; it can be resumed. */
+export type AgentStatus = "idle" | "running" | "paused" | "interrupted" | "stopped" | "error" | "done";
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "review" | "done";
 export const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "blocked", "review", "done"];
 export type MessageAuthor = "user" | "agent" | "system";
@@ -124,6 +125,9 @@ export interface AgentRun {
   endedAt: number | null;
   lastActivity: string | null;
   plan: PlanStep[];
+  /** Isolated git worktree this agent works in (code-writing specialists), and its branch. */
+  worktree: string | null;
+  branch: string | null;
 }
 
 export interface Task {
@@ -163,6 +167,8 @@ export interface RoleDef {
   skills: string[];
   prompt: string;
   source: "builtin" | "user";
+  /** Changes code: when delegated in a git project, works in its own worktree and branch (Settings → Agents). */
+  isolate?: boolean;
 }
 
 export interface SkillDef {

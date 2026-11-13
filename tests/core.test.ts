@@ -40,8 +40,12 @@ describe("Db", () => {
     expect(db.updateTask(t.id, { status: "done" }).status).toBe("done");
     expect(db.listTasks({ projectId: p.id, status: "done" })).toHaveLength(1);
     expect(db.getOrCreateMasterChat().id).toBe(db.getOrCreateMasterChat().id);
-    db.reapOrphans();
-    expect(db.getAgent(a.id)!.status).toBe("stopped");
+    const working = db.createAgent({ projectId: p.id, chatId: c.id, role: "tester", harness: "mock", model: null, brief: "run the suite" });
+    db.updateAgent(working.id, { status: "running" });
+    expect(db.interruptOrphans().map((x) => x.id)).toEqual([working.id]);
+    expect(db.getAgent(a.id)!.status).toBe("stopped"); // idle: only waiting for input
+    expect(db.getAgent(working.id)).toMatchObject({ status: "interrupted", brief: "run the suite" });
+    expect(db.listInterrupted().map((x) => x.id)).toEqual([working.id]);
   });
 
   it("migrates a file database idempotently", () => {
@@ -94,7 +98,7 @@ describe("token efficiency engine", () => {
 
   it("parses result blocks and caps what goes back to the parent", () => {
     const text = "work...\n<result>\nsummary: All good\nfindings:\n- a.c:3 leak\n- b.c:9 race\nartifacts: a1b2, c3d4\n</result>";
-    expect(parseResult(text)).toEqual({ summary: "All good", findings: ["a.c:3 leak", "b.c:9 race"], artifacts: ["a1b2", "c3d4"] });
+    expect(parseResult(text)).toEqual({ status: "done", question: null, summary: "All good", findings: ["a.c:3 leak", "b.c:9 race"], artifacts: ["a1b2", "c3d4"] });
     expect(resultForParent(text, 400)).toContain("findings:\n- a.c:3 leak");
     expect(resultForParent("z".repeat(5000), 10).length).toBeLessThan(100);
   });
@@ -217,5 +221,21 @@ describe("Jazz client", () => {
     expect(calls[3]!.init.headers.Cookie).toBe("JSESSIONID=abc");
     expect((await j.query("flicker")).length).toBe(1);
     expect((await j.query("nothing-matches")).length).toBe(0);
+  });
+});
+
+describe("result status", () => {
+  it("parses status and question, defaulting to done", () => {
+    expect(parseResult("work\n<result>\nsummary: ok\n</result>")).toMatchObject({ status: "done", question: null, summary: "ok" });
+    expect(parseResult("no block")).toMatchObject({ status: null });
+    const r = parseResult("<result>\nstatus: needs-decision\nquestion: Flash to ECU A or B? I recommend A.\nsummary: Two targets found\nfindings:\n- a.c:3\n</result>");
+    expect(r).toMatchObject({ status: "needs_decision", question: "Flash to ECU A or B? I recommend A.", summary: "Two targets found", findings: ["a.c:3"] });
+    expect(parseResult("<result>\nstatus: weird\nsummary: x\n</result>").status).toBe("done");
+  });
+
+  it("passes status and question back to the delegating agent", () => {
+    const back = resultForParent("<result>\nstatus: blocked\nquestion: Need the DBC file path\nsummary: Can't decode the log\n</result>", 200);
+    expect(back).toBe("status: blocked\nquestion: Need the DBC file path\nsummary: Can't decode the log");
+    expect(resultForParent("<result>\nsummary: fine\n</result>", 200)).toBe("summary: fine");
   });
 });

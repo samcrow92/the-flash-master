@@ -126,3 +126,60 @@ describe("progress flow", () => {
     }
   });
 });
+
+describe("resume after restart", () => {
+  it("resumes an interrupted specialist with its brief, specialists before the coordinator", async () => {
+    const { db, orch, events, chat } = setup();
+    const lead = db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: "flashmaster", harness: "mock", model: null, brief: "Chat: c" });
+    const kid = db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: "tester", harness: "mock", model: null, parentAgentId: lead.id,
+      brief: "Goal: run the brake suite" });
+    db.updateAgent(lead.id, { status: "running" });
+    db.updateAgent(kid.id, { status: "paused" });
+    const interrupted = db.interruptOrphans(); // what the app does at start
+    orch.announceInterrupted(interrupted);
+    expect(db.listMessages(chat.id, null).some((m) => m.author === "system" && /app closed while/.test(m.content))).toBe(true);
+
+    expect(orch.resumeAllInterrupted()).toBe(2);
+    expect(db.listInterrupted()).toEqual([]);
+    const resumed = events.filter((e) => e.type === "agent.updated" && e.agent.lastActivity?.startsWith("Resuming")).map((e) => (e as any).agent.id);
+    expect(resumed).toEqual([kid.id, lead.id]); // deepest first
+    // Both ran a fresh turn (back to idle, waiting for input) and the specialist kept its result for get_result.
+    await until(() => [kid.id, lead.id].every((id) => db.getAgent(id)!.status === "idle" && !!db.getAgent(id)!.resultSummary));
+    expect(db.getAgent(kid.id)!.endedAt).toBeNull();
+    expect(() => orch.resumeInterrupted(kid.id)).toThrow(/isn't waiting/);
+  });
+});
+
+describe("result status routing", () => {
+  it("shows a specialist's question to the user and marks its task blocked", async () => {
+    const { db, orch, events } = setup();
+    const task = db.createTask({ title: "Calibrate", projectId: null });
+    const a = await orch.startAgent(null, "tester", "Calibrate the brake model [needs-decision]", task.id);
+    await until(() => db.getAgent(a.id)!.status === "idle" && !!db.getAgent(a.id)!.resultSummary);
+    expect(db.getAgent(a.id)!.lastActivity).toMatch(/^Needs your decision: Use calibration set A or B/);
+    expect(db.getAgent(a.id)!.resultSummary).toMatch(/^status: needs_decision\nquestion: /);
+    expect(events.some((e) => e.type === "notice" && e.level === "warn" && /needs your decision/.test(e.text))).toBe(true);
+    expect(db.listTasks({}).find((t) => t.id === task.id)!.status).toBe("blocked");
+  });
+});
+
+describe("stuck-agent watchdog", () => {
+  it("warns once about a silent working agent, and clears when output resumes", async () => {
+    const db = new Db(":memory:");
+    let settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" } }) as Settings;
+    const events: AppEvent[] = [];
+    const orch = new Orchestrator({ db, harnesses: new HarnessRegistry([new MockAdapter(25)]), settings: () => settings, roles: () => loadRoles(AGENTS, "/none"),
+      skills: () => [], emit: (e) => events.push(e), mcpServersFor: () => [], homeDir: tmpdir() });
+    const a = await orch.startAgent(null, "tester", "Run the suite");
+    await until(() => db.getAgent(a.id)!.status === "running" && db.listMessages(db.getAgent(a.id)!.chatId!, null).some((m) => m.author === "agent"));
+    const later = Date.now() + 11 * 60_000;
+    expect(orch.checkStuck(later)).toEqual([a.id]);
+    expect(orch.checkStuck(later)).toEqual([]); // one warning per silence
+    const chatId = db.getAgent(a.id)!.chatId!;
+    expect(db.listMessages(chatId, null).some((m) => m.author === "system" && /has sent nothing for 11 min/.test(m.content))).toBe(true);
+    await until(() => db.listEvents(a.id).some((e) => e.label === "output resumed"));
+    settings = mergeSettings(settings, { agents: { stuckAfterMinutes: 0 } }) as Settings;
+    expect(orch.checkStuck(Date.now() + 60 * 60_000)).toEqual([]);
+    await orch.stop(a.id);
+  });
+});

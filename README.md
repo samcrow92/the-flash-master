@@ -2,12 +2,14 @@
 
 **A desktop orchestrator for AI coding agents, built for enterprise automotive software teams.**
 
-TheFlashMaster is a Windows x64 desktop app in the spirit of Codex Desktop and Claude Desktop. It runs a team of AI agents on your **local project folders**. It uses the agent CLIs **already installed and signed in on your machine**:
+TheFlashMaster is a desktop app for Windows x64 and macOS (Apple silicon and Intel) in the spirit of Codex Desktop and Claude Desktop. It runs a team of AI agents on your **local project folders**. It uses the agent CLIs **already installed and signed in on your machine**:
 
 | Harness | How TheFlashMaster talks to it |
 |---|---|
 | GitHub Copilot CLI | `copilot --acp`, via the Agent Client Protocol (ACP), with streaming |
 | OpenCode | `opencode acp` (ACP) |
+| Cursor Agent | `cursor-agent acp` (ACP), with your Cursor login |
+| Claude Code | `claude-agent-acp`, Claude Code's official ACP bridge (`npm i -g @agentclientprotocol/claude-agent-acp`), with your Claude Code login |
 | Pi coding agent | `pi --mode rpc` (Pi's native RPC; Pi has no MCP, so Pi agents can't use the MCP tools) |
 | GitLab Duo CLI | `duo run --goal …` in headless mode, with session continuation |
 | Mock | Built-in offline demo, so you can try everything without a CLI |
@@ -98,6 +100,7 @@ npm run dev            # Electron + Vite dev mode
 npm run ci             # local CI: typecheck → lint → tests → python tests → build
 npm run ci -- --smoke  # + launches the built app headlessly and checks the UI boots
 npm run dist:win       # Windows x64 portable exe + installer (run on Windows)
+npm run dist:mac       # macOS .dmg + .zip for arm64 and x64 (run on a Mac; unsigned unless CSC_LINK is set)
 ```
 
 If `npm run dev` reports **"Electron uninstall"**, npm skipped Electron's binary download, either because `ignore-scripts` is on or a proxy blocked it. The dev and build scripts now fetch it automatically, using your standard `https_proxy` / `http_proxy` / `no_proxy` environment variables. To use an internal mirror instead, set `$env:ELECTRON_MIRROR`.

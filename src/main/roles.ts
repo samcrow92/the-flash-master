@@ -35,6 +35,7 @@ export function parseRole(src: string, fallbackName: string, source: RoleDef["so
     skills: arr(meta.skills),
     prompt: body,
     source,
+    ...(str(meta.isolate) === "true" ? { isolate: true } : {}),
   };
 }
 
@@ -61,7 +62,7 @@ export function loadSkills(dir: string): SkillDef[] {
 }
 
 export const ROLE_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
-const HARNESSES = ["copilot", "opencode", "pi", "duo", "mock"];
+const HARNESSES = ["copilot", "opencode", "cursor", "claude", "pi", "duo", "mock"];
 
 export interface RoleValidation {
   ok: boolean;
