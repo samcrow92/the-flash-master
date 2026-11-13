@@ -4,7 +4,7 @@
  *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, thread, reactions,
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  */
-import { app, type BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -51,6 +51,16 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`document.querySelector('.thread-pill.open')?.click()`);
       await sleep(600);
       await shot(join(demo, "2-thread-inline-collapsed.png"));
+      // The classic side panel, then the same thread popped out into its own window
+      await js(`document.querySelector('.thread-pill')?.click()`);
+      await sleep(700);
+      await js(`document.querySelector('.inline-thread.open button[title="Open in side panel"]')?.click()`);
+      await sleep(900);
+      await shot(join(demo, "2-thread-side-panel.png"));
+      await js(`document.querySelector('.thread-side button[title="Open in new window"]')?.click()`);
+      await sleep(3500);
+      const tw = BrowserWindow.getAllWindows().find((w) => w !== win && w.webContents.getURL().includes("#thread/"));
+      if (tw) { writeFileSync(join(demo, "2-thread-window.png"), (await tw.webContents.capturePage()).toPNG()); tw.close(); }
       await click("Progress", ".chat-controls button");
       await sleep(900);
       await shot(join(demo, "2b-progress-flow.png"));

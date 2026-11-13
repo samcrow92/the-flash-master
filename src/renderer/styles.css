@@ -781,7 +781,7 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .it-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--fg); }
 .it-title svg { color: var(--blue); }
 .it-sub { color: var(--muted); }
-.it-collapse { margin-left: auto; display: inline-grid; place-content: center; width: 26px; height: 26px; padding: 0; border-radius: 50%;
+.it-collapse { display: inline-grid; place-content: center; width: 26px; height: 26px; padding: 0; border-radius: 50%;
   background: transparent; border: 1px solid transparent; color: var(--muted); }
 .it-collapse:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .it-list { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 6px 6px; }
@@ -801,3 +801,18 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 /* Hovering inside a thread highlights the reply, not the parent message around it. */
 .msg:has(.inline-thread:hover) { background: transparent; }
 .msg:has(.inline-thread:hover) > .msg-body > .msg-footer .msg-actions { display: none; }
+
+/* Header tools on a thread: open in side panel, open in new window, collapse / close. */
+.it-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+/* The side panel (and a pop-out thread window) share the inline thread's compact replies. */
+.thread-side { animation: side-in .34s var(--it-ease); min-width: 0; }
+@keyframes side-in { from { opacity: 0; transform: translateX(14px); } }
+.thread-side .thread-header { gap: 8px; padding: 10px 10px 10px 14px; }
+.thread-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.thread-title strong { display: inline-flex; align-items: center; gap: 6px; }
+.thread-title strong svg { color: var(--blue); }
+.thread-title .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-side .msg { grid-template-columns: 24px 1fr; gap: 8px; padding: 6px 10px; }
+.thread-side .avatar { width: 24px; height: 24px; font-size: 12px; }
+.thread-window { height: 100vh; display: grid; background: var(--bg); }
+.thread-standalone { border-left: none; animation: none; }

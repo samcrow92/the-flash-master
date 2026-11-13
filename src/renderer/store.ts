@@ -30,8 +30,10 @@ interface State {
   masterChatId: string | null;
   currentProjectId: string | null;
   messages: Record<string, Message[]>; // chatId → main-thread messages
-  /** Replies per thread root (root excluded), loaded on first expand and kept live by events. */
+  /** Thread messages per root (root first, then replies), loaded on first open and kept live by events. */
   threads: Record<string, Message[]>;
+  /** The thread shown in the side panel (or filling a pop-out thread window). */
+  sideThread: { chatId: string; rootId: string } | null;
   /** Thread roots currently expanded inline under their message. */
   openThreads: Record<string, boolean>;
   flowPanel: { chatId: string; agentId: string | null } | null;
@@ -57,6 +59,9 @@ interface State {
   openThread(chatId: string, rootId: string): Promise<void>;
   closeThread(rootId: string): void;
   toggleThread(chatId: string, rootId: string): void;
+  loadThread(chatId: string, rootId: string): Promise<void>;
+  openSideThread(chatId: string, rootId: string): void;
+  closeSideThread(): void;
   refreshProjects(): Promise<void>;
   refreshChats(projectId: string): Promise<void>;
   upsertChat(c: Chat): void;
@@ -111,6 +116,7 @@ export const useStore = create<State>((set, get) => ({
   messages: {},
   threads: {},
   openThreads: {},
+  sideThread: null,
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
@@ -164,12 +170,25 @@ export const useStore = create<State>((set, get) => ({
 
   async openThread(chatId, rootId) {
     set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true } }));
-    const msgs = (await api().listMessages(chatId, rootId)).filter((m) => m.id !== rootId);
+    await get().loadThread(chatId, rootId);
+  },
+
+  async loadThread(chatId, rootId) {
+    const msgs = await api().listMessages(chatId, rootId);
     set((st) => ({ threads: { ...st.threads, [rootId]: mergeLoaded(msgs, st.threads[rootId]) } }));
   },
 
+  openSideThread(chatId, rootId) {
+    set((st) => ({ sideThread: { chatId, rootId }, flowPanel: null, artifactsPanel: null, openThreads: { ...st.openThreads, [rootId]: false } }));
+    void get().loadThread(chatId, rootId);
+  },
+
+  closeSideThread() {
+    set({ sideThread: null });
+  },
+
   openFlow(chatId, agentId) {
-    set({ flowPanel: { chatId, agentId }, artifactsPanel: null });
+    set({ flowPanel: { chatId, agentId }, artifactsPanel: null, sideThread: null });
   },
 
   closeThread(rootId) {

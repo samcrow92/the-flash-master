@@ -96,8 +96,10 @@ function createRole(spec: AgentSpec, createdBy: string, keep: boolean): RoleDef 
 }
 
 let win: BrowserWindow | null = null;
+/** Threads popped out into their own windows, keyed by root message id; they get every app event like the main window. */
+const threadWins = new Map<string, BrowserWindow>();
 const emit = (e: AppEvent) => {
-  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("flash:event", e);
+  for (const w of [win, ...threadWins.values()]) if (w && !w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send("flash:event", e);
   if (e.type === "notice" && e.level !== "info" && settings.get().general.notifications && !win?.isFocused() && Notification.isSupported()) {
     new Notification({ title: "TheFlashMaster", body: e.text }).show();
   }
@@ -544,6 +546,7 @@ const api: FlashApi = {
     if (!ok || !existsSync(path)) throw new Error("attachment not found");
     await shell.openPath(path);
   },
+  openThreadWindow: async (chatId, rootId) => openThreadWindow(chatId, rootId),
   toggleReaction: async (messageId, emoji) => {
     const reactions = db.toggleReaction(messageId, emoji);
     const m = db.getMessage(messageId);
@@ -776,6 +779,7 @@ function createWindow(): void {
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.once("ready-to-show", () => win?.show());
+  win.on("closed", () => { for (const w of threadWins.values()) if (!w.isDestroyed()) w.close(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
   if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) win.webContents.once("did-finish-load", () => void runSmoke(win!, log));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
@@ -783,6 +787,25 @@ function createWindow(): void {
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadFile(join(here, "../renderer/index.html"));
+}
+
+/** A thread in its own window: same renderer, started on `#thread/<chat>/<root>`, which shows only that thread. */
+function openThreadWindow(chatId: string, rootId: string): void {
+  const open = threadWins.get(rootId);
+  if (open && !open.isDestroyed()) { if (open.isMinimized()) open.restore(); open.focus(); return; }
+  const w = new BrowserWindow({
+    width: 560, height: 820, minWidth: 380, minHeight: 420, title: "Thread — TheFlashMaster", backgroundColor: "#0f1115", show: false,
+    autoHideMenuBar: true, icon: appIcon,
+    webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  threadWins.set(rootId, w);
+  w.on("closed", () => threadWins.delete(rootId));
+  w.once("ready-to-show", () => w.show());
+  w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
+  w.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
+  const hash = `thread/${encodeURIComponent(chatId)}/${encodeURIComponent(rootId)}`;
+  if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
+  else void w.loadFile(join(here, "../renderer/index.html"), { hash });
 }
 
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });

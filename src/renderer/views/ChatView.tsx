@@ -11,7 +11,7 @@ import { Composer } from "../components/Composer";
 import { openMenu } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { Archive, ChevronDown, ChevronUp, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, Zap } from "../components/icons";
+import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, X, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, Zap } from "../components/icons";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -53,7 +53,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const isMaster = chat.kind === "master";
 
   return (
-    <div className={`chat-layout ${st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
+    <div className={`chat-layout ${st.sideThread?.chatId === chatId || st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
       <section className="chat">
         <header className="chat-header">
           <div className="chat-title-block">
@@ -92,7 +92,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
               onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={15} /> Progress</button>
             <button className={`${st.artifactsPanel === chatId ? "toggle on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Files changed, saved artifacts and code from this chat — download and diff"
-              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, flowPanel: null })}><Package size={15} /> Artifacts</button>
+              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, flowPanel: null, sideThread: null })}><Package size={15} /> Artifacts</button>
             {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={13} fill="currentColor" /> Stop</button>}
             <button className="ghost icon-only" title="More actions" onClick={(e) => openMenu(e, [
               ...(!isMaster ? [{ label: "Rename", icon: <Pencil size={15} />, onClick: () => setEditingTitle(true) },
@@ -136,6 +136,7 @@ export function ChatView({ chatId }: { chatId: string }) {
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
         <UsageMeter />
       </section>
+      {st.sideThread?.chatId === chatId && <ThreadPanel key={st.sideThread.rootId} chatId={chatId} rootId={st.sideThread.rootId} onClose={st.closeSideThread} />}
       {st.artifactsPanel === chatId && <ArtifactsPanel chatId={chatId} onClose={() => useStore.setState({ artifactsPanel: null })} />}
       {st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
     </div>
@@ -247,7 +248,7 @@ const plural = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`;
 
 /** The "N replies" pill under a message: who replied, how many, and a chevron that flips when the thread is open. */
 function ThreadPill({ root, open, onClick }: { root: Message; open: boolean; onClick: () => void }) {
-  const replies = useStore((s) => s.threads[root.id]);
+  const replies = useStore((s) => s.threads[root.id])?.filter((r) => r.id !== root.id);
   const faces: Message[] = [];
   for (const r of replies ?? []) if (!faces.some((f) => f.author === r.author && f.role === r.role)) faces.push(r);
   const last = replies?.at(-1);
@@ -304,7 +305,7 @@ function InlineThread({ root, open, focusReq }: { root: Message; open: boolean; 
 }
 
 function ThreadCard({ root }: { root: Message }) {
-  const replies = useStore((s) => s.threads[root.id]);
+  const replies = useStore((s) => s.threads[root.id])?.filter((r) => r.id !== root.id);
   const chat = useStore((s) => s.chatById[root.chatId]);
   const busy = useStore((s) => Object.values(s.agents).some((a) => a.chatId === root.chatId && a.status === "running"));
   if (!chat) return null;
@@ -314,7 +315,11 @@ function ThreadCard({ root }: { root: Message }) {
           <header className="it-head">
             <span className="it-title"><MessageCircle size={14} /> Thread</span>
             <span className="it-sub">{n ? plural(n) : "No replies yet"}</span>
-            <button className="it-collapse" title="Collapse thread" onClick={() => useStore.getState().closeThread(root.id)}><ChevronUp size={15} /></button>
+            <span className="it-tools">
+              <button className="it-collapse" title="Open in side panel" onClick={() => useStore.getState().openSideThread(root.chatId, root.id)}><PanelRight size={14} /></button>
+              <button className="it-collapse" title="Open in new window" onClick={() => void api().openThreadWindow(root.chatId, root.id)}><AppWindow size={14} /></button>
+              <button className="it-collapse" title="Collapse thread" onClick={() => useStore.getState().closeThread(root.id)}><ChevronUp size={15} /></button>
+            </span>
           </header>
           <div className="it-list">
             {replies === undefined
@@ -327,5 +332,43 @@ function ThreadCard({ root }: { root: Message }) {
           </div>
           <Composer chat={chat} parentId={root.id} compact busy={busy} placeholder="Reply in thread…" />
         </div>
+  );
+}
+
+/**
+ * A thread as its own column: the classic side panel next to the chat, and the whole content of a pop-out thread window.
+ * `onClose` is absent in the pop-out (the window has its own close button).
+ */
+export function ThreadPanel({ chatId, rootId, onClose, standalone }: { chatId: string; rootId: string; onClose?: () => void; standalone?: boolean }) {
+  const list = useStore((s) => s.threads[rootId]);
+  const chat = useStore((s) => s.chatById[chatId]);
+  const busy = useStore((s) => Object.values(s.agents).some((a) => a.chatId === chatId && a.status === "running"));
+  const ref = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  useLayoutEffect(() => { const el = ref.current; if (el && pinned.current) el.scrollTop = el.scrollHeight; }, [list]);
+  if (!chat) return null;
+  const root = list?.find((m) => m.id === rootId);
+  const replies = list?.filter((m) => m.id !== rootId) ?? [];
+  return (
+    <aside className={`thread thread-side ${standalone ? "thread-standalone" : ""}`}>
+      <header className="thread-header">
+        <div className="thread-title">
+          <strong><MessageCircle size={15} /> Thread</strong>
+          {standalone && <span className="muted small">{chat.title}</span>}
+        </div>
+        <span className="it-tools">
+          {!standalone && <button className="it-collapse" title="Open in new window" onClick={() => { void api().openThreadWindow(chatId, rootId); onClose?.(); }}><AppWindow size={15} /></button>}
+          {onClose && <button className="it-collapse" title="Close thread" onClick={onClose}><X size={16} /></button>}
+        </span>
+      </header>
+      <div className="messages" ref={ref} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
+        {!list ? <div className="it-loading"><span className="working-dots"><i /><i /><i /></span></div> : <>
+          {root && <MessageItem m={root} inThread />}
+          <div className="thread-sep">{replies.length ? plural(replies.length) : "No replies yet"}</div>
+          {replies.map((m) => <MessageItem key={m.id} m={m} inThread />)}
+        </>}
+      </div>
+      <Composer chat={chat} parentId={rootId} compact busy={busy} placeholder="Reply in thread…" />
+    </aside>
   );
 }
