@@ -61,7 +61,7 @@ export function loadSkills(dir: string): SkillDef[] {
 }
 
 export const ROLE_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
-const HARNESSES = ["copilot", "opencode", "pi", "duo", "mock"];
+const HARNESSES = ["copilot", "opencode", "cursor", "claude", "pi", "duo", "mock"];
 
 export interface RoleValidation {
   ok: boolean;

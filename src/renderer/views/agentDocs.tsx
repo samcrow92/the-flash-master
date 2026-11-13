@@ -37,7 +37,7 @@ export const AGENT_DOCS: AgentDoc[] = [
       "Creates custom agents on the fly when no specialist fits (for example a CAN-log analyst or a MISRA checker), and keeps them for later.",
       "Tracks multi-step work on the task board and links Jazz work items.",
       "Sends non-trivial plans and finished work to the Challenger before declaring them done.",
-      "Runs specialists on another harness (Copilot, OpenCode, Pi, GitLab Duo) when you ask for it.",
+      "Runs specialists on another harness (Copilot, OpenCode, Cursor Agent, Claude Code, Pi, GitLab Duo) when you ask for it.",
     ],
     when: [
       "You have a goal rather than a single step: “add the new DID and test it”, “analyse this defect and prepare a deck”.",

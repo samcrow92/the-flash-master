@@ -204,7 +204,7 @@ export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
 In this session you delegate in plain text, not with a \`delegate\` tool. Write one block per sub-task,
 starting at the beginning of a line:
 DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
-DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, pi or duo, only when the user asked for one)
+DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, cursor, claude, pi or duo, only when the user asked for one)
 A brief may continue on the following lines until a blank line.
 To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
 AGENT <name>[@<harness>]: <one-line description>
@@ -222,7 +222,7 @@ export function parseTextDelegations(text: string): TextDelegation[] {
   for (const raw of text.split(/\r?\n/)) {
     if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
     if (fence) continue;
-    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
     if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), goal: m[3]!.trim() }; out.push(cur); continue; }
     if (/^\s*(?:\*\*)?(?:AGENT|END)\b/.test(raw)) { cur = null; continue; }
     if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
@@ -241,7 +241,7 @@ export function parseTextAgents(text: string): TextAgent[] {
   for (const raw of text.split(/\r?\n/)) {
     if (!cur && /^\s*```/.test(raw)) { fence = !fence; continue; }
     if (fence) continue;
-    const m = /^\s*(?:\*\*)?AGENT(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
+    const m = /^\s*(?:\*\*)?AGENT(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
     if (m) { cur = { name: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), description: m[3]!.trim(), instructions: "" }; out.push(cur); continue; }
     if (!cur) continue;
     if (/^\s*(?:\*\*)?(END|DELEGATE)\b/.test(raw) || /^\s*<result>/.test(raw)) { cur = null; continue; }

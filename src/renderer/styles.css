@@ -575,6 +575,11 @@ p .doc-link, .doc-note .doc-link { padding: 0 4px; border: none; background: non
 .doc-note > svg { color: var(--blue); margin-top: 2px; }
 .doc-note.warn { background: color-mix(in srgb, var(--amber) 10%, var(--bg2)); border-color: color-mix(in srgb, var(--amber) 35%, var(--line)); }
 .doc-note.warn > svg { color: var(--amber); }
+.doc-table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 13px; }
+.doc-table th, .doc-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.doc-table th { color: var(--muted); font-weight: 600; }
+.doc-cmd { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 6px 0; border-radius: 8px; background: var(--bg2); border: 1px solid var(--line); }
+.doc-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: none; }
 .doc-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
 .doc-card { position: relative; display: grid; gap: 6px; text-align: left; padding: 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg2); transition: transform .2s, border-color .2s, box-shadow .2s; }
 .doc-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 12px 28px -14px color-mix(in srgb, var(--accent) 60%, transparent); }
