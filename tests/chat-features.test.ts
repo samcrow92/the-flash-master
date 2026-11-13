@@ -31,7 +31,8 @@ const ATT: Attachment[] = [
 
 function setup(over: DeepPartial<Settings> = {}) {
   const db = new Db(":memory:");
-  let settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" }, ...over } as any) as Settings;
+  // These tests exercise the MCP path; text mode (the app default) has its own test.
+  let settings = mergeSettings(mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" }, agents: { toolMode: "auto" } } as any), over as any) as Settings;
   const harnesses = new HarnessRegistry([new MockAdapter(2), new AcpAdapter("opencode", "Fake ACP", [process.execPath], [FAKE], "")]);
   (harnesses as any).status.set("opencode", { id: "opencode", available: true, path: process.execPath });
   const events: AppEvent[] = [];

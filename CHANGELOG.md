@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Text mode is the default for TheFlashMaster's tools** (Settings → Agents → *Agent tools*). It covers delegation, creating agents, tasks, artifacts, Jazz and DOORS Next.
+  - **How it works:** agents write `DELEGATE`, `AGENT … END` and `TOOL name {json}` lines from the first message and the app carries them out. There's no waiting for MCP tools and no warnings, and the app's own tool servers are no longer sent to the CLIs.
+  - **Why:** it works in corporate environments where MCP is blocked, and on Pi.
+  - **Previous behaviour:** *MCP tools, text fallback* keeps it. Other MCP servers (office, Context7…) are still attached as before.
 - **Agents read IBM Jazz work items with your sign-in.**
   - **Every agent:** all agents get the Jazz tools once Jazz is enabled, including custom agents and specialists whose role doesn't list Jazz.
   - **Your credentials:** the tools use the app's own Jazz connection, so your saved credentials (Basic/Form/Windows) or the browser sign-in session.

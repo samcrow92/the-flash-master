@@ -437,7 +437,12 @@ export class Orchestrator {
       // and are checked again after the first reply (some list them only when the first prompt arrives).
       let toolsPending = false;
       const coordinator = firstTurn && this.coordinates(live, s);
-      if (firstTurn && this.d.toolsLoaded && this.d.listTools && live.harness !== "mock") {
+      if (firstTurn && s.agents.toolMode === "text" && live.harness !== "mock") {
+        // Text mode (default): no MCP for the app's tools; every agent uses TOOL lines, the coordinator DELEGATE/AGENT lines.
+        live.textTools = !!this.d.listTools;
+        if (coordinator) live.textDelegation = true;
+        live.warnedTools = true;
+      } else if (firstTurn && this.d.toolsLoaded && this.d.listTools && live.harness !== "mock") {
         // Pi has no MCP; elsewhere give the harness a few seconds to list the app's tools.
         const confirmed = live.harness !== "pi" && await this.waitForTools(live, coordinator ? 5000 : 3000);
         live.textTools = !confirmed;
@@ -492,12 +497,12 @@ export class Orchestrator {
       if (toolsPending && !(await this.waitForTools(live, 3000))) { this.enterTextDelegation(live, t); switchedToText = true; }
       // The harness listed the app's tools but the model says it doesn't have `delegate` (filtered by policy, renamed…):
       // believe the model, not the tool list.
-      else if (!live.textDelegation && this.coordinates(live, s) && saysNoDelegate(text) && !parseTextDelegations(text).length) {
+      else if (!live.textDelegation && s.agents.toolMode !== "text" && this.coordinates(live, s) && saysNoDelegate(text) && !parseTextDelegations(text).length) {
         this.enterTextDelegation(live, t, "hidden");
         live.textTools = true;
         switchedToText = true;
       }
-      if (firstTurn && this.d.toolsLoaded && live.harness !== "pi" && live.harness !== "mock" && !this.d.toolsLoaded(live.agentId) && !live.warnedTools && !live.textDelegation) {
+      if (firstTurn && this.d.toolsLoaded && live.harness !== "pi" && live.harness !== "mock" && !this.d.toolsLoaded(live.agentId) && !live.warnedTools && !live.textDelegation && s.agents.toolMode !== "text") {
         live.warnedTools = true;
         this.system(t.chat.id, t.threadRoot, `⚠️ TheFlashMaster's tools (delegation, tasks, artifacts) did not load in **${live.harness}** for ${t.role.title}, so it cannot hand work to specialists. `
           + "Check **Settings → MCP → Test tool servers**; the error there tells what blocks them.", "warn");

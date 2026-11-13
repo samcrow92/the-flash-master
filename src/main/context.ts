@@ -188,8 +188,8 @@ export function budgetState(used: number, limit: number, warnPct: number): Budge
 export interface TextDelegation { role: string; harness?: string; goal: string }
 
 /** Instructions for a coordinator whose `delegate` tool didn't load (MCP blocked by policy, Pi without MCP…). */
-export const TEXT_DELEGATION_RULES = `## Delegation without tools
-Your \`delegate\` tool is not available in this session, so delegate in plain text instead. Write one block per sub-task,
+export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
+In this session you delegate in plain text, not with a \`delegate\` tool. Write one block per sub-task,
 starting at the beginning of a line:
 DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
 DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, pi or duo, only when the user asked for one)

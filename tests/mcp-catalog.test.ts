@@ -23,7 +23,7 @@ function setup(patch: unknown = {}) {
   writeFileSync(vpy, "");
   mkdirSync(join(dataDir, "mcp", "pip"), { recursive: true });
   writeFileSync(join(dataDir, "mcp", "pip", "markitdown.installed"), "x");
-  let settings: Settings = mergeSettings(DEFAULT_SETTINGS, patch);
+  let settings: Settings = mergeSettings(mergeSettings(DEFAULT_SETTINGS, { agents: { toolMode: "auto" } } as any), patch); // MCP path; text mode has its own test
   const boot = new McpBootstrap({ nodeEntry: (n) => `/app/${n}.mjs`, nodeExec: "/electron", nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, pythonSrc: "/none", dataDir },
     () => settings, () => {});
   boot.setBridge("http://127.0.0.1:1", "t");
@@ -80,7 +80,7 @@ describe("tool server self-test", () => {
   it("app tool servers get the essential environment and bridge settings as arguments", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "flash-env-"));
     const boot = new McpBootstrap({ nodeEntry: (n) => `/app/${n}.mjs`, nodeExec: "/electron", nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, pythonSrc: "/none", dataDir },
-      () => DEFAULT_SETTINGS, () => {});
+      () => mergeSettings(DEFAULT_SETTINGS, { agents: { toolMode: "auto" } } as any), () => {});
     boot.setBridge("http://127.0.0.1:9", "tok");
     const core = boot.specsFor(role("flashmaster"), "agent-1").find((x) => x.name === "flashmaster-core")!;
     expect(core.args).toEqual(["/app/flashmaster-core.mjs", "--bridge", "http://127.0.0.1:9", "--token", "tok", "--agent", "agent-1"]);
@@ -94,5 +94,12 @@ describe("tool server self-test", () => {
     set({ jazz: { enabled: true } });
     expect(boot.specsFor(role("software-expert"), "a1").map((x) => x.name)).toContain("jazz");
     expect(boot.specsFor(role("my-custom-agent"), "a1").map((x) => x.name)).toContain("jazz");
+  });
+  it("text mode (default) doesn't send the app's own tool servers; auto mode does", () => {
+    const { boot, set } = setup();
+    set({ jazz: { enabled: true }, agents: { toolMode: "text" } });
+    expect(boot.specsFor(role("flashmaster"), "a1").map((x) => x.name)).not.toEqual(expect.arrayContaining(["flashmaster-core"]));
+    set({ agents: { toolMode: "auto" } });
+    expect(boot.specsFor(role("flashmaster"), "a1").map((x) => x.name)).toEqual(expect.arrayContaining(["flashmaster-core", "jazz"]));
   });
 });

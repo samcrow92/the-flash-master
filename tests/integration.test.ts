@@ -88,7 +88,8 @@ describe("ACP client against a fake ACP agent", () => {
 
 function setup(over: DeepPartial<Settings> = {}, extra: Record<string, unknown> = {}) {
   const db = new Db(":memory:");
-  let settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" }, ...over } as any) as Settings;
+  // These tests exercise the MCP path; text mode (the app default) has its own test.
+  let settings = mergeSettings(mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" }, agents: { toolMode: "auto" } } as any), over as any) as Settings;
   const harnesses = new HarnessRegistry([new MockAdapter(2), new AcpAdapter("opencode", "Fake ACP", [process.execPath], [FAKE], "")]);
   (harnesses as any).status.set("opencode", { id: "opencode", available: true, path: process.execPath });
   const roles = loadRoles(join(__dirname, "..", "agents"), "/nonexistent");
@@ -181,6 +182,25 @@ describe("Orchestrator", () => {
     const all = () => { const top = db.listMessages(chat.id, null); return [...new Map(top.concat(...top.map((m) => db.listMessages(chat.id, m.id))).map((m) => [m.id, m])).values()]; };
     await until(() => all().some((m) => m.author === "agent" && m.content.startsWith("Integrated:")), 15000);
     expect(all().some((m) => m.author === "system" && m.content.includes("didn't give them to"))).toBe(true);
+  });
+
+  it("text mode (default): no MCP needed — the coordinator delegates with DELEGATE lines from the first message", async () => {
+    const calls: any[] = [];
+    const { db, orch, chat } = setup({ agents: { toolMode: "text" } }, {
+      toolsLoaded: () => false,
+      listTools: (set: string) => set === "core" ? [{ name: "create_task", description: "Create a task.", inputSchema: { properties: { title: {} }, required: ["title"] } }] : [],
+      callTool: async (name: string, args: any) => { calls.push({ name, args }); return { id: "t1" }; },
+    });
+    cleanup = () => orch.stopAll();
+    db.updateChat(chat.id, { harness: "opencode" });
+    const waited = { n: 0 };
+    (orch as any).waitForTools = async () => { waited.n++; return false; };
+    await orch.sendUserMessage(chat.id, "review the brake logic", null);
+    const all = () => { const top = db.listMessages(chat.id, null); return [...new Map(top.concat(...top.map((m) => db.listMessages(chat.id, m.id))).map((m) => [m.id, m])).values()]; };
+    await until(() => all().some((m) => m.author === "agent" && m.content.startsWith("Integrated:")), 15000);
+    expect(waited.n).toBe(0); // no waiting for MCP tools
+    expect(all().some((m) => m.author === "system" && /did not load|didn't give/.test(m.content))).toBe(false); // no warnings
+    expect(all().some((m) => m.role === "reviewer" && m.author === "agent")).toBe(true);
   });
 
   it("the coordinator can create a custom agent and run it", async () => {

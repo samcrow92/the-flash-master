@@ -38,6 +38,12 @@ export interface Settings {
     maxConcurrent: number;
     roleOverrides: Record<string, { harness?: HarnessId; model?: string; maxResultTokens?: number }>;
     delegationDepth: number; // how deep sub-agents may delegate further
+    /**
+     * How agents reach TheFlashMaster's own tools (delegate, create_agent, tasks, artifacts, Jazz, DOORS Next):
+     * "text" = plain-text DELEGATE / AGENT / TOOL lines the app carries out (works everywhere, also where MCP is blocked);
+     * "auto" = as MCP tools, falling back to text when they don't load.
+     */
+    toolMode: "text" | "auto";
     autoTaskFromDelegation: boolean; // create a task per delegation
     instructionMode: "clean" | "harness"; // clean = TheFlashMaster instructions only (harness AGENTS.md/rules/skills off)
     keepProjectInstructions: boolean; // in clean mode, still load the project's AGENTS.md / instruction files
@@ -147,7 +153,7 @@ export const DEFAULT_SETTINGS: Settings = {
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
+  agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "" },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true },
   tokens: {
