@@ -78,7 +78,7 @@ export interface Settings {
     serverUrl: string; // e.g. https://jazz.company.com/ccm
     projectArea: string; // legacy single area (migrated into projectAreas)
     projectAreas: string[];
-    authType: "form" | "basic" | "windows"; // windows = integrated Kerberos/NTLM sign-in, no password
+    authType: "form" | "basic" | "windows" | "browser"; // windows = integrated Kerberos/NTLM; browser = SSO window (Jazz Authorization Server / OIDC)
     username: string;
     hasPassword: boolean; // password stored encrypted via safeStorage, never in settings
     defaultQuery: string;

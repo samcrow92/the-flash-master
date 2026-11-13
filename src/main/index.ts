@@ -132,6 +132,49 @@ const jazz = (): JazzClient | null => {
   }
   return jazzClient;
 };
+/**
+ * Browser sign-in for servers behind the Jazz Authorization Server / OIDC / SAML: the user logs in in a normal
+ * window (MFA, company SSO pages), the cookies land in the persist:jazz session, and the API reuses them.
+ */
+let signInWin: BrowserWindow | null = null;
+async function jazzIdentity(serverUrl: string): Promise<string | null> {
+  try {
+    const r = await jazzSession().fetch(`${serverUrl.replace(/\/+$/, "")}/authenticated/identity`, { headers: { Accept: "application/json" }, credentials: "include", redirect: "follow" } as any);
+    if (!r.ok || r.headers.get("x-com-ibm-team-repository-web-auth-msg") === "authrequired") return null;
+    const body = await r.text();
+    try { return JSON.parse(body)?.userId ?? null; } catch { return null; }
+  } catch { return null; }
+}
+function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
+  const j = settings.get().jazz;
+  if (!j.serverUrl) return Promise.resolve({ ok: false, detail: "Set the Jazz server URL first" });
+  const base = j.serverUrl.replace(/\/+$/, "");
+  signInWin?.close();
+  return new Promise((resolve) => {
+    let done = false;
+    const w = new BrowserWindow({
+      width: 980, height: 760, parent: win ?? undefined, title: "Sign in to IBM Jazz", autoHideMenuBar: true, backgroundColor: "#ffffff",
+      webPreferences: { session: jazzSession(), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    signInWin = w;
+    const finish = (r: { ok: boolean; detail: string }) => {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      clearTimeout(limit);
+      if (!w.isDestroyed()) w.close();
+      signInWin = null;
+      jazzClient = null;
+      resolve(r);
+    };
+    const check = async () => { const user = await jazzIdentity(base); if (user) finish({ ok: true, detail: `Signed in as ${user}` }); };
+    const timer = setInterval(() => void check(), 2000);
+    const limit = setTimeout(() => finish({ ok: false, detail: "Sign-in timed out" }), 10 * 60000);
+    w.webContents.on("did-navigate", () => void check());
+    w.on("closed", () => finish({ ok: false, detail: "Sign-in window closed" }));
+    void w.loadURL(`${base}/web`);
+  });
+}
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, emitTask: (task) => emit({ type: "task.updated", task }) }));
@@ -448,6 +491,8 @@ const api: FlashApi = {
     jazzClient = null;
     await jazzSession().clearStorageData({ storages: ["cookies"] }); // new credentials → fresh login
   },
+  jazzSignIn: async () => jazzSignIn(),
+  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; },
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),
   updateSettings: async (patch) => { const r = settings.update(patch); if ((patch as any).usage) scheduleUsage(); return r; },

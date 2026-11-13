@@ -473,13 +473,19 @@ function Integrations(f: F) {
     <Row label="Enabled"><Bool f={f} path="jazz.enabled" /></Row>
     <Row label="Server URL" hint="e.g. https://jazz.company.com/ccm"><Text f={f} path="jazz.serverUrl" /></Row>
     <Row label="Project areas" hint="Searches cover all of these unless you narrow them in the Jazz page. Empty = every area you can see."><JazzAreas f={f} /></Row>
-    <Row label="Authentication" hint={f.s.jazz.authType === "windows" ? "Uses your Windows login (Kerberos/NTLM) — no password. Restart TheFlashMaster after changing the server URL." : "If Test reports HTTP 401, the message says which method the server expects."}>
-      <Choice f={f} path="jazz.authType" options={[["form", "Form (default for EWM)"], ["basic", "Basic"], ["windows", "Windows (integrated)"]]} /></Row>
-    <Row label="User"><Text f={f} path="jazz.username" /></Row>
-    <Row label="Password" hint={f.s.jazz.hasPassword ? "Stored encrypted with the OS keychain (Windows DPAPI)." : "Not set."}>
+    <Row label="Authentication" hint={f.s.jazz.authType === "windows" ? "Uses your Windows login (Kerberos/NTLM) — no password. Restart TheFlashMaster after changing the server URL."
+      : f.s.jazz.authType === "browser" ? "For company single sign-on / Jazz Authorization Server (HTTP 401 “Bearer”). You log in once in a sign-in window; the session is kept."
+      : "If Test reports HTTP 401, the message says which method the server expects."}>
+      <Choice f={f} path="jazz.authType" options={[["form", "Form (default for EWM)"], ["basic", "Basic"], ["windows", "Windows (integrated)"], ["browser", "Browser sign-in (SSO)"]]} /></Row>
+    {f.s.jazz.authType === "browser" && <Row label="Sign-in"><div className="row gap">
+      <button className="primary" onClick={async () => { setTest("Waiting for sign-in…"); const r = await api().jazzSignIn(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Sign in to Jazz</button>
+      <button className="ghost" onClick={async () => { await api().jazzSignOut(); setTest("Signed out"); }}>Sign out</button>
+    </div></Row>}
+    {(f.s.jazz.authType === "form" || f.s.jazz.authType === "basic") && <Row label="User"><Text f={f} path="jazz.username" /></Row>}
+    {(f.s.jazz.authType === "form" || f.s.jazz.authType === "basic") && <Row label="Password" hint={f.s.jazz.hasPassword ? "Stored encrypted with the OS keychain (Windows DPAPI)." : "Not set."}>
       <div className="row gap"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••" />
         <button disabled={!pw} onClick={async () => { await api().jazzSetPassword(pw); setPw(""); st.setSettings((await api().getSettings()).settings); st.toast("info", "Password saved"); }}>Save</button></div>
-    </Row>
+    </Row>}
     <Row label="Default query"><Text f={f} path="jazz.defaultQuery" placeholder="words or ids shown when the Jazz page opens (optional)" /></Row>
     <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().jazzTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span>{test}</span></div></Row>
 

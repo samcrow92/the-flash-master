@@ -122,7 +122,13 @@ export function JazzView() {
         )}
       </div>
 
-      {error && <div className="warn-note">{error}</div>}
+      {error && <div className="warn-note row gap between"><span>{error}</span>
+        {(cfg?.authType === "browser" || /sign-in|single sign-on|Bearer/i.test(error)) && <button className="primary" onClick={async () => {
+          if (cfg?.authType !== "browser") await api().updateSettings({ jazz: { authType: "browser" } }).then((x) => st.setSettings(x));
+          const r = await api().jazzSignIn();
+          if (r.ok) { st.toast("info", r.detail); void search(); } else st.toast("error", r.detail);
+        }}>Sign in to Jazz</button>}
+      </div>}
 
       <div className="jazz-layout">
         <div className="jazz-list">

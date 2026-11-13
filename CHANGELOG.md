@@ -11,6 +11,7 @@
 - **IBM Jazz:**
   - **HTTP 401 handling:** expired form sessions log in again automatically. The client falls back to Basic once when the server asks for it. For Kerberos/NTLM ("Negotiate") and Jazz Authorization Server tokens you get a message saying exactly what to change.
   - **New authentication:** Windows (integrated). It uses your domain login with no password.
+  - **New authentication: Browser sign-in (SSO)** for servers behind the Jazz Authorization Server / OIDC (HTTP 401 "Bearer"). You log in once in a sign-in window (company SSO, MFA) and the API reuses that session. When the session expires, a **Sign in to Jazz** button appears on the Jazz page.
   - **Multiple project areas:** configure several in Settings (with "↻ From server" to load them). The old single value is migrated.
   - **Rewritten Jazz page:**
     - always-visible project-area picker (configured areas and every area on the server)

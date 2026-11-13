@@ -21,7 +21,7 @@ const AUTH_MSG = "x-com-ibm-team-repository-web-auth-msg";
 export interface JazzConfig {
   serverUrl: string;
   projectAreas: string[];
-  authType: "form" | "basic" | "windows";
+  authType: "form" | "basic" | "windows" | "browser";
   username: string;
   password: string;
 }
@@ -53,7 +53,7 @@ export class JazzClient {
   /** User id of the signed-in user (owner "me"). */
   async whoAmI(): Promise<string | null> {
     if (this.me) return this.me;
-    if (this.cfg.authType !== "windows" && this.cfg.username) return (this.me = this.cfg.username);
+    if ((this.cfg.authType === "form" || this.cfg.authType === "basic") && this.cfg.username) return (this.me = this.cfg.username);
     const r = await this.send("GET", "/authenticated/identity", undefined, { Accept: "application/json" });
     const body = await r.text();
     let id: string | null;
@@ -157,6 +157,7 @@ export class JazzClient {
       r = await this.req(method, path, body, headers);
       if (!needsAuth(r)) return r;
     }
+    if (this.cfg.authType === "browser") throw new JazzSignInRequired();
     if (/basic/i.test(scheme) && this.cfg.authType !== "basic" && !this.basicFallback && this.cfg.username && this.cfg.password) {
       this.basicFallback = true; // server explicitly asks for Basic
       r = await this.req(method, path, body, headers);
@@ -187,7 +188,7 @@ export class JazzClient {
     if (check.headers.get(AUTH_MSG) === "authrequired" || isLoginPage(check) || check.status === 401) {
       const host = hostOf(check.url);
       throw new Error(host && host !== hostOf(this.cfg.serverUrl)
-        ? `Jazz redirected the login to ${host} (OIDC / Jazz Authorization Server). Form login is not possible there — try Authentication: Windows or Basic, or ask for an app password.`
+        ? `Jazz redirected the login to ${host} (OIDC / Jazz Authorization Server). Form login is not possible there — set Authentication to "Browser sign-in (SSO)" and click “Sign in to Jazz”.`
         : check.status === 401 ? explain401(401, check.headers.get("www-authenticate") ?? "", "form") : "Jazz login did not complete — check user/password and the server URL (…/ccm)");
     }
     this.authed = true;
@@ -196,7 +197,7 @@ export class JazzClient {
   private async req(method: string, path: string, body?: string, headers: Record<string, string> = {}) {
     const h: Record<string, string> = { "OSLC-Core-Version": "2.0", "X-Requested-With": "XMLHttpRequest", ...headers };
     if (this.cfg.authType === "basic" || this.basicFallback) h.Authorization = "Basic " + Buffer.from(`${this.cfg.username}:${this.cfg.password}`).toString("base64");
-    if (this.cookies.size) h.Cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    if (this.cookies.size && this.cfg.authType !== "browser") h.Cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const r = await this.fetchImpl(this.cfg.serverUrl + path, { method, headers: h, body });
     if (this.authed && r.headers.get(AUTH_MSG) === "authrequired") this.authed = false;
     const set = r.headers.getSetCookie?.() ?? (r.headers.get("set-cookie") ? [r.headers.get("set-cookie")!] : []);
@@ -208,6 +209,12 @@ export class JazzClient {
   }
 }
 
+/** Browser sign-in (SSO / Jazz Authorization Server) has expired or never happened. */
+export class JazzSignInRequired extends Error {
+  readonly code = "JAZZ_SIGNIN";
+  constructor() { super("Jazz sign-in needed — click “Sign in to Jazz” (Jazz page or Settings → Integrations → IBM Jazz)."); }
+}
+
 const needsAuth = (r: { status: number; headers: { get(n: string): string | null } }) => r.status === 401 || r.headers.get(AUTH_MSG) === "authrequired";
 
 /** Turn a 401 into an actionable message based on what the server asked for. */
@@ -216,10 +223,10 @@ export function explain401(status: number, scheme: string, authType: string): st
   const asked = scheme ? ` (server asked for: ${scheme.split(/[\s,]/)[0]})` : "";
   if (/negotiate|ntlm|kerberos/.test(s)) {
     return authType === "windows"
-      ? `HTTP ${status}: Windows sign-in was rejected${asked}. Make sure you are logged in to the company domain and that the Jazz server allows Kerberos/NTLM for this PC; restart TheFlashMaster after changing the server URL.`
+      ? `HTTP ${status}: Windows sign-in was rejected${asked}. Try Authentication "Browser sign-in (SSO)". Make sure you are logged in to the company domain and that the Jazz server allows Kerberos/NTLM for this PC; restart TheFlashMaster after changing the server URL.`
       : `HTTP ${status}: the Jazz server uses Windows sign-in${asked}. Set Authentication to "Windows (integrated)" in Settings → Integrations → IBM Jazz and restart TheFlashMaster.`;
   }
-  if (/jauth|bearer|oauth/.test(s)) return `HTTP ${status}: the server uses the Jazz Authorization Server / tokens${asked}. Try Authentication "Windows (integrated)", or "Basic" with an application password from your Jazz admin.`;
+  if (/jauth|bearer|oauth/.test(s)) return `HTTP ${status}: the server signs in through the Jazz Authorization Server (single sign-on)${asked}. Set Authentication to "Browser sign-in (SSO)" in Settings → Integrations → IBM Jazz and click “Sign in to Jazz”.`;
   if (/basic/.test(s)) return `HTTP ${status}: user or password rejected${asked}. Check them in Settings → Integrations → IBM Jazz (Authentication: Basic).`;
   if (authType === "form") return `HTTP ${status}: Jazz rejected the session after login. Check user/password; if your company uses single sign-on, try Authentication "Windows (integrated)".`;
   return `HTTP ${status}: not authorised${asked}. Check the authentication settings and your access to the project area.`;

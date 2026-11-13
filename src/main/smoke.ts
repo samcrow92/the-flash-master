@@ -104,6 +104,14 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await click("Settings", ".sidebar button");
         await sleep(600);
       }
+      const ssoUrl = process.env.FLASH_SMOKE_JAZZ_SSO_URL;
+      if (ssoUrl) {
+        await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(ssoUrl)}, authType: "browser" } }).then(()=>{})`);
+        const before = await js<string>(`window.flash.api.jazzTest().then(r=>JSON.stringify(r))`);
+        const signIn = await js<string>(`window.flash.api.jazzSignIn().then(r=>JSON.stringify(r))`);
+        const after = await js<string>(`window.flash.api.jazzSearch({state:"all"}).then(r=>JSON.stringify(r.map(w=>w.title))).catch(e=>String(e))`);
+        log("info", `smoke-sso before=${before} signIn=${signIn} after=${after}`);
+      }
       const jazzUrl = process.env.FLASH_SMOKE_JAZZ_URL;
       if (jazzUrl) {
         await js(`window.flash.api.updateSettings({ jazz: { enabled: true, serverUrl: ${JSON.stringify(jazzUrl)}, authType: "basic", username: "ana", projectAreas: ["Body Electronics", "Powertrain"] } }).then(()=>{})`);

@@ -85,6 +85,9 @@ export interface FlashApi {
   jazzProjectAreas(): Promise<string[]>;
   jazzSetPassword(password: string): Promise<void>;
   jazzTest(): Promise<{ ok: boolean; detail: string }>;
+  /** Opens a sign-in window (company SSO / Jazz Authorization Server); resolves when signed in or closed. */
+  jazzSignIn(): Promise<{ ok: boolean; detail: string }>;
+  jazzSignOut(): Promise<void>;
 
   // settings
   getSettings(): Promise<{ settings: Settings; locked: string[] }>;
@@ -101,7 +104,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "copilotUsage", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "jazzSignIn", "jazzSignOut", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];
 

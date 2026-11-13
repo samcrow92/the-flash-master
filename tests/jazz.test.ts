@@ -83,7 +83,7 @@ describe("Jazz client", () => {
     const { f } = fake(() => ({ status: 401, headers: { "www-authenticate": "Negotiate" } }));
     await expect(new JazzClient({ ...base, authType: "basic" }, f).get("7")).rejects.toThrow(/Windows \(integrated\)/);
     expect(explain401(401, "Negotiate", "windows")).toMatch(/Windows sign-in was rejected/);
-    expect(explain401(401, "jauth realm=x", "form")).toMatch(/Authorization Server/);
+    expect(explain401(401, "jauth realm=x", "form")).toMatch(/Jazz Authorization Server/);
     expect(explain401(401, "Basic", "basic")).toMatch(/password rejected/);
   });
 
@@ -103,5 +103,24 @@ describe("Jazz client", () => {
     const d = await j.detail("7");
     expect(d.item.id).toBe("7");
     expect(d.comments).toHaveLength(2);
+  });
+});
+
+describe("Jazz browser sign-in (SSO / Jazz Authorization Server)", () => {
+  it("sends no credentials or manual cookies and asks for sign-in on 401", async () => {
+    const { f, calls } = fake(() => ({ status: 401, headers: { "www-authenticate": 'Bearer realm="jazz"', "set-cookie": "X=1" } }));
+    const j = new JazzClient({ ...base, authType: "browser", username: "", password: "" }, f);
+    await expect(j.get("7")).rejects.toMatchObject({ code: "JAZZ_SIGNIN" });
+    await expect(j.get("7")).rejects.toThrow(/Sign in to Jazz/);
+    expect(calls.every((c) => !c.init.headers.Authorization && !c.init.headers.Cookie)).toBe(true);
+  });
+
+  it("works with the session cookies once signed in", async () => {
+    const { f } = fake(() => ({}));
+    expect(await new JazzClient({ ...base, authType: "browser", username: "", password: "" }, f).search({ state: "all" })).toHaveLength(2);
+  });
+
+  it("points Bearer servers to browser sign-in", () => {
+    expect(explain401(401, "Bearer", "basic")).toMatch(/Browser sign-in \(SSO\)/);
   });
 });

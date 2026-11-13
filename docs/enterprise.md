@@ -75,6 +75,7 @@ SQLite database: `%APPDATA%\TheFlashMaster\flashmaster.db`. Logs: `…\logs\main
 |---|---|
 | `form` | Default EWM/RTC login page (j_security_check). Expired sessions are renewed automatically. |
 | `basic` | Servers that answer `WWW-Authenticate: Basic`, or an application password. |
+| `browser` | Jazz Authorization Server / OIDC / SAML single sign-on (401 with `Bearer`). The user signs in once in a sign-in window; cookies are kept in the app's Jazz session. |
 | `windows` | Kerberos/NTLM single sign-on with the user's domain login (no password stored). The server host is allow-listed for Chromium's integrated auth. Restart the app after changing the URL. |
 
 If a request returns HTTP 401, TheFlashMaster reads the server's `WWW-Authenticate` header and tells the user which mode to pick. Servers behind the Jazz Authorization Server (OIDC) cannot use form login. Use `windows`, or `basic` with an application password.
