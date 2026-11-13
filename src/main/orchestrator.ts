@@ -83,6 +83,12 @@ interface Live {
 const MAX_CONCURRENT_FALLBACK = 4;
 const MAX_TEXT_ROUNDS = 12;
 
+/** The coordinator's reply says it has no `delegate` tool ("delegate tool didn't load", "isn't available"…). */
+export function saysNoDelegate(text: string): boolean {
+  return /\bdelegate`?\s*(?:tool)?[^.\n]{0,80}?\b(?:didn'?t load|did not load|not (?:be )?(?:available|exposed|loaded|present)|unavailable|isn'?t (?:available|exposed)|aren'?t (?:available|exposed)|missing)/i.test(text)
+    || /\b(?:no|without(?: a| the)?|lack(?:s|ing)?(?: a| the)?)\s+`?delegate`?\s+tool/i.test(text);
+}
+
 /** Copilot CLI logs "N MCP servers were blocked by policy" when the organisation's MCP policy is off. */
 function copilotMcpBlocked(homeDir: string): boolean {
   try {
@@ -484,6 +490,13 @@ export class Orchestrator {
       this.d.db.updateMessage(reply.id, { content: text });
       // The harness was given our MCP servers but none of them reached the app: tools did not load.
       if (toolsPending && !(await this.waitForTools(live, 3000))) { this.enterTextDelegation(live, t); switchedToText = true; }
+      // The harness listed the app's tools but the model says it doesn't have `delegate` (filtered by policy, renamed…):
+      // believe the model, not the tool list.
+      else if (!live.textDelegation && this.coordinates(live, s) && saysNoDelegate(text) && !parseTextDelegations(text).length) {
+        this.enterTextDelegation(live, t, "hidden");
+        live.textTools = true;
+        switchedToText = true;
+      }
       if (firstTurn && this.d.toolsLoaded && live.harness !== "pi" && live.harness !== "mock" && !this.d.toolsLoaded(live.agentId) && !live.warnedTools && !live.textDelegation) {
         live.warnedTools = true;
         this.system(t.chat.id, t.threadRoot, `⚠️ TheFlashMaster's tools (delegation, tasks, artifacts) did not load in **${live.harness}** for ${t.role.title}, so it cannot hand work to specialists. `
@@ -541,7 +554,8 @@ export class Orchestrator {
     }
     if (switchedToText && finalStatus === "done" && !live.stopped && !live.paused && !parseTextDelegations(text).length) {
       // The first reply was written without the delegate tool: have the coordinator re-plan with DELEGATE lines.
-      void this.turn({ ...t, input: `${TEXT_DELEGATION_RULES}\n\nRe-plan the user's last request now and delegate it with DELEGATE lines.`,
+      const extra = live.textTools ? this.textToolsFor(live) : "";
+      void this.turn({ ...t, input: `${TEXT_DELEGATION_RULES}${extra ? `\n\n${extra}` : ""}\n\nYour tools are not available, so use this text mode. Re-plan the user's last request now and delegate it with DELEGATE lines.`,
         attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: 1 });
       return;
     }
@@ -684,11 +698,17 @@ export class Orchestrator {
     return live.depth === 0 && live.harness !== "mock" && s.agents.delegationDepth > 0 && (live.role.name === "flashmaster" || /delegate/i.test(live.role.description ?? ""));
   }
 
-  private enterTextDelegation(live: Live, t: { chat: Chat; threadRoot: string | null; role: RoleDef }): void {
+  private enterTextDelegation(live: Live, t: { chat: Chat; threadRoot: string | null; role: RoleDef }, why: "missing" | "hidden" = "missing"): void {
     live.textDelegation = true;
     if (live.warnedTools) return;
     live.warnedTools = true;
     const blocked = live.harness === "copilot" && copilotMcpBlocked(this.d.homeDir);
+    if (why === "hidden" && !blocked) {
+      this.system(t.chat.id, t.threadRoot, `⚠️ **${live.harness}** started TheFlashMaster's tool server and read its tools, but didn't give them to ${t.role.title}`
+        + " (most likely an organisation policy that filters MCP tools). Delegation runs in text mode instead: the coordinator writes `DELEGATE` lines"
+        + " and TheFlashMaster starts the specialists.", "warn");
+      return;
+    }
     this.system(t.chat.id, t.threadRoot, `⚠️ ${t.role.title}'s \`delegate\` tool did not load in **${live.harness}**`
       + (live.harness === "pi" ? " (Pi has no MCP support)" : blocked ? ": Copilot reports **MCP servers blocked by policy**. Your organisation's *MCP servers in Copilot* policy is off; ask your GitHub admin to enable it" : "")
       + ". Delegation runs in text mode instead: the coordinator writes `DELEGATE` lines and TheFlashMaster starts the specialists."

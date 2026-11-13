@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: text-mode delegation didn't start when the CLI hid the tools.** Copilot can fetch TheFlashMaster's tool list and still not give the tools to the model (for example an organisation policy filtering MCP tools), so the app thought `delegate` had loaded. When the coordinator's reply says `delegate` is missing, the app now switches to text mode and has it re-plan with `DELEGATE` lines. The chat explains what happened. The coordinator is also told its tools may appear with a server prefix (`flashmaster-core-delegate`).
 - **Fix: private repository not recognised by the update check.** When GitHub answers with its (SSO) sign-in page instead of `latest.json`, the error now says the repository is private, and the **Sign in to GitHub** button appears. It also appears for the "sign-in" wording, which wasn't matched before.
 - **Fix: DOORS Next with a global configuration found 0 modules (HTTP 400).**
   - **Configuration field:** a GCM web link (`…/gc/web/projects/…#action=gc.viewConfiguration&path=…`), a DOORS Next link with `oslc_config.context`, or a URL-encoded value is now turned into the configuration URI (`…/gc/configuration/51068`). This applies in Settings when pasted, and to values already saved. Pasting a GCM link into the server field sets the configuration and leaves the server unchanged.

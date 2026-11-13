@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTextAgents, parseTextDelegations, parseTextToolCalls, textToolRules } from "../src/main/context";
 import { parseRole, roleMarkdown } from "../src/main/roles";
+import { saysNoDelegate } from "../src/main/orchestrator";
 
 describe("parseTextDelegations", () => {
   it("parses roles, harness, multi-line briefs, and ignores code fences", () => {
@@ -52,5 +53,15 @@ describe("roleMarkdown", () => {
     const r = parseRole(md, "x", "user");
     expect(r).toMatchObject({ name: "can-log-analyst", title: "Can Log Analyst", tools: ["flashmaster-core", "jazz"], harness: "pi", prompt: "Do it." });
     expect(md).toContain("createdBy: flashmaster");
+  });
+});
+
+describe("saysNoDelegate", () => {
+  it("recognises the coordinator reporting a missing delegate tool", () => {
+    expect(saysNoDelegate("I couldn't delegate this: TheFlashMaster's `delegate` tool didn't load in this session, so no task was started.")).toBe(true);
+    expect(saysNoDelegate("The specialist/task-board tools aren't available; the delegate tool is unavailable.")).toBe(true);
+    expect(saysNoDelegate("I have no `delegate` tool in this session.")).toBe(true);
+    expect(saysNoDelegate("I'll delegate the review to the reviewer.")).toBe(false);
+    expect(saysNoDelegate("DELEGATE reviewer: check the available signals")).toBe(false);
   });
 });

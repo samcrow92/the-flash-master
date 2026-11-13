@@ -51,6 +51,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Plan: one review.\n\nDELEGATE reviewer: Review brake.c\nfocus on debounce\n\nDELEGATE nosuchrole: x\n" } });
         return reply({ stopReason: "end_turn" });
       }
+      if (text.includes("SAYNODELEGATE")) {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "I couldn't delegate this: TheFlashMaster's `delegate` tool didn't load in this session, so no task was started." } });
+        return reply({ stopReason: "end_turn" });
+      }
       if (text === "/usage") {
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Usage\n  Premium requests: 123 / 300 (41%)\n  Resets: Dec 1, 2026\n" } });
         return reply({ stopReason: "end_turn" });

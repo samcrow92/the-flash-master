@@ -173,6 +173,16 @@ describe("Orchestrator", () => {
     expect(reviewer).toBeTruthy();
   });
 
+  it("switches to text mode when the coordinator says delegate is missing, even if the tools were listed", async () => {
+    const { db, orch, chat } = setup({}, { toolsLoaded: () => true });
+    cleanup = () => orch.stopAll();
+    db.updateChat(chat.id, { harness: "opencode" });
+    await orch.sendUserMessage(chat.id, "SAYNODELEGATE say hi", null);
+    const all = () => { const top = db.listMessages(chat.id, null); return [...new Map(top.concat(...top.map((m) => db.listMessages(chat.id, m.id))).map((m) => [m.id, m])).values()]; };
+    await until(() => all().some((m) => m.author === "agent" && m.content.startsWith("Integrated:")), 15000);
+    expect(all().some((m) => m.author === "system" && m.content.includes("didn't give them to"))).toBe(true);
+  });
+
   it("the coordinator can create a custom agent and run it", async () => {
     const created: any[] = [];
     const { db, orch, chat } = setup({}, { createRole: (spec: any, by: string, keep: boolean) => {

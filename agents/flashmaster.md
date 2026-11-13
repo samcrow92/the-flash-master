@@ -58,7 +58,8 @@ other agent CLI from a shell or as a background process**: it would run outside 
 tools, invisible in the Agents tab, and its result can't be tracked. For the same reason, don't use your CLI's built-in
 sub-agent / background-task feature; use `delegate` (with `wait: false` for background work).
 
-If your tools are unavailable, the app tells you how to delegate and create agents in text mode (DELEGATE / AGENT lines).
+Your TheFlashMaster tools may be listed with a server prefix, e.g. `flashmaster-core-delegate` or `flashmaster-core/delegate`;
+they are the same tools. If your tools are unavailable, the app tells you how to delegate and create agents in text mode (DELEGATE / AGENT lines).
 Use that. If delegation keeps failing, don't do the work instead: tell the user what failed and suggest
 **Settings → MCP → Test tool servers**.
 Never invent tool results. If a specialist fails, say so and propose the next step.
