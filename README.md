@@ -86,6 +86,8 @@ npm run ci -- --smoke  # + launches the built app headlessly and checks the UI b
 npm run dist:win       # Windows x64 portable exe + installer (run on Windows)
 ```
 
+If `npm run dev` reports **"Electron uninstall"**, npm skipped Electron's binary download, either because `ignore-scripts` is on or a proxy blocked it. The dev and build scripts now fetch it automatically. Behind a proxy, set `$env:GLOBAL_AGENT_HTTPS_PROXY="http://proxy:port"`, or set `$env:ELECTRON_MIRROR` to your internal mirror.
+
 Requirements: Node 22.13+, and Python 3.10+ with `pytest cantools python-pptx` for the Python tests.
 
 ### Release pipeline

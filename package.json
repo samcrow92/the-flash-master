@@ -17,7 +17,10 @@
     "test": "vitest run",
     "test:py": "node scripts/run-pytest.mjs",
     "ci": "node scripts/ci.mjs",
-    "dist:win": "npm run build && electron-builder --win --x64 --publish never"
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "predev": "node scripts/ensure-electron.mjs",
+    "prebuild": "node scripts/ensure-electron.mjs",
+    "predist:win": "node scripts/ensure-electron.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
