@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentImportResult } from "@shared/types";
 import { api, useStore } from "../store";
+import { Download, FolderInput, Plus, StatusMark } from "./icons";
 
 /** Create / import a custom agent: edit the template (or paste one written by an LLM), validate live, import. */
 export function AgentImportDialog({ onClose, initialText }: { onClose: () => void; initialText?: string }) {
@@ -30,10 +31,10 @@ export function AgentImportDialog({ onClose, initialText }: { onClose: () => voi
     <div className="modal-back" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <div className="row between">
-          <h3>➕ Add your own agent</h3>
+          <h3 className="row gap-s"><Plus size={18} className="h-icon" /> Add your own agent</h3>
           <div className="row gap">
-            <button onClick={async () => { const p = await api().saveAgentTemplate(); if (p) toast("info", `Template saved to ${p}`); }}>⬇ Save template…</button>
-            <button onClick={fromFiles}>📂 Import .md files…</button>
+            <button onClick={async () => { const p = await api().saveAgentTemplate(); if (p) toast("info", `Template saved to ${p}`); }}><Download size={14} /> Save template…</button>
+            <button onClick={fromFiles}><FolderInput size={14} /> Import .md files…</button>
           </div>
         </div>
         <p className="muted small">
@@ -43,9 +44,9 @@ export function AgentImportDialog({ onClose, initialText }: { onClose: () => voi
         <textarea className="agent-editor" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
         {check && (
           <div className="validation">
-            {check.errors.map((e) => <div key={e} className="v-err">✖ {e}</div>)}
-            {check.warnings.map((w) => <div key={w} className="v-warn">⚠ {w}</div>)}
-            {check.ok && check.warnings.length === 0 && <div className="v-ok">✔ Valid agent "{check.name}"</div>}
+            {check.errors.map((e) => <div key={e} className="v-err"><StatusMark state="fail" size={13} /> {e}</div>)}
+            {check.warnings.map((w) => <div key={w} className="v-warn"><StatusMark state="warn" size={13} /> {w}</div>)}
+            {check.ok && check.warnings.length === 0 && <div className="v-ok"><StatusMark state="ok" size={13} /> Valid agent "{check.name}"</div>}
           </div>
         )}
         <div className="row between">

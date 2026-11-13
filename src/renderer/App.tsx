@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { reportImports } from "./components/AgentImport";
-import { api } from "./store";
-import { useStore } from "./store";
+import { api, applyWindow, useStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./views/ChatView";
 import { AgentsView } from "./views/AgentsView";
@@ -13,6 +12,8 @@ import { FlowPage } from "./views/FlowView";
 import { MarketplaceView } from "./views/MarketplaceView";
 import { DocsView } from "./views/DocsView";
 import { ContextMenuHost } from "./components/ContextMenu";
+import { TitleBar } from "./components/TitleBar";
+import { Dots } from "./components/Dots";
 import { Zap } from "./components/icons";
 
 export function App() {
@@ -21,13 +22,22 @@ export function App() {
 
   useEffect(() => {
     const off = window.flash.onEvent((e) => apply(e));
+    // Before init: the splash already needs the title bar (the window has no native frame).
+    void api().windowState().then((w) => { useStore.setState({ window: w }); applyWindow(w); }).catch(() => undefined);
     void init().catch((e) => useStore.getState().toast("error", String(e?.message ?? e)));
     return off;
   }, [init, apply]);
 
-  if (!ready) return <div className="splash"><div className="logo-big"><Zap size={56} strokeWidth={1.6} /></div><div className="splash-title">TheFlashMaster</div><div className="splash-bar"><i /></div></div>;
+  if (!ready) return (
+    <div className="shell">
+      <TitleBar />
+      <div className="splash"><div className="logo-big"><Zap size={52} strokeWidth={1.5} /></div><div className="splash-title">TheFlashMaster</div><Dots pattern="auto" cycle size={8} /></div>
+    </div>
+  );
 
   return (
+    <div className="shell">
+    <TitleBar />
     <div className="app"
       onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
@@ -55,6 +65,7 @@ export function App() {
       <div className="toasts">
         {toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}
       </div>
+    </div>
     </div>
   );
 }

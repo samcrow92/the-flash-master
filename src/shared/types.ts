@@ -312,7 +312,17 @@ export type AppEvent =
   | { type: "artifacts.changed"; chatId: string }
   | { type: "update.state"; state: UpdateState }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
+  | { type: "window.state"; state: WindowState }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
+
+/** The app window, for the custom (frameless) title bar. `material` is the native blur behind the window, if any. */
+export interface WindowState {
+  maximized: boolean;
+  focused: boolean;
+  fullscreen: boolean;
+  platform: string;
+  material: "acrylic" | "vibrancy" | "none";
+}
 
 export interface AgentImportResult {
   file: string;
