@@ -4,7 +4,7 @@ import {
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
   KeyRound, LifeBuoy, ListChecks, Package, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
   CornerDownRight, Leaf, Users, Lightbulb, FileText, FlaskConical, ScanSearch, ShieldCheck, Bug, Swords,
-  RoleIcon, User, ChevronRight,
+  RoleIcon, User, ChevronRight, MessageCircle,
 } from "../components/icons";
 import { AGENT_DOCS, type AgentDoc } from "./agentDocs";
 
@@ -305,7 +305,7 @@ function Use() {
       <Item icon={<Sparkles size={18} />} title="Superpowers">On demand, a disciplined workflow: brainstorm → plan → test-driven implementation → review → verify. <PageLink to="superpowers">How it works</PageLink></Item>
       <Item icon={<Package size={18} />} title="Artifacts & diffs">The <b>Artifacts</b> button in a chat lists every file the agents changed (with a side-by-side or unified diff), the project’s uncommitted git changes, saved reports and code blocks. Download single files, patches or everything as one .patch.</Item>
       <Item icon={<Compass size={18} />} title="Progress">The Progress panel shows each agent’s plan, delegations and approvals as a flow chart.</Item>
-      <Item icon={<Bot size={18} />} title="Agents overview">See every running agent, pause, resume or stop it.</Item>
+      <Item icon={<Bot size={18} />} title="Agents overview">See every running agent, pause, resume or stop it. Click an agent card, or <b>Chat</b> on a row, to open its chat.</Item>
       <Item icon={<SquareKanban size={18} />} title="Tasks">A simple board; “Run with agent” hands a task to its assigned specialist.</Item>
       <Item icon={<ClipboardList size={18} />} title="Jazz work items">Search, read and comment on IBM Jazz items and send them to an agent for analysis (Settings → Integrations).</Item>
       <Item icon={<ListChecks size={18} />} title="Requirements (DOORS Next)">IBM Jazz → Requirements: pick a project and module, read it by section, search it, select requirements and click <b>Analyse</b>. Agents search modules themselves with <code>rm_search</code> and read details with <code>rm_get</code>, so only relevant requirements enter their context.</Item>
@@ -428,6 +428,7 @@ function Actor({ actor }: { actor: string }) {
 function AgentPage({ doc: a }: { doc: AgentDoc }) {
   const roles = useStore((s) => s.roles);
   const role = roles.find((r) => r.name === a.name);
+  const chatWithAgent = useStore((s) => s.chatWithAgent);
   const i = AGENT_DOCS.indexOf(a);
   const prev = AGENT_DOCS[i - 1], next = AGENT_DOCS[i + 1];
   return <>
@@ -438,6 +439,7 @@ function AgentPage({ doc: a }: { doc: AgentDoc }) {
         <h3>{a.title}</h3>
         <div className="row gap wrap"><code>@{a.name}</code>{role?.source === "user" && <span className="pill amber">customised in your setup</span>}</div>
       </div>
+      {role && <button className="primary agent-hero-chat" onClick={() => chatWithAgent(a.name)}><MessageCircle size={15} /> Chat with {a.title}</button>}
     </header>
 
     <h4>Purpose</h4>
