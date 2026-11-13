@@ -1,4 +1,5 @@
 // Runs the Python MCP server tests with whichever Python 3 is available.
+// -rs prints the reason for every skipped test, so CI output shows what was not covered.
 import { spawnSync } from "node:child_process";
 
 const candidates = process.platform === "win32" ? [["py", ["-3"]], ["python", []]] : [["python3", []], ["python", []]];

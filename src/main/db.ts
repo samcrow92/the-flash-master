@@ -4,7 +4,7 @@ import type {
   AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, ToolRun, UsageSummary,
 } from "@shared/types";
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
    CREATE TABLE chats(id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, title TEXT NOT NULL,
      kind TEXT NOT NULL, agent_role TEXT NOT NULL, harness TEXT, model TEXT, superpowers INTEGER NOT NULL DEFAULT 0,

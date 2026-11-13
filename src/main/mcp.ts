@@ -26,7 +26,7 @@ interface Paths {
   dataDir: string; // app data root
 }
 
-const PY_SERVERS = [
+export const PY_SERVERS = [
   { id: "vector-autosar", label: "Vector / AUTOSAR tools (DBC, ARXML, CDD, CAPL, CANoe, DaVinci)" },
   { id: "winidea", label: "winIDEA debugger (isystem.connect SDK)" },
   { id: "office", label: "PowerPoint & diagrams (python-pptx, Ishikawa)" },
