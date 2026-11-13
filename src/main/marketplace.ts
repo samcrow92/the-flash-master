@@ -6,7 +6,7 @@
  *
  * Installing a plugin writes its agents into the user roles folder and its workflows into the user skills folder,
  * stores its instructions (merged into the team rules while enabled) and records provenance in plugins/installed.json,
- * so uninstall/update remove exactly what was installed. MCP servers are added disabled-by-policy unless allowed.
+ * so uninstall/update remove exactly what was installed. MCP servers are added disabled unless policy allows them.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -22,8 +22,7 @@ export interface MarketplaceDeps {
   rolesDir: string; // user roles folder (agents)
   skillsDir: string; // user skills folder (workflows)
   fetch: FetchLike;
-  token: (sourceId: string) => string;
-  policy: () => { requireIntegrity: boolean; allowMcpServers: boolean };
+  policy: () => { allowMcpServers: boolean };
   knownTools: () => string[];
   builtinRoles: () => string[];
   addMcpServers: (servers: { id: string; label: string; command: string; args: string; env: string }[], enabled: boolean) => void;
@@ -126,10 +125,9 @@ export class Marketplace {
     const pkgUrl = /^https?:\/\//i.test(entry.package) ? entry.package : `${listing.url}/${entry.package.replace(/^\/+/, "")}`;
     const raw = await this.get(src, pkgUrl);
     if (raw.length > MAX_PACKAGE) throw new Error("plugin package is too large");
-    const policy = this.d.policy();
+    // The publishing script writes a sha256 per package; when present it must match (protects against half-copied files).
     const sha = createHash("sha256").update(raw).digest("hex");
-    if (entry.sha256 && entry.sha256.toLowerCase() !== sha) throw new Error(`integrity check failed for ${pluginId} (sha256 mismatch) — not installed`);
-    if (!entry.sha256 && policy.requireIntegrity) throw new Error(`${pluginId} has no sha256 in the marketplace index and integrity checks are required (Settings → Marketplace)`);
+    if (entry.sha256 && entry.sha256.toLowerCase() !== sha) throw new Error(`${pluginId}: package does not match the marketplace index (re-run the publishing script on the server)`);
     const pkg = JSON.parse(raw) as PluginPackage;
     if (pkg.id !== entry.id) throw new Error(`package id "${pkg.id}" does not match index id "${entry.id}"`);
     return this.apply(src, listing.sourceName, entry, pkg);
@@ -203,9 +201,8 @@ export class Marketplace {
     if (p.mcpServers.length) this.d.removeMcpServers(p.mcpServers);
   }
 
-  private async get(src: MarketplaceSource, url: string): Promise<string> {
-    const token = this.d.token(src.id);
-    const r = await this.d.fetch(url, { method: "GET", headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+  private async get(_src: MarketplaceSource, url: string): Promise<string> {
+    const r = await this.d.fetch(url, { method: "GET", headers: { Accept: "application/json" } });
     if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
     return r.text();
   }

@@ -61,7 +61,6 @@ export interface FlashApi {
   marketplaceInstall(sourceId: string, pluginId: string): Promise<InstalledPlugin>;
   marketplaceUninstall(pluginId: string): Promise<void>;
   marketplaceUpdateAll(): Promise<{ id: string; ok: boolean; error?: string }[]>;
-  marketplaceSetToken(sourceId: string, token: string): Promise<void>;
   marketplaceTest(sourceId: string): Promise<{ ok: boolean; detail: string }>;
   pluginInstructions(pluginId: string, enabled: boolean): Promise<void>;
   listModels(harness: HarnessId, refresh?: boolean): Promise<HarnessModels>;
@@ -90,7 +89,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "usageSummary", "detectHarnesses", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
-  "marketplaceSetToken", "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
+  "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "jazzQuery", "jazzGet", "jazzSetPassword", "jazzTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "appInfo",
 ];

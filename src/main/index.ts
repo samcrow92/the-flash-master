@@ -138,17 +138,10 @@ function refreshModels(h: HarnessId): Promise<HarnessModels> {
 }
 
 // ---------------- marketplace ----------------
-const mpSecretDir = join(dataDir, "marketplace-secrets");
-mkdirSync(mpSecretDir, { recursive: true });
-const mpToken = (id: string): string => {
-  const f = join(mpSecretDir, `${id.replace(/[^\w-]/g, "_")}.bin`);
-  try { return existsSync(f) && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(readFileSync(f)) : ""; } catch { return ""; }
-};
 const marketplace = new Marketplace({
   dataDir, rolesDir: userRolesDir, skillsDir: userSkillsDir,
   fetch: (url, init) => session.defaultSession.fetch(url, { ...init, redirect: "follow" } as any) as any,
-  token: mpToken,
-  policy: () => ({ requireIntegrity: settings.get().marketplace.requireIntegrity, allowMcpServers: settings.get().marketplace.allowMcpServers }),
+  policy: () => ({ allowMcpServers: settings.get().marketplace.allowMcpServers }),
   knownTools: () => [...mcp.list().map((m) => m.id), ...settings.get().mcp.external.map((e) => e.id)],
   builtinRoles: () => loadRoles(join(resources, "agents"), join(dataDir, "__none__")).map((r) => r.name),
   addMcpServers: (servers, enabled) => {
@@ -185,17 +178,7 @@ async function checkPluginUpdates(): Promise<void> {
   if (!m.sources.some((x) => x.enabled)) return;
   await marketplace.refresh(m.sources);
   const ups = marketplace.updates();
-  if (!ups.length) return;
-  if (m.autoUpdate) {
-    for (const u of ups) {
-      try { await marketplace.install(mpSource(u.plugin.sourceId), u.plugin.id); log("info", `plugin updated: ${u.plugin.id} ${u.plugin.version} → ${u.entry.version}`); }
-      catch (e) { log("error", `plugin update failed: ${u.plugin.id}: ${String(e)}`); }
-    }
-    afterPluginChange();
-    emit({ type: "notice", level: "info", text: `${ups.length} plugin update(s) installed` });
-  } else {
-    emit({ type: "notice", level: "info", text: `${ups.length} plugin update(s) available — see Marketplace` });
-  }
+  if (ups.length) emit({ type: "notice", level: "info", text: `${ups.length} plugin update(s) available — see Marketplace` });
 }
 
 // ---------------- agent import ----------------
@@ -317,12 +300,6 @@ const api: FlashApi = {
     }
     afterPluginChange();
     return results;
-  },
-  marketplaceSetToken: async (sourceId, token) => {
-    if (token && !safeStorage.isEncryptionAvailable()) throw new Error("OS encryption is not available on this machine");
-    const f = join(mpSecretDir, `${sourceId.replace(/[^\w-]/g, "_")}.bin`);
-    if (token) writeFileSync(f, safeStorage.encryptString(token)); else if (existsSync(f)) unlinkSync(f);
-    settings.update({ marketplace: { sources: mpSources().map((x) => (x.id === sourceId ? { ...x, hasToken: !!token } : x)) } });
   },
   marketplaceTest: async (sourceId) => {
     const l = await marketplace.fetchIndex(mpSource(sourceId));

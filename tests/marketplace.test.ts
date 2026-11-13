@@ -36,14 +36,14 @@ const fetchImpl: FetchLike = async (url, init) => {
   return { status: r.status, ok: r.ok, headers: { get: (n: string) => r.headers.get(n) }, text: () => r.text() };
 };
 
-function setup(over: Partial<{ requireIntegrity: boolean; allowMcpServers: boolean; token: string }> = {}) {
+function setup(over: Partial<{ allowMcpServers: boolean }> = {}) {
   const data = mkdtempSync(join(tmpdir(), "mpdata-"));
   const rolesDir = join(data, "agents"), skillsDir = join(data, "skills");
   mkdirSync(rolesDir, { recursive: true });
   const mcp: { added: { ids: string[]; enabled: boolean }[]; removed: string[] } = { added: [], removed: [] };
   const mp = new Marketplace({
-    dataDir: data, rolesDir, skillsDir, fetch: fetchImpl, token: () => over.token ?? "",
-    policy: () => ({ requireIntegrity: over.requireIntegrity ?? true, allowMcpServers: over.allowMcpServers ?? false }),
+    dataDir: data, rolesDir, skillsDir, fetch: fetchImpl,
+    policy: () => ({ allowMcpServers: over.allowMcpServers ?? false }),
     knownTools: () => ["flashmaster-core", "vector-autosar", "jazz", "office", "winidea"],
     builtinRoles: () => loadRoles(join(ROOT, "agents"), "/none").map((r) => r.name),
     addMcpServers: (s, enabled) => mcp.added.push({ ids: s.map((x) => x.id), enabled }),
@@ -100,7 +100,7 @@ describe("marketplace", () => {
     }
   });
 
-  it("enforces integrity and never half-installs a bad plugin", async () => {
+  it("rejects a package that does not match its published checksum, and installs without one", async () => {
     const { mp, src, rolesDir } = setup();
     const idxFile = join(market, "index.json");
     const orig = readFileSync(idxFile, "utf8");
@@ -109,15 +109,12 @@ describe("marketplace", () => {
       idx.plugins[0].sha256 = "0".repeat(64);
       writeFileSync(idxFile, JSON.stringify(idx));
       await mp.refresh([src]);
-      await expect(mp.install(src, "body-sw-test-pack")).rejects.toThrow(/integrity check failed/);
-      delete idx.plugins[0].sha256;
+      await expect(mp.install(src, "body-sw-test-pack")).rejects.toThrow(/does not match the marketplace index/);
+      expect(existsSync(join(rolesDir, "hil-tester.md"))).toBe(false);
+      delete idx.plugins[0].sha256; // hand-written index without checksums is fine on an internal server
       writeFileSync(idxFile, JSON.stringify(idx));
       await mp.refresh([src]);
-      await expect(mp.install(src, "body-sw-test-pack")).rejects.toThrow(/no sha256/);
-      expect(existsSync(join(rolesDir, "hil-tester.md"))).toBe(false);
-      const lax = setup({ requireIntegrity: false });
-      await lax.mp.refresh([lax.src]);
-      expect((await lax.mp.install(lax.src, "body-sw-test-pack")).agents).toEqual(["hil-tester"]);
+      expect((await mp.install(src, "body-sw-test-pack")).agents).toEqual(["hil-tester"]);
     } finally {
       writeFileSync(idxFile, orig);
     }
@@ -130,11 +127,11 @@ describe("marketplace", () => {
     expect(readFileSync(join(rolesDir, "hil-tester.md"), "utf8")).toContain("title: Mine");
   });
 
-  it("sends the access token and reports unreachable marketplaces", async () => {
-    const { mp, src } = setup({ token: "s3cret" });
+  it("reports unreachable marketplaces", async () => {
+    const { mp, src } = setup();
     seen.length = 0;
     await mp.fetchIndex(src);
-    expect(seen[0]).toMatchObject({ url: "/index.json", auth: "Bearer s3cret" });
+    expect(seen[0]).toMatchObject({ url: "/index.json" });
     const down = await mp.fetchIndex({ ...src, id: "x", url: "127.0.0.1:1" });
     expect(down.error).toBeTruthy();
   });

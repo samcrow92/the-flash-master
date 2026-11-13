@@ -53,7 +53,7 @@ The app calls no model API itself and stores no model credentials. There's no lo
 - **Superpowers workflow on demand:** off by default.
   - Toggle it per chat (`/superpowers`), or load one phase: `/brainstorm`, `/plan`, `/execute`, `/tdd`, `/debug`, `/review`, `/verify`.
 - **Custom tools as MCP servers.** They're auto-installed at startup when missing and attached **per session**, so your global harness configs stay untouched.
-- **🧩 Marketplace for teams:** each department hosts a catalogue of plugins (custom agents, workflows, team instructions, optional tool servers) on a local server at an IP, using any static web server. Add several marketplaces in Settings → Marketplace (with an optional encrypted token). Browse by department, search, install, update and uninstall in the Marketplace page. Packages are checked against their sha256, nothing half-installs, and plugin tool servers are opt-in by policy. Teams publish with `scripts/marketplace/build-index.mjs`; see [docs/marketplace.md](docs/marketplace.md).
+- **🧩 Marketplace for teams:** each department hosts a catalogue of plugins (custom agents, workflows, team instructions, optional tool servers) on a local server at an IP, using any static web server. Add several marketplaces in Settings → Marketplace (name, department, IP:port). Browse by department, search, install, update and uninstall in the Marketplace page. Nothing half-installs, and plugin tool servers stay off unless allowed. Teams publish with `scripts/marketplace/build-index.mjs`; see [docs/marketplace.md](docs/marketplace.md).
 - **Light and dark mode:** one click with ☀/🌙 in the sidebar, or follow Windows (Settings → General → Theme).
 - **Comprehensive settings,** plus an **enterprise policy file** to preset and lock them.
 

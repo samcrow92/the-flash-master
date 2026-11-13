@@ -254,16 +254,14 @@ function Mcp(f: F) {
 }
 
 function MarketplaceSettings(f: F) {
-  const st = useStore();
   const list = f.s.marketplace.sources;
   const lockedSources = f.locked("marketplace.sources");
-  const [tokens, setTokens] = useState<Record<string, string>>({});
   const [tests, setTests] = useState<Record<string, string>>({});
   const setList = (next: typeof list) => f.set("marketplace.sources", next);
   const patch = (id: string, p: Partial<(typeof list)[number]>) => setList(list.map((x) => (x.id === id ? { ...x, ...p } : x)));
   const add = () => {
     const id = `mp-${Date.now().toString(36)}`;
-    void setList([...list, { id, name: "New marketplace", url: "http://192.168.0.10:8080", department: "", enabled: true, hasToken: false }]);
+    void setList([...list, { id, name: "New marketplace", url: "http://192.168.0.10:8080", department: "", enabled: true }]);
   };
   return <>
     <p className="muted">A marketplace is a catalogue of plugins (custom agents, workflows, instructions, optionally tools) that a team or department hosts on a
@@ -280,21 +278,15 @@ function MarketplaceSettings(f: F) {
         </div>
         <div className="row gap wrap">
           <label className="row gap-s small"><input type="checkbox" checked={m.enabled} disabled={lockedSources} onChange={(e) => patch(m.id, { enabled: e.target.checked })} /> Enabled</label>
-          <input type="password" placeholder={m.hasToken ? "token saved (••••)" : "access token (optional)"} value={tokens[m.id] ?? ""} onChange={(e) => setTokens({ ...tokens, [m.id]: e.target.value })} />
-          <button onClick={async () => { await api().marketplaceSetToken(m.id, tokens[m.id] ?? ""); setTokens({ ...tokens, [m.id]: "" }); st.setSettings((await api().getSettings()).settings); st.toast("info", tokens[m.id] ? "Token saved (encrypted)" : "Token removed"); }}>
-            {tokens[m.id] ? "Save token" : m.hasToken ? "Remove token" : "Save token"}</button>
           <button onClick={async () => { setTests({ ...tests, [m.id]: "Testing…" }); const r = await api().marketplaceTest(m.id); setTests({ ...tests, [m.id]: (r.ok ? "✅ " : "❌ ") + r.detail }); }}>Test</button>
           <span className="small">{tests[m.id]}</span>
           <button className="ghost danger" disabled={lockedSources} onClick={() => confirm(`Remove marketplace "${m.name}"? Installed plugins stay installed.`) && setList(list.filter((x) => x.id !== m.id))}>Remove</button>
         </div>
       </div>
     ))}
-    <h4>Policies</h4>
-    <Row label="Check for plugin updates at startup"><Bool f={f} path="marketplace.autoCheckUpdates" /></Row>
-    <Row label="Install updates automatically" hint="Otherwise you get a notice and an ‘Update all’ button in the Marketplace."><Bool f={f} path="marketplace.autoUpdate" /></Row>
-    <Row label="Require integrity checksums" hint="Only install packages whose sha256 is published in the marketplace index (the publishing script adds it)."><Bool f={f} path="marketplace.requireIntegrity" /></Row>
-    <Row label="Allow plugins to add MCP tool servers" hint="MCP servers run programs on this PC. When off, plugin servers are added but stay disabled until you enable them in Settings → MCP."><Bool f={f} path="marketplace.allowMcpServers" /></Row>
-    <p className="muted small">Enterprise: preset and lock marketplaces for all users in the policy file, e.g. <code>{`{"settings":{"marketplace":{"sources":[…]}},"lock":["marketplace.sources"]}`}</code>.</p>
+    <h4>Options</h4>
+    <Row label="Check for plugin updates at startup" hint="You get a notice and an ‘Update all’ button in the Marketplace."><Bool f={f} path="marketplace.autoCheckUpdates" /></Row>
+    <Row label="Allow plugins to add tool servers (MCP)" hint="Tool servers run programs on this PC. When off, they are added disabled — enable them in Settings → MCP if you trust them."><Bool f={f} path="marketplace.allowMcpServers" /></Row>
   </>;
 }
 

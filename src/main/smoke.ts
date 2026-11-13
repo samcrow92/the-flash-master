@@ -73,7 +73,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       }
       const mpUrl = process.env.FLASH_SMOKE_MARKET_URL;
       if (mpUrl) {
-        await js(`window.flash.api.updateSettings({ marketplace: { sources: [{ id: "body", name: "Body Electronics", department: "Body", url: ${JSON.stringify(mpUrl)}, enabled: true, hasToken: false }] } }).then(s=>{})`);
+        await js(`window.flash.api.updateSettings({ marketplace: { sources: [{ id: "body", name: "Body Electronics", department: "Body", url: ${JSON.stringify(mpUrl)}, enabled: true }] } }).then(s=>{})`);
         win.webContents.reload();
         await sleep(2500);
         await click("Marketplace", ".sidebar button");
