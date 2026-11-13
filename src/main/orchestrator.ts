@@ -141,7 +141,10 @@ export class Orchestrator {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
     const s = this.d.settings();
-    if (parent.depth + 1 > s.agents.delegationDepth) throw new Error(`delegation depth limit (${s.agents.delegationDepth}) reached — do it yourself or ask the user`);
+    if (parent.depth + 1 > s.agents.delegationDepth)
+      throw new Error(parent.depth === 0
+        ? "delegation is turned off (Settings → Agents → delegation depth is 0) — tell the user; don't do the work yourself"
+        : `delegation depth limit (${s.agents.delegationDepth}) reached — do it yourself or ask the user`);
     const role = this.role(a.role);
     const chat = this.mustChat(parent.chatId);
     const brief = buildBrief({ goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, parentRole: parent.role.name });
