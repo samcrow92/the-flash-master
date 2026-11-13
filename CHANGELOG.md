@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- **Runs on macOS.** The app now works on Apple silicon and Intel Macs, with the system's own traffic lights and vibrancy.
+  - **Agent CLIs are found from the Dock:** on start the app reads your login shell's PATH, so CLIs in `~/.local/bin`, Homebrew or npm's global folder are detected even when it's not launched from Terminal.
+  - Clicking the Dock icon reopens the window; `npm run dist:mac` builds a .dmg and .zip (arm64 and x64). CI also runs on macOS.
+  - The Copilot usage bar stays hidden off Windows when Copilot isn't installed.
+- **Two new agent harnesses: Cursor Agent and Claude Code**, both over ACP like Copilot and OpenCode, with streaming, tools (MCP), model lists and permission prompts.
+  - **Cursor Agent** runs as `cursor-agent acp` with your Cursor login.
+  - **Claude Code** runs through its official ACP bridge, `claude-agent-acp` (`npm i -g @agentclientprotocol/claude-agent-acp`), with your Claude Code login.
+  - Pick them per chat, per agent, or ask the coordinator ("review this on Claude"). Both keep their own CLAUDE.md / AGENTS.md rules (partial clean mode).
+  - **Documentation → Cursor, Claude Code & other CLIs** shows setup steps for Windows and macOS and whether each one was found.
 - **Threads open inline, in the same chat.** Replies unfold under their message; the side panel and a pop-out window are one click away.
   - **The thread pill** under a message shows who replied, how many replies and when the last one came. Click it to expand or collapse; the chevron flips.
   - **Opening and closing animate:** the card grows smoothly, the replies fade in one after another, and collapsing plays it back.

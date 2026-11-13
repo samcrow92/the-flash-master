@@ -6,6 +6,8 @@
  *  opencode → OPENCODE_DISABLE_CLAUDE_CODE=1; OPENCODE_DISABLE_PROJECT_CONFIG=1 (project AGENTS.md);
  *             XDG_CONFIG_HOME → app-managed folder with a copy of the user's global opencode config minus
  *             `instructions` and without the global AGENTS.md (auth lives in XDG_DATA_HOME, unaffected)
+ *  cursor   → no switch exists: partial (AGENTS.md and .cursor/rules still load; precedence statement in the prompt)
+ *  claude   → no switch in the ACP bridge: partial (CLAUDE.md and ~/.claude settings still load; precedence statement)
  *  pi       → --no-context-files --no-skills --no-extensions --no-prompt-templates
  *  duo      → no switch exists: partial (TheFlashMaster's precedence statement in the prompt)
  */
@@ -56,6 +58,10 @@ export function prepareInstructions(h: HarnessId, o: InstructionOptions): Instru
         env: {}, coverage: "full",
         note: `Pi skills, extensions and prompt templates off${o.keepProject ? "; AGENTS.md/CLAUDE.md context files kept" : "; AGENTS.md/CLAUDE.md context files off"}.`,
       };
+    case "cursor":
+      return { args: [], env: {}, coverage: "partial", note: "Cursor Agent has no switch to skip AGENTS.md and .cursor/rules; TheFlashMaster's instructions are given precedence in the prompt." };
+    case "claude":
+      return { args: [], env: {}, coverage: "partial", note: "The Claude Code ACP bridge always loads CLAUDE.md and ~/.claude settings; TheFlashMaster's instructions are given precedence in the prompt." };
     case "duo":
       return { args: [], env: {}, coverage: "partial", note: "GitLab Duo has no switch to skip chat-rules.md/AGENTS.md; TheFlashMaster's instructions are given precedence in the prompt." };
     default:

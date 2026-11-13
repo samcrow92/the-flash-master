@@ -166,6 +166,8 @@ export const DEFAULT_SETTINGS: Settings = {
   harnesses: {
     copilot: harness(true),
     opencode: harness(true),
+    cursor: harness(true),
+    claude: harness(true),
     pi: harness(true),
     duo: harness(true),
     mock: harness(true),

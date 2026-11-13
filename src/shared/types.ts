@@ -1,7 +1,7 @@
 // Domain model shared by main process, preload and renderer.
 
-export type HarnessId = "copilot" | "opencode" | "pi" | "duo" | "mock";
-export const HARNESS_IDS: HarnessId[] = ["copilot", "opencode", "pi", "duo", "mock"];
+export type HarnessId = "copilot" | "opencode" | "cursor" | "claude" | "pi" | "duo" | "mock";
+export const HARNESS_IDS: HarnessId[] = ["copilot", "opencode", "cursor", "claude", "pi", "duo", "mock"];
 
 /** interrupted = the app closed while the agent was working; it can be resumed. */
 export type AgentStatus = "idle" | "running" | "paused" | "interrupted" | "stopped" | "error" | "done";

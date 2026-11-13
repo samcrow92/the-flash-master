@@ -53,6 +53,18 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-${version}-x64-setup.${ext}
   shortcutName: TheFlashMaster
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # Unsigned unless CSC_LINK / CSC_KEY_PASSWORD (Developer ID) are set; then also set notarize credentials.
+  hardenedRuntime: true
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
 linux:
   target: [dir]
 publish: null

@@ -37,6 +37,8 @@ export function UsageMeter() {
   if (!u || (u.loading && !u.ok)) {
     return <div className="usage-meter"><button className="usage-bar-btn" onClick={open}><Gauge size={13} className="muted" /><span className="usage-text">{u?.loading ? "Checking Copilot usage…" : "Copilot usage not checked yet"}</span></button>{refresh}</div>;
   }
+  // Off Windows, Copilot is one harness among several (Cursor, Claude Code…): don't nag when it isn't installed.
+  if (!u.ok && u.error === "Copilot CLI not found" && st.window && st.window.platform !== "win32") return null;
   if (!u.ok) {
     return (
       <div className="usage-meter warn" title={u.error ?? ""}>

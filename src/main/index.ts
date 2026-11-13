@@ -1,3 +1,4 @@
+import { fixPath } from "./shell-path";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, Notification } from "electron";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { extname } from "node:path";
@@ -37,6 +38,8 @@ app.setName("TheFlashMaster");
 if (!app.requestSingleInstanceLock()) app.quit();
 
 // FLASH_DATA_DIR overrides the data folder (isolated test runs, or keeping data next to a portable exe).
+// Finder/Dock launches on macOS start with a minimal PATH: take the login shell's, so agent CLIs are found.
+fixPath();
 if (process.env.FLASH_DATA_DIR) app.setPath("userData", process.env.FLASH_DATA_DIR);
 const dataDir = app.getPath("userData");
 mkdirSync(dataDir, { recursive: true });
@@ -955,3 +958,5 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => { void orch.stopAll(); bridge.stop(); db.close(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+// macOS: clicking the Dock icon with no window open brings the main window back.
+app.on("activate", () => { if (!app.isReady()) return; if (!win || win.isDestroyed()) createWindow(); else win.show(); });

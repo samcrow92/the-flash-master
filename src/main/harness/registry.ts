@@ -16,6 +16,10 @@ export class HarnessRegistry {
         "Copilot CLI not found — see Documentation → Install Copilot CLI (official download from GitHub), then choose copilot.exe."),
       new AcpAdapter("opencode", "OpenCode", ["opencode"], ["acp"],
         "Install OpenCode (npm i -g opencode-ai) and run `opencode auth login` once."),
+      new AcpAdapter("cursor", "Cursor Agent", ["cursor-agent", ...homeBin("cursor-agent")], ["acp"],
+        "Install Cursor Agent (curl https://cursor.com/install -fsS | bash; on Windows: irm 'https://cursor.com/install?win32=true' | iex) and run `cursor-agent login` once."),
+      new AcpAdapter("claude", "Claude Code", ["claude-agent-acp", ...homeBin("claude-agent-acp")], [],
+        "Install Claude Code and sign in (`claude`, then /login), then add its ACP bridge: npm i -g @agentclientprotocol/claude-agent-acp"),
       new PiAdapter(),
       new DuoAdapter(),
       new MockAdapter(),
@@ -52,7 +56,7 @@ export class HarnessRegistry {
       (this.status.get(id)?.available ?? id === "mock");
     if (ok(requested)) return requested;
     if (ok(settings.general.defaultHarness)) return settings.general.defaultHarness;
-    for (const id of ["copilot", "opencode", "pi", "duo"] as HarnessId[]) if (ok(id)) return id;
+    for (const id of ["copilot", "opencode", "cursor", "claude", "pi", "duo"] as HarnessId[]) if (ok(id)) return id;
     return "mock";
   }
 }
@@ -68,4 +72,12 @@ function copilotZipLocations(): string[] {
     `${home}\\Tools\\copilot\\copilot.exe`,
     ...["x64", "arm64"].flatMap((a) => [`${home}\\Downloads\\copilot-win32-${a}\\copilot.exe`, `${home}\\Downloads\\copilot-win32-${a}\\copilot-win32-${a}\\copilot.exe`]),
   ].filter((p) => !p.startsWith("\\"));
+}
+
+/** Per-user install folders a GUI launch may not have on PATH (installers for Cursor Agent, Claude Code, npm -g on macOS). */
+function homeBin(name: string): string[] {
+  if (process.platform === "win32") return [];
+  const home = process.env.HOME ?? "";
+  if (!home) return [];
+  return [`${home}/.local/bin/${name}`, `${home}/.npm-global/bin/${name}`, `/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`];
 }
