@@ -19,6 +19,10 @@ from server import S  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
+    # Results contain non-ASCII text (→, —, names); a Windows console defaults to cp1252 and would crash on print.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     if not argv or argv[0] in ("-h", "--help", "list"):
         for name, (_, meta) in S.tools.items():
             props = ", ".join(meta["inputSchema"].get("properties", {}).keys())
