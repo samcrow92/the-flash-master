@@ -51,6 +51,14 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Plan: one review.\n\nDELEGATE reviewer: Review brake.c\nfocus on debounce\n\nDELEGATE nosuchrole: x\n" } });
         return reply({ stopReason: "end_turn" });
       }
+      if (text.includes("SEGMENTS")) {
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Let me check the tests." } });
+        upd({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "The failure is probably " } });
+        upd({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "in the debounce." } });
+        upd({ sessionUpdate: "tool_call", toolCallId: "s1", title: "Run tests", kind: "execute", status: "completed", rawInput: { command: "ctest" } });
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "They pass now." } });
+        return reply({ stopReason: "end_turn" });
+      }
       if (text.includes("RUNCMD")) {
         upd({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Run tests", kind: "execute", status: "pending", rawInput: { command: ["ctest", "--output-on-failure"] } });
         upd({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress", content: [{ type: "content", content: { type: "text", text: "Test #1: brake ... Passed" } }] });

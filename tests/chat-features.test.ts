@@ -225,6 +225,48 @@ describe("steering acknowledgement with native steering", () => {
     expect(events.filter((e) => e.type === "message.updated" && e.message.id === m.id).map((e: any) => e.message.delivery)).toEqual(["delivered", "seen"]);
     await orch.stopAll();
   }, 15000);
+
+  it("what the agent writes after taking the steering message goes in a new reply below it", async () => {
+    const { db, orch, chat } = setup();
+    const harnesses = (orch as any).d.harnesses as HarnessRegistry;
+    const { PiAdapter } = await import("../src/main/harness/pi");
+    class FakePi extends PiAdapter {
+      override async start(o: SessionOptions) {
+        const sess = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc"], o);
+        await sess.init();
+        return sess;
+      }
+    }
+    (harnesses as any).adapters.set("pi", new FakePi());
+    (harnesses as any).status.set("pi", { id: "pi", available: true, path: process.execPath });
+    db.updateChat(chat.id, { harness: "pi" });
+    await orch.sendUserMessage(chat.id, "SLOW", null);
+    await until(() => (agentMsgs(db, chat.id)[0]?.content.length ?? 0) > 0 || !!(orch as any).liveText.size);
+    const m = await orch.sendUserMessage(chat.id, "use the CAN log", null, { whileBusy: "steer" });
+    await until(() => agentMsgs(db, chat.id).length === 2 && agentMsgs(db, chat.id).every((x) => x.status === "done"));
+    const [before, after] = agentMsgs(db, chat.id);
+    const steerMsg = db.getMessage(m.id)!;
+    expect(before!.seq).toBeLessThan(steerMsg.seq);
+    expect(after!.seq).toBeGreaterThan(steerMsg.seq);
+    expect(before!.content).not.toContain("[steered:");
+    expect(after!.content).toContain("[steered: use the CAN log]");
+    await orch.stopAll();
+  }, 15000);
+});
+
+describe("reply layout", () => {
+  it("keeps text bursts around tool calls as separate paragraphs, and records the reasoning in place", async () => {
+    const { db, orch, chat } = setup();
+    db.updateChat(chat.id, { harness: "opencode" });
+    await orch.sendUserMessage(chat.id, "SEGMENTS please", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "done");
+    const m = db.getMessage(agentMsgs(db, chat.id)[0]!.id)!;
+    expect(m.content).toBe("Let me check the tests.\n\nThey pass now.");
+    const think = m.tools!.find((x) => x.kind === "think")!;
+    expect(think).toMatchObject({ title: "Thinking", status: "completed", output: "The failure is probably in the debounce.", at: "Let me check the tests.".length });
+    expect(m.tools!.find((x) => x.title === "Run tests")!.at).toBe("Let me check the tests.".length);
+    await orch.stopAll();
+  });
 });
 
 describe("resilience", () => {

@@ -4,6 +4,7 @@ import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { ago, api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
+import { ReplyBody } from "../components/ReplyBody";
 import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
 import { UsageMeter } from "../components/UsageMeter";
@@ -215,8 +216,9 @@ export function MessageItem({ m, inThread }: { m: Message; inThread?: boolean })
         </div>
         <div className="msg-content">
           {(m.steer || m.delivery) && <DeliveryBadge steer={m.steer} state={m.delivery} />}
-          {!!m.tools?.length && <ToolRuns tools={m.tools} />}
-          {m.author === "user" ? <div className="plain">{m.content}</div> : <Markdown text={m.content || (m.status === "streaming" ? "" : "")} />}
+          {m.author === "user" ? <div className="plain">{m.content}</div>
+            : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} />
+            : <>{!!m.tools?.length && <ToolRuns tools={m.tools} />}<Markdown text={m.content} /></>}
           {m.attachments.length > 0 && (
             <div className="msg-atts">
               {m.attachments.map((a) => (
