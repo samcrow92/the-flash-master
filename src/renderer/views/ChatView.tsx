@@ -14,6 +14,7 @@ import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
 import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
 import { Dots } from "../components/Dots";
+import { SpecialistsPill } from "../components/SpecialistsPill";
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
@@ -130,11 +131,14 @@ export function ChatView({ chatId }: { chatId: string }) {
           </div>
         )}
 
-        <div className="messages" ref={listRef}>
-          <div className="messages-inner" ref={innerRef}>
-            {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
-            {messages.map((m) => <MessageItem key={m.id} m={m} />)}
+        <div className="messages-area">
+          <div className="messages" ref={listRef}>
+            <div className="messages-inner" ref={innerRef}>
+              {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
+              {messages.map((m) => <MessageItem key={m.id} m={m} />)}
+            </div>
           </div>
+          <SpecialistsPill />
         </div>
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
         <UsageMeter />
