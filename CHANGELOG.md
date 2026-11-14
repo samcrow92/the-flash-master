@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Windows-style window controls, no title bar.** Minimise, maximise and close now sit at the top right like any Windows app, next to the light/dark toggle, with nothing drawn behind them. The lightning-bolt app icon is back at the top left of the window. macOS keeps its own traffic lights.
 - **Runs on macOS.** The app now works on Apple silicon and Intel Macs, with the system's own traffic lights and vibrancy.
   - **Agent CLIs are found from the Dock:** on start the app reads your login shell's PATH, so CLIs in `~/.local/bin`, Homebrew or npm's global folder are detected even when it's not launched from Terminal.
   - Clicking the Dock icon reopens the window; `npm run dist:mac` builds a .dmg and .zip (arm64 and x64). CI also runs on macOS.

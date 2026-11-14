@@ -814,8 +814,8 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1000, minHeight: 640, title: "TheFlashMaster", show: false,
     backgroundColor: material === "none" ? "#0f1115" : "#00000000",
-    // Frameless: the app draws its own macOS-style title bar (traffic lights). "hidden" keeps the native frame for
-    // resizing, Snap layouts, the shadow and rounded corners on Windows 11; macOS keeps its own traffic lights.
+    // Frameless: the app draws its own Windows-style caption buttons at the top right (TitleBar.tsx), with no bar behind them.
+    // "hidden" keeps the native frame for resizing, Snap layouts, the shadow and rounded corners on Windows 11; macOS keeps its own traffic lights.
     titleBarStyle: "hidden",
     roundedCorners: true, // Windows 11 rounds frameless windows natively (DWM); older Windows can't.
     ...(process.platform === "darwin" ? { trafficLightPosition: { x: 18, y: 14 } } : {}),

@@ -90,3 +90,22 @@ describe("repo layout", () => {
     expect(read("CLAUDE.md").trim().split(/\r?\n/).filter((l) => !l.startsWith("<!--"))).toEqual(["@AGENTS.md"]);
   });
 });
+
+describe("window chrome", () => {
+  // The bolt icon has gone missing twice: once from the taskbar (no AppUserModelID / .ico) and once from the window
+  // when the native title bar was removed. Keep both in place.
+  it("every BrowserWindow carries the app icon", () => {
+    const src = read("src/main/index.ts");
+    const windows = [...src.matchAll(/new BrowserWindow\(\{([\s\S]*?)webPreferences/g)].map((m) => m[1]!);
+    expect(windows.length).toBeGreaterThan(2);
+    expect(windows.filter((w) => !/icon: appIcon/.test(w)), "BrowserWindow without icon: appIcon").toEqual([]);
+    expect(src).toMatch(/setAppUserModelId\(/);
+  });
+  it("the frameless title bar shows the app icon and Windows-style caption buttons", () => {
+    const tsx = read("src/renderer/components/TitleBar.tsx");
+    expect(tsx).toMatch(/import appIcon from "\.\.\/assets\/app-icon\.png"/);
+    expect(tsx).toMatch(/<img className="titlebar-icon" src=\{appIcon\}/);
+    for (const action of ["minimize", "maximize", "close"]) expect(tsx).toContain(`windowControl("${action}")`);
+    expect(readFileSync(join(root, "src/renderer/assets/app-icon.png")).length).toBeGreaterThan(100);
+  });
+});
