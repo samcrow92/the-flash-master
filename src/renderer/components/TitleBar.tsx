@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, useStore } from "../store";
+import { api, toggleTheme, useStore } from "../store";
+import { Moon, Sun } from "./icons";
 
 const VIEW_TITLES: Record<string, string> = {
   agents: "Agents", dashboard: "Dashboard", tasks: "Tasks", jazz: "IBM Jazz", settings: "Settings", flow: "Progress",
@@ -8,7 +9,7 @@ const VIEW_TITLES: Record<string, string> = {
 
 /**
  * Frameless window title bar, macOS style: traffic lights on the left (close · minimise · zoom), the current view in
- * the middle, and the whole strip is a drag handle (double-click zooms; Windows Snap still works through it).
+ * the middle, the light/dark toggle on the right, and the rest of the strip is a drag handle (double-click zooms; Windows Snap still works through it).
  * On macOS the system draws its own traffic lights, so only the spacer is kept.
  */
 export function TitleBar() {
@@ -19,6 +20,7 @@ export function TitleBar() {
   const title = view.kind === "chat" ? chatTitle ?? "Chat" : VIEW_TITLES[view.kind] ?? "";
   const native = ws?.platform === "darwin";
   const blurred = ws ? !ws.focused : false;
+  const light = useStore((s) => s.settings?.general.theme === "light") || document.documentElement.dataset.theme === "light";
 
   // Alt+F4 still works natively; give keyboard users the familiar shortcuts for the other two as well.
   useEffect(() => {
@@ -38,7 +40,11 @@ export function TitleBar() {
         </div>
       )}
       <div key={title} className="titlebar-title">{title}</div>
-      <span className="lights-spacer" />
+      <div className="titlebar-right">
+        <button className="theme-toggle" title={light ? "Switch to dark mode" : "Switch to light mode"} aria-label={light ? "Switch to dark mode" : "Switch to light mode"} onClick={() => void toggleTheme()}>
+          <span key={light ? "moon" : "sun"} className="theme-icon">{light ? <Moon size={15} /> : <Sun size={15} />}</span>
+        </button>
+      </div>
     </header>
   );
 }

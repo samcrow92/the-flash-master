@@ -1185,3 +1185,7 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .table td.actions button.chat-btn { display: inline-flex; align-items: center; gap: 4px; }
 .agent-hero-chat { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
 .agent-chat-label { margin-top: 14px; } .agent-chat-label + .agent-chat-strip { margin-top: 6px; }
+/* Light/dark toggle sits at the right end of the title bar. */
+.titlebar-right { justify-self: end; display: flex; align-items: center; }
+.titlebar .theme-toggle { background: transparent; border: none; border-radius: 8px; padding: 4px 7px !important; color: var(--muted); display: inline-grid; place-content: center; }
+.titlebar .theme-toggle:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); }
