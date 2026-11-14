@@ -8,9 +8,10 @@ const usd = (v: number) => `$${v.toFixed(2)}`;
 export function usageLabel(u: CopilotUsage): string {
   const b = u.billing;
   if (b) {
-    const parts = [`${fmt(b.used)} ${unitName(b)} used`];
-    if (b.remaining !== null) parts.push(`${fmt(b.remaining)} left`);
-    if (b.netAmount > 0 || b.budget !== null) parts.push(b.budgetRemaining !== null ? `${usd(b.netAmount)} of ${usd(b.budget!)} budget` : `${usd(b.netAmount)} billed`);
+    const parts = b.available !== null && b.availableTotal !== null
+      ? [`${fmt(b.available)} of ${fmt(b.availableTotal)} ${unitName(b)} available`, `${fmt(b.usedOfAvailable)} used (${b.percent}%)`]
+      : [`${fmt(b.used)} ${unitName(b)} used`];
+    if (b.netAmount > 0) parts.push(`${usd(b.netAmount)} billed`);
     if (b.models[0]) parts.push(`top: ${b.models[0].model} ${b.models[0].share}%`);
     return `Copilot · ${parts.join(" · ")}`;
   }

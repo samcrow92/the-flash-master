@@ -22,6 +22,8 @@ export interface BillingOptions {
   allowance?: number;
   /** Monthly spending budget in USD; 0/undefined = none. */
   budget?: number;
+  /** Included credits still available, as Copilot itself counts them (only used with Copilot's own allowance). */
+  availableNow?: number | null;
 }
 
 export const PLAN_PERMISSION_HINT =
@@ -53,10 +55,24 @@ export function summarizeBilling(items: BillingItem[], period: { year: number; m
     .map((m) => ({ model: m.model, quantity: round(m.quantity), amount: round(m.amount), netAmount: round(m.netAmount), share: used > 0 ? round((m.quantity / used) * 100, 1) : 0 }));
   const allowance = opts.allowance && opts.allowance > 0 ? opts.allowance : null;
   const budget = opts.budget && opts.budget > 0 ? opts.budget : null;
+  // Available credits = plan allowance + what the budget buys; usage is then computed from what is still available.
+  const budgetCredits = budget !== null && price ? budget / price : null;
+  const budgetCreditsLeft = budget !== null && price ? Math.max(0, budget - netAmount) / price : null;
+  const availableTotal = allowance === null && budgetCredits === null ? null : (allowance ?? 0) + (budgetCredits ?? 0);
+  const fromCopilot = allowance !== null && typeof opts.availableNow === "number";
+  const available = availableTotal === null ? null
+    : fromCopilot ? Math.min(availableTotal, Math.max(0, opts.availableNow!) + (budgetCreditsLeft ?? 0))
+    : Math.max(0, availableTotal - used);
+  const usedOfAvailable = availableTotal !== null && available !== null ? availableTotal - available : used;
   return {
     unit, period, user,
     used: round(used), included: round(included), billed: round(billed), grossAmount: round(grossAmount), netAmount: round(netAmount), pricePerUnit: price,
-    allowance, remaining: allowance !== null ? round(Math.max(0, allowance - included)) : null,
+    allowance, budgetCredits: budgetCredits !== null ? round(budgetCredits) : null,
+    availableTotal: availableTotal !== null ? round(availableTotal) : null,
+    available: available !== null ? round(available) : null,
+    availableFrom: available === null ? null : fromCopilot ? "copilot" : "computed",
+    usedOfAvailable: round(usedOfAvailable),
+    percent: availableTotal ? round(Math.min(100, (usedOfAvailable / availableTotal) * 100), 1) : null,
     budget, budgetRemaining: budget !== null ? round(Math.max(0, budget - netAmount)) : null,
     models,
   };
@@ -116,26 +132,28 @@ export async function fetchCopilotBilling(fetch: Fetch, token: string, opts: Bil
   }
 
   let allowance = opts.allowance && opts.allowance > 0 ? opts.allowance : 0;
+  let availableNow: number | null = null;
   let resetAt: string | null = null;
   try {
     const r = await fetch(`${api}/copilot_internal/user`, { headers });
     const ent = r.ok ? parseEntitlement(await r.json()) : null;
-    if (ent) { if (!allowance) allowance = ent.allowance; resetAt = ent.resetAt; }
+    if (ent) {
+      // Copilot's own "remaining" is the available count; it only matches Copilot's allowance, not a typed one.
+      if (!allowance) { allowance = ent.allowance; availableNow = ent.remaining; }
+      resetAt = ent.resetAt;
+    }
   } catch { /* the allowance is optional */ }
   if (!resetAt) resetAt = new Date(Date.UTC(period.year, period.month, 1)).toISOString().slice(0, 10);
 
-  const billing = summarizeBilling(items, period, login, { allowance, budget: opts.budget });
+  const billing = summarizeBilling(items, period, login, { allowance, budget: opts.budget, availableNow });
   return toUsage(billing, resetAt);
 }
 
 /** Fills the generic meter fields from billing totals, so every view that reads `premium` keeps working. */
 export function toUsage(b: CopilotBilling, resetAt: string | null, fetchedAt = Date.now()): CopilotUsage {
-  const limit = b.allowance;
-  // With a budget, the bar tracks spending beyond the plan (what can still run out); otherwise the included allowance.
-  const percent = b.budget ? round(Math.min(100, (b.netAmount / b.budget) * 100), 1) : limit ? round(Math.min(100, (b.included / limit) * 100), 1) : null;
   return {
     ok: true, fetchedAt, error: null, source: "github", billing: b,
-    premium: { used: b.used, limit, percent, unlimited: false },
+    premium: { used: b.usedOfAvailable, limit: b.availableTotal, percent: b.percent, unlimited: false },
     resetAt, entries: [], raw: "",
   };
 }

@@ -475,17 +475,19 @@ function BillingDetail({ b }: { b: CopilotBilling }) {
   const unit = unitName(b);
   const fmt = (v: number) => (Math.round(v * 100) / 100).toLocaleString();
   const usd = (v: number) => `$${v.toFixed(2)}`;
-  const pct = b.allowance ? Math.min(100, (b.included / b.allowance) * 100) : null;
+  const pct = b.percent;
+  const sources = [b.allowance !== null ? `${fmt(b.allowance)} in your plan` : "", b.budgetCredits !== null ? `${fmt(b.budgetCredits)} from your ${usd(b.budget!)} budget` : ""].filter(Boolean).join(" + ");
   const top = b.models[0]?.quantity || 1;
   return <>
     <div className="usage-stats">
-      <div className="usage-stat"><span className="muted small">Used this month</span><strong>{fmt(b.used)}</strong><span className="muted small">{unit}{b.grossAmount > 0 ? ` · ${usd(b.grossAmount)}` : ""}</span></div>
-      <div className="usage-stat"><span className="muted small">Included left</span><strong>{b.remaining !== null ? fmt(b.remaining) : "—"}</strong>
-        <span className="muted small">{b.allowance !== null ? `of ${fmt(b.allowance)} in your plan` : "set your plan’s allowance below"}</span></div>
+      <div className="usage-stat"><span className="muted small">Available credits</span><strong>{b.available !== null ? fmt(b.available) : "—"}</strong>
+        <span className="muted small">{b.availableTotal !== null ? `of ${fmt(b.availableTotal)} ${unit} (${sources})` : "set the credits you have per month below"}</span></div>
+      <div className="usage-stat"><span className="muted small">Used</span><strong>{fmt(b.usedOfAvailable)}{pct !== null ? <span className="muted small"> · {pct}%</span> : null}</strong>
+        <span className="muted small">{b.availableTotal !== null ? `of available ${unit}${b.availableFrom === "copilot" ? ", as Copilot counts them" : ""}` : `${unit} this month`}{b.grossAmount > 0 ? ` · ${usd(b.grossAmount)}` : ""}</span></div>
       <div className="usage-stat"><span className="muted small">Billed beyond plan</span><strong>{usd(b.netAmount)}</strong>
         <span className="muted small">{fmt(b.billed)} {unit}{b.budgetRemaining !== null ? ` · ${usd(b.budgetRemaining)} of ${usd(b.budget!)} budget left` : ""}</span></div>
     </div>
-    {pct !== null && <div className="usage-bar big" title={`${Math.round(pct)}% of the included allowance used`}><div className={`usage-fill ${pct >= 90 ? "crit" : pct >= 75 ? "warn" : "ok"}`} style={{ width: `${pct}%` }} /></div>}
+    {pct !== null && <div className="usage-bar big" title={`${pct}% of your available credits used`}><div className={`usage-fill ${pct >= 90 ? "crit" : pct >= 75 ? "warn" : "ok"}`} style={{ width: `${pct}%` }} /></div>}
     <h5>Models using the most</h5>
     {b.models.length === 0 ? <div className="muted small">No Copilot usage billed to @{b.user} in {b.period.year}-{String(b.period.month).padStart(2, "0")} yet.</div>
       : <table className="kv usage-models"><tbody>{b.models.map((m) => <tr key={m.model}>
@@ -548,8 +550,8 @@ function UsageSettings(f: F) {
           {f.s.usage.hasBillingToken && <button className="ghost danger" disabled={saving} onClick={() => void saveToken("")}>Remove</button>}
           <a className="link small" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">Create token <ArrowUpRight size={12} /></a></div>
       </Row>
-      <Row label="Included in your plan (per month)" hint="Credits (or premium requests) your plan includes. 0 = read it from Copilot when it says."><Num f={f} path="usage.includedCredits" /></Row>
-      <Row label="Monthly budget (USD)" hint="What you allow for usage beyond the plan; the meter shows how much is left. 0 = no budget."><Num f={f} path="usage.monthlyBudget" /></Row>
+      <Row label="Credits in your plan (per month)" hint="Credits (or premium requests) your plan includes; with the budget this makes your available credits. 0 = read it from Copilot when it says."><Num f={f} path="usage.includedCredits" /></Row>
+      <Row label="Monthly budget (USD)" hint="What you allow for usage beyond the plan. It adds the credits it buys to your available credits. 0 = no budget."><Num f={f} path="usage.monthlyBudget" /></Row>
     </>}
     <Row label="Show usage bar under the chat box"><Bool f={f} path="usage.copilotMeter" /></Row>
     <Row label="Refresh every (minutes)" hint="0 = only when you press refresh. Minimum 5."><Num f={f} path="usage.refreshMinutes" /></Row>
