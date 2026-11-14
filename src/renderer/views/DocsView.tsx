@@ -296,7 +296,7 @@ function Use() {
     <div className="use-grid">
       <Item icon={<FolderPlus size={18} />} title="Projects & chats">Add a local folder with the <b>folder +</b> button next to Projects. Each project has chats; agents work inside the project folder. <b>Right-click</b> a chat to rename, pin, reset context, copy as Markdown, archive or delete it (double-click or F2 renames too).</Item>
       <Item icon={<Zap size={18} />} title="Master chat">TheFlashMaster coordinates: describe the goal and it delegates to specialists, collects their short results and reports back.</Item>
-      <Item icon={<AtSign size={18} />} title="Specialists">Type <code>@reviewer</code>, <code>@tester</code>, <code>@autosar-vector</code>… to route a message, or click a specialist in the sidebar to open a chat with it.</Item>
+      <Item icon={<AtSign size={18} />} title="Specialists">Type <code>@reviewer</code>, <code>@tester</code>, <code>@autosar-vector</code>… to route a message, or pick one from the <b>Specialists</b> pill at the top right of the chat to open a chat with it.</Item>
       <Item icon={<Leaf size={18} />} title="Drive modes">LOCAL / ECO / COMFORT / SPORT under the chat box switch the model profile for the chat. Configure them in Settings → Modes & chat.</Item>
       <Item icon={<Plane size={18} />} title="Autopilot">When on, tool calls are approved automatically and agents don’t stop to ask. Blocked commands and read-only mode still apply.</Item>
       <Item icon={<CornerDownRight size={18} />} title="Steer or queue">While an agent works, sending a message either steers it right away or queues it for afterwards.</Item>
@@ -397,7 +397,7 @@ function Agents() {
       <li><b>One expert or a team?</b> A direct <code>@mention</code> runs one agent. The master chat may run several, which costs more requests but covers more ground.</li>
       <li><b>Tools follow the agent.</b> Each agent only gets the tool servers listed on its page. Add or change tools in Settings → Agents.</li>
       <li><b>Short results.</b> Specialists return a compact summary to whoever delegated to them; long output goes into Artifacts.</li>
-      <li><b>Make your own.</b> Import an agent file (<code>agents/_template.md</code>) from Settings → Agents, the ＋ next to Specialists, or by dropping the .md onto the window. Reusing a built-in name overrides it.</li>
+      <li><b>Make your own.</b> Import an agent file (<code>agents/_template.md</code>) from Settings → Agents, the ＋ in the Specialists pill on the chat, or by dropping the .md onto the window. Reusing a built-in name overrides it.</li>
       <li><b>Workflow skills per agent.</b> An agent file can list <code>skills:</code> (brainstorm, plan, execute, tdd, debug, review, verify) that load on its first turn. See <PageLink to="superpowers">Superpowers workflow</PageLink>.</li>
     </ul>
   </>;

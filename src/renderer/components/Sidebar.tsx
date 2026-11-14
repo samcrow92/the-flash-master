@@ -1,13 +1,11 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { Chat, Project } from "@shared/types";
 import { api, useStore } from "../store";
-import { AgentImportDialog } from "./AgentImport";
 import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
-import { Dots } from "./Dots";
 import {
   Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
-  Download, MoreHorizontal, Pause, Pencil, Pin, PinOff, Plus, Puzzle, RoleIcon, RotateCcw, Settings, SquareKanban, Trash2, Zap,
+  Download, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
 
 const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
@@ -17,7 +15,6 @@ export function Sidebar() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [showArchived, setShowArchived] = useState<Record<string, boolean>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const view = st.view;
   const isChat = (id: string) => view.kind === "chat" && view.chatId === id;
@@ -40,12 +37,6 @@ export function Sidebar() {
     st.upsertChat(c);
     setOpen((o) => ({ ...o, [projectId]: true }));
     await st.openChat(c.id);
-  };
-
-  const startSpecialist = async (role: string) => {
-    const pid = st.currentProjectId ?? st.projects[0]?.id;
-    if (!pid) { st.toast("warn", "Add a project folder first — specialists work inside a project."); return; }
-    await newChat(pid, role);
   };
 
   const patchChat = async (c: Chat, patch: Partial<Pick<Chat, "title" | "archived" | "pinned">>) => {
@@ -147,7 +138,7 @@ export function Sidebar() {
                 ) : (
                   <button className="project-name" title={p.path} onClick={() => setOpen((o) => ({ ...o, [p.id]: !o[p.id] }))}
                     onDoubleClick={() => setRenaming(`project:${p.id}`)} onKeyDown={(e) => { if (e.key === "F2") setRenaming(`project:${p.id}`); }}>
-                    <ChevronRight size={14} className={`chev ${open[p.id] ? "open" : ""}`} /> {p.name}
+                    <ChevronRight size={14} className={`chev ${open[p.id] ? "open" : ""}`} /> <span className="project-label">{p.name}</span>
                   </button>
                 )}
                 <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
@@ -167,32 +158,6 @@ export function Sidebar() {
         })}
       </div>
 
-      <div className="section-title">
-        Specialists <button className="icon-btn" title="Add your own agent (template / import)" onClick={() => setImporting(true)}><Plus size={15} /></button>
-      </div>
-      <div className="palette">
-        {st.roles.filter((r) => r.name !== "flashmaster").map((r) => {
-          const mine = Object.values(st.agents).filter((a) => a.role === r.name);
-          const working = mine.filter((a) => a.status === "running").length;
-          const paused = mine.filter((a) => a.status === "paused").length;
-          const busyAgent = mine.find((a) => a.status === "running");
-          return (
-          <button key={r.name} className={`palette-item ${working ? "is-working" : paused ? "is-paused" : ""}`} title={`${r.description}\n\n${working ? "Working now — click to watch its progress." : `Click: new chat with ${r.title} in the current project.`}\nTip: type @${r.name} in any chat.`}
-            onClick={async () => {
-              // A working specialist opens its chat with the progress flow; an idle one starts a new chat.
-              if (busyAgent?.chatId) { await st.openChat(busyAgent.chatId); st.openFlow(busyAgent.chatId, busyAgent.id); } else await startSpecialist(r.name);
-            }}>
-            <span className="palette-icon"><RoleIcon role={r.name} emoji={r.icon} size={24} className="icon-glyph" />{(working > 0 || paused > 0) && <span className="activity-ring" />}</span>
-            <span className="palette-title">{r.title}</span>
-            {working > 0 && <Dots size={5} count={working} title={`${working} working${busyAgent?.lastActivity ? ` — ${busyAgent.lastActivity}` : ""}`} />}
-            {!working && paused > 0 && <span className="paused-tag" title={`${paused} paused`}><Pause size={12} /></span>}
-            {r.source === "user" && <span className="custom-tag">custom</span>}
-          </button>
-          );
-        })}
-      </div>
-
-      {importing && <AgentImportDialog onClose={() => setImporting(false)} />}
       {st.update && ["available", "downloading", "ready"].includes(st.update.status) && (
         <button className={`update-pill ${st.update.status}`} onClick={() => st.update?.status === "ready" ? api().updateInstall() : st.setView({ kind: "settings", tab: "about" })}
           title={st.update.status === "ready" ? "Restart TheFlashMaster and install the update" : "Open update details"}>
