@@ -16,6 +16,7 @@ import { buildTools } from "./tools";
 import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { parseCopilotUsage } from "./copilot-usage";
+import { fetchCopilotBilling } from "./github-billing";
 import { Requirements, parseRmLink } from "./requirements";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
@@ -354,14 +355,36 @@ function refreshModels(h: HarnessId): Promise<HarnessModels> {
   return p;
 }
 
-// ---------------- Copilot usage meter (data only from Copilot CLI's /usage) ----------------
+// ---------------- Copilot usage meter (GitHub billing API, or Copilot CLI's /usage) ----------------
 const usageFile = join(dataDir, "copilot-usage.json");
 let copilotUsage: CopilotUsage | null = (() => { try { return JSON.parse(readFileSync(usageFile, "utf8")); } catch { return null; } })();
 let usageInflight: Promise<CopilotUsage | null> | null = null;
 const setUsage = (u: CopilotUsage) => { copilotUsage = u; emit({ type: "copilotUsage.updated", usage: u }); return u; };
+const billingSecret = join(dataDir, "github-billing.secret");
+const billingFetch = withProxyFallback(() => session.defaultSession, (url, init) => session.defaultSession.fetch(url, init as any) as any);
+/** Token for the billing API: the one saved for it, else Copilot's sign-in token, the environment, or GitHub CLI's login. */
+async function billingToken(): Promise<string> {
+  const saved = secrets.get(billingSecret) || readCopilotToken() || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "";
+  if (saved) return saved;
+  const { execFile } = await import("node:child_process");
+  return new Promise((resolve) => execFile("gh", ["auth", "token"], { timeout: 5000, windowsHide: true, encoding: "utf8" }, (err, out) => resolve(err ? "" : String(out).trim())));
+}
+function runBilling(): Promise<CopilotUsage | null> {
+  const u = settings.get().usage;
+  setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), loading: true, error: null });
+  return billingToken()
+    .then((token) => fetchCopilotBilling(billingFetch as any, token, { allowance: u.includedCredits, budget: u.monthlyBudget, api: process.env.FLASH_GITHUB_API }))
+    .then((r) => setUsage(r))
+    .catch((e) => setUsage({ ...parseCopilotUsage("", copilotUsage?.fetchedAt ?? 0), source: "github", ok: false, loading: false, error: String(e?.message ?? e) }))
+    .finally(() => { try { writeFileSync(usageFile, JSON.stringify({ ...copilotUsage, loading: false })); } catch { /* best effort */ } });
+}
 function refreshCopilotUsage(): Promise<CopilotUsage | null> {
   if (usageInflight) return usageInflight;
   const s = settings.get();
+  if (s.usage.source !== "cli") {
+    usageInflight = runBilling().finally(() => { usageInflight = null; });
+    return usageInflight;
+  }
   usageInflight = (async () => {
     const st = harnesses.cached("copilot")?.available ? harnesses.cached("copilot") : (await harnesses.detectAll(s)).find((h) => h.id === "copilot");
     return st;
@@ -381,7 +404,7 @@ function runUsage(s: ReturnType<typeof settings.get>, st: ReturnType<typeof harn
         return setUsage({ ...parseCopilotUsage(""), ok: false, advertised: false,
           error: `This Copilot CLI does not offer /usage to apps (commands: ${r.commands.slice(0, 12).join(", ") || "none"}). Update Copilot CLI, or turn off “only if advertised” (may use a premium request).` });
       }
-      return setUsage({ ...parseCopilotUsage(r.text), advertised: r.advertised });
+      return setUsage({ ...parseCopilotUsage(r.text), source: "cli", advertised: r.advertised });
     })
     .catch((e) => setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: String(e?.message ?? e) }))
     .finally(() => {
@@ -656,6 +679,11 @@ const api: FlashApi = {
   },
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   copilotUsage: async (refresh) => (refresh ? refreshCopilotUsage() : copilotUsage),
+  setBillingToken: async (token) => {
+    await secrets.set(billingSecret, token.trim());
+    settings.update({ usage: { hasBillingToken: !!token.trim() } });
+    return refreshCopilotUsage();
+  },
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
   pickHarnessExecutable: async (h) => {
     const r = await dialog.showOpenDialog(win!, {
@@ -938,7 +966,7 @@ async function proxyTest(url: string): Promise<{ ok: boolean; detail: string; co
 settings.onChange(() => void applyProxy());
 
 app.whenReady().then(async () => {
-  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret)]);
+  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret), secrets.load(billingSecret)]);
   await applyProxy();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
@@ -948,7 +976,7 @@ app.whenReady().then(async () => {
   void harnesses.detectAll(settings.get()).then((list) => {
     for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
     const u = settings.get().usage;
-    if (u.copilotMeter && list.some((h) => h.id === "copilot" && h.available)
+    if (u.copilotMeter && (u.source !== "cli" || list.some((h) => h.id === "copilot" && h.available))
       && Date.now() - (copilotUsage?.fetchedAt ?? 0) > Math.max(5, u.refreshMinutes || 30) * 60000) void refreshCopilotUsage();
     scheduleUsage();
   });

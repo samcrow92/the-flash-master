@@ -432,6 +432,11 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 .usage-text { font-size: 11.5px; color: var(--muted, #8a8f98); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button.tiny { padding: 0 6px; font-size: 12px; }
 .usage-detail { display: grid; gap: 10px; }
+.usage-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.usage-stat { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.usage-stat strong { font-size: 20px; }
+.usage-detail h5 { margin: 4px 0 0; font-size: 12.5px; }
+table.usage-models td.usage-model-bar { width: 40%; } table.usage-models .usage-bar { width: 100%; flex: none; }
 table.kv { border-collapse: collapse; font-size: 12.5px; } table.kv td { padding: 3px 12px 3px 0; vertical-align: top; }
 
 /* recommended MCP servers */

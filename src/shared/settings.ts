@@ -66,6 +66,10 @@ export interface Settings {
     copilotMeter: boolean; // show Copilot premium-request usage (from Copilot's /usage) under the chat box
     refreshMinutes: number; // 0 = only manual refresh
     onlyIfAdvertised: boolean; // never send /usage unless Copilot lists it as a command (so no premium request is used)
+    source: "github" | "cli"; // github = GitHub billing API (credits used/left, per model); cli = Copilot CLI /usage text
+    hasBillingToken: boolean; // a GitHub token with "Plan: read" is stored (encrypted)
+    includedCredits: number; // plan allowance per month; 0 = read it from Copilot
+    monthlyBudget: number; // USD per month for usage beyond the plan; 0 = none
   };
   tokens: {
     dailyBudget: number; // 0 = unlimited
@@ -181,7 +185,7 @@ export const DEFAULT_SETTINGS: Settings = {
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, isolateWriters: true },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
-  usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true },
+  usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, source: "github", hasBillingToken: false, includedCredits: 0, monthlyBudget: 0 },
   tokens: {
     dailyBudget: 0,
     projectBudget: 0,

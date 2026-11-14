@@ -271,8 +271,38 @@ export interface UpdateState {
   feed: string;
 }
 
+/** This month's Copilot usage from GitHub's billing API, for usage-based billing. */
+export interface CopilotBilling {
+  /** "ai-credits" since June 2026; "requests" for accounts still billed by premium requests. */
+  unit: "ai-credits" | "requests";
+  period: { year: number; month: number };
+  user: string;
+  /** Everything consumed this month. */
+  used: number;
+  /** Part of `used` covered by the plan's included allowance. */
+  included: number;
+  /** Part of `used` billed on top of the plan. */
+  billed: number;
+  /** USD before and after the included allowance. */
+  grossAmount: number;
+  netAmount: number;
+  pricePerUnit: number | null;
+  /** Included allowance per month (from Copilot or the user's setting); null when unknown. */
+  allowance: number | null;
+  /** Included allowance left this month; null when the allowance is unknown. */
+  remaining: number | null;
+  /** Monthly spending budget in USD set in the app, and what is left of it. */
+  budget: number | null;
+  budgetRemaining: number | null;
+  /** Largest consumer first; `share` is % of `used`. */
+  models: { model: string; quantity: number; amount: number; netAmount: number; share: number }[];
+}
+
 export interface CopilotUsage {
   ok: boolean;
+  /** "github" = billing API (account-wide, per model); "cli" = Copilot CLI's /usage text. */
+  source?: "github" | "cli";
+  billing?: CopilotBilling;
   fetchedAt: number;
   error: string | null;
   /** Premium requests: used of limit (limit null when unknown or unlimited). */
