@@ -289,8 +289,17 @@ export interface CopilotBilling {
   pricePerUnit: number | null;
   /** Included allowance per month (from Copilot or the user's setting); null when unknown. */
   allowance: number | null;
-  /** Included allowance left this month; null when the allowance is unknown. */
-  remaining: number | null;
+  /** Credits the monthly budget buys beyond the plan (budget / price per credit); null without a budget or price. */
+  budgetCredits: number | null;
+  /** Credits available this month in total: plan allowance + what the budget buys. null when neither is known. */
+  availableTotal: number | null;
+  /** Credits still available now. From Copilot's own count when it gives one, else availableTotal − used. */
+  available: number | null;
+  availableFrom: "copilot" | "computed" | null;
+  /** Usage computed from the available credits: availableTotal − available (falls back to `used`). */
+  usedOfAvailable: number;
+  /** usedOfAvailable as % of availableTotal; null when the total is unknown. */
+  percent: number | null;
   /** Monthly spending budget in USD set in the app, and what is left of it. */
   budget: number | null;
   budgetRemaining: number | null;
