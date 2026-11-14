@@ -82,6 +82,8 @@ export interface ToolRun {
   truncated?: boolean;
   startedAt: number;
   endedAt?: number;
+  /** Where in the reply text the call started (characters), so the chat shows it between the paragraphs around it. */
+  at?: number;
 }
 
 export type StepStatus = "pending" | "in_progress" | "completed" | "failed";

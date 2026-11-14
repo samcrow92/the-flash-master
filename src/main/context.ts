@@ -95,6 +95,11 @@ export function buildTurnPrompt(p: PromptParts): string {
   return out.join("\n\n");
 }
 
+/** Replies are read in a chat: one idea per paragraph, not one long block. */
+export const REPLY_STYLE = "Reply style: the user reads your replies in a chat. Write short paragraphs (one idea each, two to four sentences) separated by blank lines. "
+  + "Use a bullet list for steps or several findings, a heading when a reply has distinct parts, and code blocks for code and commands. "
+  + "Before and after tool calls, say briefly what you are checking and what you found, each as its own paragraph.";
+
 /** Byte-stable prefix: never put timestamps or counters here, so provider prompt caches stay warm. */
 export function rolePrefix(role: RoleDef, projectPath: string | null, o: { clean?: boolean; houseRules?: string } = {}): string {
   return [
@@ -105,6 +110,7 @@ export function rolePrefix(role: RoleDef, projectPath: string | null, o: { clean
     projectPath ? `Project root: ${projectPath} — work only inside it.` : "No project folder is attached to this chat.",
     "Token discipline: read only what you need (search before reading, read ranges not whole files), never paste large files back, summarise tool output.",
     "Progress: for multi-step work, publish a short step plan with report_progress and update it as steps complete.",
+    REPLY_STYLE,
     RESULT_CONTRACT(role.maxResultTokens),
   ].filter(Boolean).join("\n\n");
 }

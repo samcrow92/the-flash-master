@@ -12,6 +12,7 @@ import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
+import { paragraphBreak } from "@shared/replySegments";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
@@ -95,6 +96,15 @@ interface Live {
   stopped: boolean;
   /** Where streamed text goes for the *current* turn. Sessions outlive turns, so this is swapped per turn. */
   sink: ((delta: string) => void) | null;
+  /** Text resumes after a tool call or a thought: start a new paragraph. */
+  textBreak?: boolean;
+  /** The reasoning block being streamed (a "think" run on the reply), until text or a tool call ends it. */
+  thought?: { key: string; text: string } | null;
+  thoughts?: number;
+  /** The model took a steering message mid-turn: what it writes next goes in a new reply below that message. */
+  splitPending?: boolean;
+  /** Close the current reply and continue the turn in a new one (set per turn, like `sink`). */
+  rollover?: (() => void) | null;
 }
 
 const MAX_CONCURRENT_FALLBACK = 4;
@@ -591,18 +601,25 @@ export class Orchestrator {
       await this.acquireSlot(max);
     }
     if (live.stopped) { live.busy = false; if (!borrowed) this.releaseSlot(); return; } // stopped while queued
-    const reply = this.d.db.addMessage({ chatId: t.chat.id, parentId: t.threadRoot, author: "agent", agentId: live.agentId,
+    const newReply = () => this.d.db.addMessage({ chatId: t.chat.id, parentId: t.threadRoot, author: "agent", agentId: live.agentId,
       role: t.role.name, content: "", status: "streaming" });
+    let reply = newReply();
     live.currentMessageId = reply.id;
     live.lastReplyId = reply.id;
     live.tools = new Map();
+    live.textBreak = false;
+    live.thought = null;
+    live.splitPending = false;
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
     live.lastOutputAt = Date.now();
     live.stuckSince = null;
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
+    // `text` is the whole turn (results and delegations are parsed from it); the shown reply starts at `base`, which
+    // moves when a steering message splits the turn into a new reply below it.
     let text = "";
+    let base = 0;
     let finalStatus = "";
     let switchedToText = false;
     let lastFlush = Date.now();
@@ -612,10 +629,27 @@ export class Orchestrator {
       const firstTurn = !live.session || !live.session.alive;
       live.turnChanges = new Map();
       live.sink = (delta) => {
+        if (live.textBreak) { delta = paragraphBreak(text.slice(base)) + delta; live.textBreak = false; }
         text += delta;
-        this.liveText.set(reply.id, text);
+        this.liveText.set(reply.id, text.slice(base));
         this.d.emit({ type: "message.delta", messageId: reply.id, chatId: t.chat.id, delta });
-        if (Date.now() - lastFlush > 500) { lastFlush = Date.now(); this.d.db.updateMessage(reply.id, { content: text }); }
+        if (Date.now() - lastFlush > 500) { lastFlush = Date.now(); this.d.db.updateMessage(reply.id, { content: text.slice(base) }); }
+      };
+      live.rollover = () => {
+        this.endThought(live);
+        this.flushTools(live, reply.id, t.chat.id);
+        this.liveText.delete(reply.id);
+        const shown = text.slice(base);
+        const done = this.d.db.updateMessage(reply.id, { content: shown.trim() ? shown : "_(continued below your message)_", status: "done" });
+        this.d.emit({ type: "message.updated", message: done });
+        if (text && !text.endsWith("\n\n")) text += paragraphBreak(text) || "\n\n";
+        base = text.length;
+        reply = newReply();
+        live.currentMessageId = reply.id;
+        live.lastReplyId = reply.id;
+        live.tools = new Map();
+        live.textBreak = false;
+        this.d.emit({ type: "message.created", message: reply });
       };
       if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
       const workDir = live.worktree ?? project?.path ?? null;
@@ -680,7 +714,7 @@ export class Orchestrator {
           ? "Your previous response was cut off by a network error. Continue exactly where you stopped; do not repeat what you already wrote."
           : promptText, text.trim() ? [] : atts);
       }
-      this.d.db.updateMessage(reply.id, { content: text });
+      this.d.db.updateMessage(reply.id, { content: text.slice(base) });
       // The harness was given our MCP servers but none of them reached the app: tools did not load.
       if (toolsPending && !(await this.waitForTools(live, 3000))) { this.enterTextDelegation(live, t); switchedToText = true; }
       // The harness listed the app's tools but the model says it doesn't have `delegate` (filtered by policy, renamed…):
@@ -705,7 +739,7 @@ export class Orchestrator {
       finalStatus = redirected ? "redirected" : status;
       if (redirected) text += "\n\n_↪ Redirected by your steering message._";
       else if (res.error) text += `\n\n⚠️ ${res.error}`;
-      const final = this.d.db.updateMessage(reply.id, { content: text || (status === "paused" ? "_(paused)_" : "_(no output)_"),
+      const final = this.d.db.updateMessage(reply.id, { content: text.slice(base) || (status === "paused" ? "_(paused)_" : "_(no output)_"),
         status: res.stopReason === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
       this.d.emit({ type: "message.updated", message: final });
       const compact = resultForParent(text, t.role.maxResultTokens) + (live.branch ? `\nbranch: ${live.branch} (isolated copy; the user merges it)` : "");
@@ -736,7 +770,7 @@ export class Orchestrator {
       const msg = String(e?.message ?? e);
       this.d.log?.("error", `turn failed (${live.role.name}/${live.harness}): ${msg}`);
       this.flow(live.agentId, live.stopped ? { kind: "status", label: "stopped", status: "stopped" } : { kind: "error", label: msg.slice(0, 160) });
-      const final = this.d.db.updateMessage(reply.id, { content: (text ? text + "\n\n" : "") + `⚠️ ${msg}`, status: "error" });
+      const final = this.d.db.updateMessage(reply.id, { content: (text.slice(base) ? text.slice(base) + "\n\n" : "") + `⚠️ ${msg}`, status: "error" });
       this.d.emit({ type: "message.updated", message: final });
       this.emitAgent(this.d.db.updateAgent(live.agentId, live.stopped ? { status: "stopped", lastActivity: "Stopped" } : { status: "error", lastActivity: msg }));
       live.session?.close();
@@ -744,9 +778,12 @@ export class Orchestrator {
       this.finishWaiters(live, `error: ${msg}`);
       if (t.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(t.taskId, { status: "blocked" }) });
     } finally {
+      this.endThought(live);
       this.liveText.delete(reply.id);
       this.flushTools(live, reply.id, t.chat.id);
       live.sink = null;
+      live.rollover = null;
+      live.splitPending = false;
       live.busy = false;
       live.currentMessageId = null;
       if (!borrowed) this.releaseSlot();
@@ -808,9 +845,16 @@ export class Orchestrator {
       onEvent: (e) => {
         this.noteOutput(live);
         if (live.awaiting.length && (e.type === "text" || e.type === "tool" || e.type === "thought")) this.markSeen(live, false);
-        if (e.type === "steer_ack") this.markSeen(live, true);
+        if (e.type === "steer_ack") { this.markSeen(live, true); live.splitPending = true; }
+        if (live.splitPending && (e.type === "text" || e.type === "tool" || e.type === "thought") && live.rollover) {
+          live.splitPending = false;
+          live.rollover();
+        }
+        if (e.type === "text" || e.type === "tool") this.endThought(live);
         if (e.type === "text") live.sink?.(e.text);
+        else if (e.type === "thought") this.recordThought(live, e.text);
         else if (e.type === "tool") {
+          live.textBreak = true;
           // Output updates arrive often: status line and flow chart only change when the call's status does.
           if (this.recordTool(live, e)) {
             this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
@@ -1007,6 +1051,25 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
    * Upsert a tool call of the current reply. Returns true when it is new or its status changed (worth a status line).
    * Output is capped per call (head + tail) so a noisy build can't bloat the chat or the database.
    */
+  /** Reasoning chunks become one "think" run per block, shown in place between the reply's paragraphs. */
+  private recordThought(live: Live, chunk: string): void {
+    if (!live.thought) {
+      live.thoughts = (live.thoughts ?? 0) + 1;
+      live.thought = { key: `think-${live.thoughts}`, text: "" };
+      this.setStatus(live, "running", "Thinking…");
+    }
+    live.thought.text += chunk;
+    live.textBreak = true;
+    this.recordTool(live, { id: live.thought.key, title: "Thinking", status: "in_progress", kind: "think", output: live.thought.text });
+  }
+
+  private endThought(live: Live): void {
+    const th = live.thought;
+    if (!th) return;
+    live.thought = null;
+    this.recordTool(live, { id: th.key, title: "Thinking", status: "completed", kind: "think" });
+  }
+
   private recordTool(live: Live, e: { id?: string; title: string; status: string; kind: string; input?: string; output?: string }): boolean {
     const msgId = live.currentMessageId;
     if (!msgId) return true;
@@ -1024,6 +1087,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
       id: prev?.id ?? `${msgId}:${tools.size}`, title: e.title || prev?.title || "tool", kind: (e.kind && e.kind !== "other" ? e.kind : prev?.kind) || e.kind || "other", status,
       input: e.input ?? prev?.input, output: capped ? capped.text : prev?.output, truncated: capped ? capped.truncated : prev?.truncated,
       startedAt: prev?.startedAt ?? Date.now(), endedAt: status === "completed" || status === "failed" ? prev?.endedAt ?? Date.now() : undefined,
+      at: prev ? prev.at : this.liveText.get(msgId)?.length ?? 0,
     };
     if (tools.size >= MAX_TOOLS_PER_REPLY && !prev) return false;
     tools.set(key, run);

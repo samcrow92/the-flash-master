@@ -55,6 +55,9 @@ export class MockSession implements HarnessSession {
     const steps = ["Understand the request", "Inspect relevant files", "Draft the answer", "Write the result block"];
     const plan = (done: number) => steps.map((title, i) => ({ title, status: (i < done ? "completed" : i === done ? "in_progress" : "pending") as "completed" | "in_progress" | "pending" }));
     this.o.onEvent({ type: "plan", entries: plan(0) });
+    for (const w of "The request needs the project layout first, then the signals involved. I'll list the sources before answering.".split(/(?<=\s)/)) {
+      this.o.onEvent({ type: "thought", text: w });
+    }
     this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "in_progress", kind: "execute", input: "git ls-files src | head -20" });
     this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "completed", kind: "execute",
       output: "src/brake_light.c\nsrc/brake_light.h\nsrc/can_signals.c\nsrc/can_signals.h\ntests/test_brake_light.c" });
