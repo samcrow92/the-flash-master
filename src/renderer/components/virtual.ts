@@ -46,6 +46,28 @@ export function estimateHeight(heights: ReadonlyMap<string, number>, fallback: n
   return Math.max(24, Math.round(sum / heights.size));
 }
 
+/**
+ * Measurements this close count as unchanged. Chromium rounds offsetHeight to whole pixels from the item's fractional
+ * position on the page, so the same item can read 1 px apart whenever the slice above it changes. Counting that as a
+ * change re-sized the spacers, which moved the item again, which flipped the rounding back: an endless measure loop
+ * that hit React's "Maximum update depth exceeded" and unmounted the chat (the blank gray window).
+ */
+export const HEIGHT_SLACK = 1;
+export function heightChanged(prev: number | undefined, next: number): boolean {
+  return prev === undefined || Math.abs(prev - next) > HEIGHT_SLACK;
+}
+
+/**
+ * Back-to-back synchronous re-measure passes allowed in one frame (React gives up after 50 nested updates). Past this,
+ * the next pass waits for an animation frame: a layout that keeps moving costs a frame per pass instead of the app.
+ */
+export const MAX_SYNC_PASSES = 8;
+export function nextPass(passes: number, changed: boolean): { passes: number; run: "none" | "now" | "next-frame" } {
+  if (!changed) return { passes: 0, run: "none" };
+  if (passes < MAX_SYNC_PASSES) return { passes: passes + 1, run: "now" };
+  return { passes, run: "next-frame" };
+}
+
 /** Within this many pixels of the bottom counts as "at the bottom": new content keeps the list scrolled down. */
 export const PIN_SLACK = 80;
 const OVERSCAN = 900;
@@ -135,7 +157,7 @@ export function useVirtualList(scrollRef: RefObject<HTMLElement | null>, keys: r
       const k = (node as HTMLElement).dataset.vkey;
       if (!k) continue;
       const h = (node as HTMLElement).offsetHeight;
-      if (heights.current.get(k) !== h) { heights.current.set(k, h); changed = true; }
+      if (heightChanged(heights.current.get(k), h)) { heights.current.set(k, h); changed = true; }
     }
     return changed;
   }, []);
@@ -162,10 +184,19 @@ export function useVirtualList(scrollRef: RefObject<HTMLElement | null>, keys: r
   }, []);
 
   // After every render: measure newly mounted items synchronously and re-anchor, before the browser paints.
+  // Bounded: if measuring keeps changing the layout, later passes go to the next frame (see nextPass).
+  const passes = useRef(0);
+  const deferred = useRef(0);
   useLayoutEffect(() => {
-    if (readHeights(mounted.current)) setRev((r) => r + 1);
+    const step = nextPass(passes.current, readHeights(mounted.current));
+    passes.current = step.passes;
+    if (step.run === "now") setRev((r) => r + 1);
+    else if (step.run === "next-frame" && !deferred.current) {
+      deferred.current = requestAnimationFrame(() => { deferred.current = 0; passes.current = 0; setRev((r) => r + 1); });
+    }
     restore();
   });
+  useEffect(() => () => { if (deferred.current) cancelAnimationFrame(deferred.current); }, []);
 
   // Viewport size and scroll tracking.
   useLayoutEffect(() => {

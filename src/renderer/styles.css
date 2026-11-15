@@ -1429,3 +1429,11 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .review-comment textarea { width: 100%; resize: vertical; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); padding: 6px 9px; font-family: inherit; }
 .review-comment-text { flex: 1; white-space: pre-wrap; }
 @media (max-width: 900px) { .review-body { grid-template-columns: 1fr; } .review-agents { flex-direction: row; overflow-x: auto; } .review-agent { min-width: 200px; } }
+
+/* ---------- error boundary fallback (never leave the window blank) ---------- */
+.crash-panel { margin: auto; display: grid; gap: 10px; justify-items: center; text-align: center; max-width: 520px; padding: 32px; color: var(--fg); }
+.crash-panel.full { position: fixed; inset: 0; max-width: none; align-content: center; background: var(--bg); -webkit-app-region: drag; }
+.crash-panel.full button { -webkit-app-region: no-drag; }
+.crash-title { font-size: 15px; font-weight: 600; }
+.crash-detail { color: var(--muted); font-size: 12px; font-family: var(--mono, ui-monospace, monospace); word-break: break-word; }
+.crash-actions { display: flex; gap: 8px; margin-top: 4px; }
