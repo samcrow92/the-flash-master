@@ -76,7 +76,8 @@ export interface WorkFile { path: string; status: ChangeStatus; added: number; r
 /** Where the agent's branch left the project's current branch: its changes are everything since this commit. */
 async function reviewBase(repo: string, branch: string, git: Git): Promise<string> {
   const mb = await git(repo, ["merge-base", "HEAD", branch]);
-  return mb.code === 0 && mb.out.trim() ? mb.out.trim().split(/\s+/)[0]! : "HEAD";
+  const sha = mb.code === 0 ? /^[0-9a-f]{7,64}$/m.exec(mb.out)?.[0] : undefined;
+  return sha ?? "HEAD";
 }
 
 const MAX_REVIEW_FILES = 500;
@@ -94,15 +95,18 @@ export async function worktreeChanges(repo: string, dir: string, branch: string,
     git(dir, ["ls-files", "--others", "--exclude-standard"]),
     git(dir, ["diff", "--no-renames", "--name-only", base, "HEAD"]),
   ]);
-  const lines = (s: string) => s.split(/\r?\n/).filter((l) => l.trim());
+  // git's warnings share the output (e.g. "warning: in the working copy of 'a.c', LF will be replaced by CRLF" on Windows): skip them.
+  const lines = (s: string) => s.split(/\r?\n/).filter((l) => l.trim() && !/^(warning|hint|error|fatal): /.test(l));
   const inCommits = new Set(committed.code === 0 ? lines(committed.out) : []);
   const stat = new Map<string, { added: number; removed: number; binary: boolean }>();
   for (const l of nums.code === 0 ? lines(nums.out) : []) {
+    if (!/^(\d+|-)\t(\d+|-)\t./.test(l)) continue;
     const [a, r, ...p] = l.split("\t");
     stat.set(p.join("\t"), { added: Number(a) || 0, removed: Number(r) || 0, binary: a === "-" });
   }
   const files: WorkFile[] = [];
   for (const l of names.code === 0 ? lines(names.out) : []) {
+    if (!/^[ACDMTUX]\d*\t./.test(l)) continue;
     const [code, ...p] = l.split("\t");
     const path = p.join("\t");
     const s = stat.get(path) ?? { added: 0, removed: 0, binary: false };

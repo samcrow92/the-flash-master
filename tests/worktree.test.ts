@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canIsolate, createWorktree, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState } from "../src/main/worktree";
+import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState } from "../src/main/worktree";
 import { buildFixRequest } from "../src/shared/review";
 import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
@@ -117,6 +117,12 @@ describe("agent worktrees", () => {
       { path: "gone.c", status: "deleted", added: 0, removed: 1, binary: false, committed: true },
       { path: "new file.h", status: "added", added: 2, removed: 0, binary: false, committed: false },
     ]);
+    // Windows (core.autocrlf): git prints CRLF warnings into the same output; they are not files.
+    const noisy: typeof defaultGit = async (cwd, args) => {
+      const res = await defaultGit(cwd, args);
+      return { ...res, out: `warning: in the working copy of 'a.c', LF will be replaced by CRLF the next time Git touches it\n${res.out}` };
+    };
+    expect((await worktreeChanges(r, wt, "flash/review", noisy)).files).toEqual(ch.files);
     expect(await worktreeFileDiff(r, wt, "flash/review", "a.c")).toEqual({ oldText: "int a;\n", newText: "int a;\nint b;\nint c;\n", binary: false, tooLarge: false });
     expect((await worktreeFileDiff(r, wt, "flash/review", "gone.c")).oldText).toBe("int g;\n");
     await expect(worktreeFileDiff(r, wt, "flash/review", "../../etc/passwd")).rejects.toThrow(/outside/);
