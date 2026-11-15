@@ -49,6 +49,8 @@ export const MIGRATIONS: string[] = [
   // v7: code-writing specialists work in their own git worktree and branch
   `ALTER TABLE agents ADD COLUMN worktree TEXT;
    ALTER TABLE agents ADD COLUMN branch TEXT;`,
+  // v8: each specialist instance has its own given name (several copies of one role can run at once)
+  `ALTER TABLE agents ADD COLUMN name TEXT;`,
 ];
 
 type Row = Record<string, any>;
@@ -248,11 +250,15 @@ export class Db {
 
   // ---------- agents ----------
   createAgent(i: { projectId: string | null; chatId: string | null; role: string; harness: HarnessId; model: string | null;
-    parentAgentId?: string | null; brief: string }): AgentRun {
+    parentAgentId?: string | null; brief: string; name?: string | null }): AgentRun {
     const id = newId();
-    this.run("INSERT INTO agents(id,project_id,chat_id,role,harness,model,status,parent_agent_id,brief,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-      id, i.projectId, i.chatId, i.role, i.harness, i.model, "idle", i.parentAgentId ?? null, i.brief, now());
+    this.run("INSERT INTO agents(id,project_id,chat_id,role,name,harness,model,status,parent_agent_id,brief,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      id, i.projectId, i.chatId, i.role, i.name ?? null, i.harness, i.model, "idle", i.parentAgentId ?? null, i.brief, now());
     return this.getAgent(id)!;
+  }
+  /** Instance names already given to agents in a chat (new instances pick a name not in this list). */
+  agentNamesInChat(chatId: string): string[] {
+    return this.all("SELECT name FROM agents WHERE chat_id=? AND name IS NOT NULL", chatId).map((r) => String(r.name));
   }
   getAgent(id: string): AgentRun | null {
     const r = this.get("SELECT * FROM agents WHERE id=?", id);
@@ -470,7 +476,7 @@ const toChat = (r: Row): Chat => ({
   archived: !!r.archived, pinned: !!r.pinned, createdAt: Number(r.created_at),
 });
 const toAgent = (r: Row): AgentRun => ({
-  id: r.id, projectId: r.project_id ?? null, chatId: r.chat_id ?? null, role: r.role, harness: r.harness, model: r.model ?? null,
+  id: r.id, projectId: r.project_id ?? null, chatId: r.chat_id ?? null, role: r.role, name: r.name ?? null, harness: r.harness, model: r.model ?? null,
   status: r.status, parentAgentId: r.parent_agent_id ?? null, brief: r.brief, resultSummary: r.result_summary ?? null,
   tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), estimated: !!r.estimated, startedAt: Number(r.started_at),
   endedAt: r.ended_at == null ? null : Number(r.ended_at), lastActivity: r.last_activity ?? null, plan: parsePlan(r.plan),

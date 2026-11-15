@@ -13,6 +13,7 @@ import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
 import { paragraphBreak } from "@shared/replySegments";
+import { agentLabel, pickInstanceName } from "@shared/instances";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
@@ -58,6 +59,8 @@ export interface OrchestratorDeps {
 interface Live {
   key: string;
   agentId: string;
+  /** Given name of a delegated specialist instance ("Nova"); null for the coordinator and directly-opened chats. */
+  name?: string | null;
   chatId: string;
   threadRoot: string | null;
   role: RoleDef;
@@ -148,6 +151,8 @@ export class Orchestrator {
   /** Full text of replies that are still streaming (the DB copy is only flushed every 500 ms). */
   private liveText = new Map<string, string>();
   private running = 0;
+  /** Makes each delegation's live key unique: every delegate call is a new specialist instance. */
+  private instanceSeq = 0;
   private slotWaiters: (() => void)[] = [];
 
   constructor(private d: OrchestratorDeps) {}
@@ -209,7 +214,8 @@ export class Orchestrator {
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
-    wait?: boolean; timeoutSec?: number; harness?: string; model?: string }): Promise<{ agentId: string; status: string; result?: string; harness?: string }> {
+    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; agentId?: string }):
+    Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
     const s = this.d.settings();
@@ -217,14 +223,25 @@ export class Orchestrator {
       throw new Error(parent.depth === 0
         ? "delegation is turned off (Settings → Agents → delegation depth is 0) — tell the user; don't do the work yourself"
         : `delegation depth limit (${s.agents.delegationDepth}) reached — do it yourself or ask the user`);
-    const role = this.role(a.role);
     const chat = this.mustChat(parent.chatId);
     const brief = buildBrief({ goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, parentRole: parent.role.name });
     // Specialist output appears as a thread under the coordinator's current reply.
     const threadRoot = parent.threadRoot ?? parent.currentMessageId ?? parent.lastReplyId ?? null;
     const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
-    const live = this.ensureLive(chat, threadRoot, role, parent.depth + 1, `${parentAgentId}>${role.name}${want ? `@${want}` : ""}`, parentAgentId, brief,
-      want ? { harness: want, model: a.model || null } : undefined);
+    // Every delegation starts a new instance (own session, worktree and task), so two Coders never share one
+    // conversation. Only an explicit agentId (an instance this agent started earlier) sends a follow-up to it.
+    let live: Live;
+    if (a.agentId) {
+      const prev = this.byAgent.get(a.agentId);
+      if (!prev || prev.stopped || this.d.db.getAgent(a.agentId)?.parentAgentId !== parentAgentId)
+        throw new Error("unknown agentId: pass an id an earlier delegate returned to you, or leave it out to start a new specialist");
+      if (prev.busy) throw new Error(`${agentLabel(prev, prev.role.title)} is still working on its current task: call get_result, or leave agentId out to start another instance`);
+      live = prev;
+    } else {
+      live = this.ensureLive(chat, threadRoot, this.role(a.role), parent.depth + 1, `${parentAgentId}>${a.role}#${++this.instanceSeq}`, parentAgentId, brief,
+        want ? { harness: want, model: a.model || null } : undefined);
+    }
+    const role = live.role;
     if (want && live.harness !== want)
       this.system(chat.id, threadRoot, `⚠️ ${want} is not available (not installed or disabled in Settings → Harnesses); ${role.title} runs on ${live.harness}.`, "warn");
     let taskId: string | undefined;
@@ -234,17 +251,18 @@ export class Orchestrator {
       taskId = t.id;
       this.d.emit({ type: "task.updated", task: t });
     }
-    this.flow(parentAgentId, { kind: "delegate", label: `${role.title}: ${a.goal.slice(0, 120)}`, ref: live.agentId });
+    this.flow(parentAgentId, { kind: "delegate", label: `${agentLabel(live, role.title)}: ${a.goal.slice(0, 120)}`, ref: live.agentId });
     const done = new Promise<string>((resolve) => live.waiters.push(resolve));
     // Waiting delegations borrow the coordinator's slot; background ones (wait: false) queue for their own.
     const borrowSlot = a.wait !== false && parent.busy;
     void this.turn({ chat, threadRoot, role, input: a.goal, skills: [], depth: live.depth, brief, taskId, liveKey: live.key, borrowSlot })
       .catch((e) => this.finishWaiters(live, `error: ${String(e?.message ?? e)}`));
-    if (a.wait === false) return { agentId: live.agentId, status: "running", harness: live.harness };
+    const name = live.name ?? null;
+    if (a.wait === false) return { agentId: live.agentId, name, status: "running", harness: live.harness };
     const timeout = Math.min(Math.max(a.timeoutSec ?? 600, 10), 1800) * 1000;
     const result = await Promise.race([done, new Promise<null>((r) => setTimeout(() => r(null), timeout))]);
-    if (result === null) return { agentId: live.agentId, status: "running", result: "Still running. Call get_result later." };
-    return { agentId: live.agentId, status: this.d.db.getAgent(live.agentId)?.status ?? "done", result };
+    if (result === null) return { agentId: live.agentId, name, status: "running", result: "Still running. Call get_result later." };
+    return { agentId: live.agentId, name, status: this.d.db.getAgent(live.agentId)?.status ?? "done", result };
   }
 
   /** Called by the coordinator's `create_agent` tool (and text-mode AGENT blocks): define a new agent, optionally run it. */
@@ -329,14 +347,14 @@ export class Orchestrator {
     const dir = join(this.d.dataDir ?? this.d.homeDir, "worktrees", short);
     const r = await createWorktree(projectPath, dir, branch, this.git);
     if (!r.ok) {
-      this.system(chatId, threadRoot, `⚠️ Couldn't give ${l.role.title} its own copy of the project (${r.message.split("\n")[0]}); it works in the project folder.`, "warn");
+      this.system(chatId, threadRoot, `⚠️ Couldn't give ${agentLabel(l, l.role.title)} its own copy of the project (${r.message.split("\n")[0]}); it works in the project folder.`, "warn");
       return;
     }
     l.worktree = dir;
     l.branch = branch;
     this.emitAgent(this.d.db.setAgentWorktree(l.agentId, dir, branch));
     this.flow(l.agentId, { kind: "status", label: `working on branch ${branch}`, status: "isolated" });
-    this.system(chatId, threadRoot, `🌿 **${l.role.icon} ${l.role.title}** works in its own copy of the project on branch \`${branch}\`, `
+    this.system(chatId, threadRoot, `🌿 **${l.role.icon} ${agentLabel(l, l.role.title)}** works in its own copy of the project on branch \`${branch}\`, `
       + "so parallel agents don't overwrite each other. Merge or discard it from the Agents page when it's done.");
   }
 
@@ -393,7 +411,7 @@ export class Orchestrator {
       const quiet = Math.round((now - l.lastOutputAt) / 60_000);
       this.setStatus(l, "running", `⏳ No output for ${quiet} min: may be stuck`);
       this.flow(l.agentId, { kind: "status", label: `no output for ${quiet} min`, status: "stuck" });
-      this.system(l.chatId, l.threadRoot, `⏳ **${l.role.icon} ${l.role.title}** has sent nothing for ${quiet} min. `
+      this.system(l.chatId, l.threadRoot, `⏳ **${l.role.icon} ${agentLabel(l, l.role.title)}** has sent nothing for ${quiet} min. `
         + "It is still running: keep waiting, send a message to steer it, or stop it.", "warn");
       flagged.push(l.agentId);
     }
@@ -415,7 +433,7 @@ export class Orchestrator {
     for (const a of agents) if (a.chatId) byChat.set(a.chatId, [...(byChat.get(a.chatId) ?? []), a]);
     for (const [chatId, list] of byChat) {
       if (!this.d.db.getChat(chatId)) continue;
-      const names = list.map((a) => { const r = this.d.roles().find((x) => x.name === a.role); return r ? `${r.icon} ${r.title}` : a.role; });
+      const names = list.map((a) => { const r = this.d.roles().find((x) => x.name === a.role); return r ? `${r.icon} ${agentLabel(a, r.title)}` : agentLabel(a, a.role); });
       this.system(chatId, null, `⏸ The app closed while ${names.join(", ")} ${list.length === 1 ? "was" : "were"} working. `
         + "Resume from the agent chip above the composer or from the Agents page; nothing was lost.", "warn");
     }
@@ -434,13 +452,13 @@ export class Orchestrator {
     let depth = 0;
     for (let p = a.parentAgentId; p && depth < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) depth++;
     const threadRoot = this.d.db.lastThreadOf(agentId);
-    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
-    if (this.live.has(key)) {
+    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}#${agentId}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
+    if (this.live.has(key) || this.byAgent.has(agentId)) {
       this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", lastActivity: "Superseded: the same agent is already running again" }));
       throw new Error(`${role.title} is already running again in this chat`);
     }
     const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
-    const l: Live = { key, agentId, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
+    const l: Live = { key, agentId, name: a.name, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
       worktree: a.worktree, branch: a.branch };
     this.live.set(key, l);
@@ -451,7 +469,7 @@ export class Orchestrator {
     const input = [
       "The app was closed while you were working on this, and it has just been reopened. Your earlier session is gone.",
       "Check what is already done (files, the task board, your specialists' results) and continue where you left off. Don't redo finished work.",
-      kids.length ? `Specialists you started earlier (use get_result with these ids instead of delegating again): ${kids.map((c) => `${c.role} ${c.id} (${c.status})`).join("; ")}.` : "",
+      kids.length ? `Specialists you started earlier (use get_result with these ids instead of delegating again): ${kids.map((c) => `${agentLabel(c, c.role)} ${c.id} (${c.status})`).join("; ")}.` : "",
     ].filter(Boolean).join("\n");
     void this.turn({ chat, threadRoot, role, input, skills: [], depth, brief: a.parentAgentId ? a.brief : null, liveKey: key })
       .catch((e) => this.system(chat.id, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
@@ -970,12 +988,12 @@ export class Orchestrator {
       return Promise.resolve(true);
     }
     const msg = this.d.db.addMessage({ chatId: live.chatId, parentId: live.threadRoot ?? live.currentMessageId, author: "system",
-      role: live.role.name, content: `🔐 **${live.role.title}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
+      role: live.role.name, content: `🔐 **${agentLabel(live, live.role.title)}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
     this.setStatus(live, "running", "Waiting for your approval");
     live.awaitingApproval = true;
     this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "waiting" });
-    this.d.emit({ type: "notice", level: "warn", text: `${live.role.title} is waiting for approval` });
+    this.d.emit({ type: "notice", level: "warn", text: `${agentLabel(live, live.role.title)} is waiting for approval` });
     return new Promise((resolve) => {
       this.pendingPermissions.set(msg.id, (allow) => {
         live.awaitingApproval = false;
@@ -1025,9 +1043,11 @@ export class Orchestrator {
     // An explicit harness from the coordinator (the user asked for "the Pi agent") wins over economy routing.
     const harness = this.d.harnesses.resolve(pick?.harness ?? (economy ? (s.tokens.economyHarness as HarnessId) : requested), s);
     const model = pick && harness === pick.harness ? pick.model : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
+    // Delegated specialists get a given name, unique in the chat, so parallel copies of one role can be told apart.
+    const name = parentAgentId ? pickInstanceName(this.d.db.agentNamesInChat(chat.id)) : null;
     const agent = this.d.db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: role.name, harness, model,
-      parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}` });
-    const l: Live = { key, agentId: agent.id, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
+      parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}`, name });
+    const l: Live = { key, agentId: agent.id, name, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false, sink: null, redirect: null, awaiting: [] };
     this.live.set(key, l);
     this.byAgent.set(agent.id, l);
@@ -1221,7 +1241,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
    */
   private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string): void {
     const icon = said === "needs_decision" ? "❓" : said === "blocked" ? "⛔" : "⚠️";
-    const who = `${l.role.icon} ${l.role.title}`;
+    const who = `${l.role.icon} ${agentLabel(l, l.role.title)}`;
     if (l.depth > 0) this.system(chatId, threadRoot, `${icon} **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}`);
     this.d.emit({ type: "notice", level: said === "failed" ? "error" : "warn", text: `${who} ${SAID_LABEL[said].toLowerCase()}: ${asks}`.replace(/[*`]/g, "").slice(0, 140) });
   }

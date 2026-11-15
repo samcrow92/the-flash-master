@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { pickAgentChat } from "./agentChat";
+import { agentLabel } from "@shared/instances";
 
 export const api = () => window.flash.api;
 
@@ -383,6 +384,12 @@ export async function toggleTheme(): Promise<void> {
 
 export function roleOf(name: string | null | undefined): RoleDef | undefined {
   return useStore.getState().roles.find((r) => r.name === name);
+}
+
+/** "Nova · Coder" for a named specialist instance, else the role title. */
+export function agentTitle(a: Pick<AgentRun, "role" | "name"> | null | undefined, fallback = "agent"): string {
+  if (!a) return fallback;
+  return agentLabel(a, roleOf(a.role)?.title ?? a.role);
 }
 
 export const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));

@@ -3,7 +3,7 @@ import { useVirtualList } from "../components/virtual";
 import { ToolRuns } from "../components/ToolRuns";
 import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
-import { ago, api, fmtTokens, roleOf, useStore } from "../store";
+import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
 import { ReplyBody } from "../components/ReplyBody";
 import { FlowPanel } from "./FlowView";
@@ -124,7 +124,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             {chatAgents.map((a) => (
               <span key={a.id} className={`agent-chip st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
                 <button className="chip-main" onClick={() => st.openFlow(chatId, a.id)}>
-                  <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /> {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
+                  <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /> {agentTitle(a)} · {a.harness} · {a.status}
                   {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}
                 </button>
                 {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
@@ -206,7 +206,7 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
   const showTokens = useStore((s) => s.settings?.tokens.showTokenCounts);
   const [picker, setPicker] = useState(false);
   const myName = useStore((s) => s.settings?.profile?.name);
-  const who = m.author === "user" ? myName || "You" : m.author === "system" ? "System" : role?.title ?? m.role ?? "Agent";
+  const who = m.author === "user" ? myName || "You" : m.author === "system" ? "System" : agent?.name ? agentTitle(agent) : role?.title ?? m.role ?? "Agent";
   const react = (e: string) => { setPicker(false); void api().toggleReaction(m.id, e); };
 
   if (m.marker === "context-reset") {
