@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { NO_PROJECT, pickAgentChat } from "../src/renderer/agentChat";
+import { NO_PROJECT, chatRoute, pickAgentChat } from "../src/renderer/agentChat";
+import { opensNewWindow } from "../src/renderer/specialists";
+import { readFileSync } from "node:fs";
 import { customAgents } from "../src/renderer/agentOverview";
 import { chatOrder } from "../src/renderer/commands";
 import type { RoleDef } from "../src/shared/types";
@@ -60,5 +62,49 @@ describe("No project section", () => {
   it("comes after the projects in sidebar order", () => {
     const chats = { p1: [chat("a", "flashmaster", 1)], [NO_PROJECT]: [chat("n", "tester", 2, { projectId: null })] };
     expect(chatOrder("m", ["p1"], chats)).toEqual(["m", "a", "n"]);
+  });
+});
+
+describe("open an agent's dedicated chat in its own window", () => {
+  it("TheFlashMaster pops out the master chat", () => {
+    expect(pickAgentChat("flashmaster", base, { dedicated: true })).toEqual({ kind: "open", chatId: "m", agentId: null });
+  });
+  it("a specialist helping in another chat doesn't pop that chat out: its own latest chat opens instead", () => {
+    const chats = { p1: [chat("main", "flashmaster", 1), chat("own", "reviewer", 2)] };
+    const agents = { a1: agent("a1", "reviewer", "running", "main", 5) };
+    expect(pickAgentChat("reviewer", { ...base, chats, agents })).toEqual({ kind: "open", chatId: "main", agentId: "a1" });
+    expect(pickAgentChat("reviewer", { ...base, chats, agents }, { dedicated: true })).toEqual({ kind: "open", chatId: "own", agentId: null });
+  });
+  it("a specialist working in its own direct chat opens that chat, even from another project", () => {
+    const chats = { p1: [chat("own", "reviewer", 9)], p2: [chat("busy", "reviewer", 1, { projectId: "p2" })] };
+    const agents = { a1: agent("a1", "reviewer", "running", "busy", 5) };
+    expect(pickAgentChat("reviewer", { ...base, chats, agents }, { dedicated: true })).toEqual({ kind: "open", chatId: "busy", agentId: "a1" });
+  });
+  it("starts a new direct chat when the agent has none", () => {
+    const chats = { p1: [chat("main", "flashmaster", 1)] };
+    expect(pickAgentChat("tester", { ...base, chats }, { dedicated: true })).toEqual({ kind: "new", projectId: "p1" });
+  });
+  it("the window route round-trips chat ids and ignores other hashes", () => {
+    expect(chatRoute(`#chat/${encodeURIComponent("c 1/2")}`)).toEqual({ chatId: "c 1/2" });
+    expect(chatRoute("#thread/c/r")).toBeNull();
+    expect(chatRoute("")).toBeNull();
+    expect(chatRoute("#chat/%E0%A4%A")).toBeNull();
+  });
+  it("Ctrl+click or Cmd+click opens a new window; a plain click doesn't", () => {
+    expect(opensNewWindow({ ctrlKey: true, metaKey: false })).toBe(true);
+    expect(opensNewWindow({ ctrlKey: false, metaKey: true })).toBe(true);
+    expect(opensNewWindow({ ctrlKey: false, metaKey: false })).toBe(false);
+  });
+  it("both pills offer an Open in new window button on every row", () => {
+    for (const f of ["SpecialistsPill", "AgentsPill"]) {
+      const src = readFileSync(`src/renderer/components/${f}.tsx`, "utf8");
+      expect(src, f).toContain("row-popout");
+      expect(src, f).toContain("openAgentWindow");
+    }
+  });
+  it("the main process keeps one window per chat and focuses it instead of duplicating", () => {
+    const src = readFileSync("src/main/index.ts", "utf8");
+    expect(src).toMatch(/popouts\.get\(key\)[\s\S]{0,120}open\.focus\(\)/);
+    expect(src).toContain("`chat:${chatId}`");
   });
 });

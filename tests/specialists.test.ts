@@ -44,7 +44,7 @@ describe("Agents pill on the chat", () => {
     const read = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
     const view = read("src/renderer/views/ChatView.tsx");
     expect(view).not.toContain("agent-strip");
-    expect(view).toMatch(/<div className="pill-stack">\s*<SpecialistsPill \/>\s*<AgentsPill chatId=\{chatId\} \/>/);
+    expect(view).toMatch(/<div className="pill-stack">\s*\{!popout && <SpecialistsPill \/>\}\s*<AgentsPill chatId=\{chatId\} \/>/);
   });
 });
 

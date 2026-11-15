@@ -40,6 +40,13 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(300);
       await shot(join(demo, "1b-agents-pill.png"));
       await js(`document.querySelector('.agents-float .spec-pill')?.click()`);
+      // Each Specialists row shows its "open in a new window" button on hover.
+      await js(`document.querySelector('.pill-stack > .spec-float:not(.agents-float) .spec-pill')?.click()`);
+      await sleep(300);
+      const row = await js<{ x: number; y: number } | null>(`(()=>{const r=document.querySelectorAll('.spec-row')[1]?.getBoundingClientRect();return r?{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}:null})()`);
+      if (row) { win.webContents.sendInputEvent({ type: "mouseMove", x: row.x, y: row.y }); await sleep(300); }
+      await shot(join(demo, "1c-specialists-popout.png"));
+      await js(`document.querySelector('.pill-stack > .spec-float:not(.agents-float) .spec-pill')?.click()`);
       await sleep(4500);
       await js(`[...document.querySelectorAll('.msg-agent .msg-actions button')].find(b=>b.title==='Reply in thread')?.click()`);
       await sleep(500);
@@ -335,6 +342,10 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     const search = await js<string>("window.flash.api.searchMessages('brake').then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
     log(search === "ok" ? "info" : "error", `smoke-search: ${search}`);
     if (search !== "ok") { app.exit(1); return; }
+    // An agent's chat popped out into its own window: it renders the chat, and opening it again focuses it instead of duplicating it.
+    const pop = ok ? await smokeChatWindow(win, js, demo) : "skipped";
+    log(pop === "ok" || pop === "skipped" ? "info" : "error", `smoke-chat-window: ${pop}`);
+    if (pop !== "ok" && pop !== "skipped") { app.exit(1); return; }
     // The integrated terminal: open it from the title bar, run a command in the real shell and see its output rendered.
     const term = ok && !demo ? await smokeTerminal(js) : "skipped";
     const termOk = term === "ok" || term === "skipped";
@@ -363,4 +374,21 @@ async function smokeTerminal(js: <T = unknown>(code: string) => Promise<T>): Pro
     if (r === "ok" || i === 1) return r;
   }
   return "unreachable";
+}
+
+async function smokeChatWindow(win: BrowserWindow, js: <T = unknown>(code: string) => Promise<T>, demo: string | undefined): Promise<string> {
+  const chatWins = () => BrowserWindow.getAllWindows().filter((w) => w !== win && !w.isDestroyed() && w.webContents.getURL().includes("#chat/"));
+  await js("window.flash.api.getMasterChat().then((c) => window.flash.api.openChatWindow(c.id))");
+  let cw: BrowserWindow | undefined;
+  for (let i = 0; i < 40 && !cw; i++) { await sleep(250); cw = chatWins()[0]; }
+  if (!cw) return "no window";
+  let rendered = false;
+  for (let i = 0; i < 40 && !rendered; i++) { await sleep(250); rendered = await cw.webContents.executeJavaScript("!!document.querySelector('.chat-popout .chat-header')").catch(() => false); }
+  if (!rendered) return "chat not rendered";
+  await js("window.flash.api.getMasterChat().then((c) => window.flash.api.openChatWindow(c.id))");
+  await sleep(400);
+  const count = chatWins().length;
+  if (demo) writeFileSync(join(demo, "2-chat-window.png"), (await cw.webContents.capturePage()).toPNG());
+  cw.close();
+  return count === 1 ? "ok" : `duplicated (${count})`;
 }

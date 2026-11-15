@@ -23,9 +23,12 @@ describe("the window never sits on a blank screen", () => {
 
   it("every window is guarded, and GPU crashes are logged", () => {
     const main = read("src/main/index.ts");
-    const windows = main.match(/new BrowserWindow\(\{[^]*?title: "(TheFlashMaster|Thread — TheFlashMaster)"/g) ?? [];
+    // App windows (they load the renderer through our preload): the main window, and openPopout() for thread and chat windows.
+    const windows = main.split("new BrowserWindow({").slice(1).filter((c) => c.slice(0, c.indexOf("});")).includes("preload:"));
     expect(windows.length).toBe(2);
-    expect(main.match(/guardWebContents\(/g)?.length).toBe(2);
+    expect(main.match(/guardWebContents\(/g)?.length).toBe(windows.length);
+    expect(main).toMatch(/function openThreadWindow[^]*?openPopout\(/);
+    expect(main).toMatch(/function openChatWindow[^]*?openPopout\(/);
     expect(main).toMatch(/app\.on\("child-process-gone"/);
   });
 

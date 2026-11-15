@@ -29,7 +29,8 @@ export function revealMessage(chatId: string, messageId: string, block: "start" 
 
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
-export function ChatView({ chatId }: { chatId: string }) {
+/** `popout`: the chat fills its own window (an agent's dedicated chat), so it has no Specialists pill and leaving it closes the window. */
+export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean }) {
   const st = useStore();
   const chat = st.chatById[chatId];
   const messages = st.messages[chatId] ?? [];
@@ -84,9 +85,10 @@ export function ChatView({ chatId }: { chatId: string }) {
   useEffect(() => { if (!artRev) return; setArtPulse(true); const t = setTimeout(() => setArtPulse(false), 1800); return () => clearTimeout(t); }, [artRev]);
   const update = async (patch: Partial<typeof chat>) => st.upsertChat(await api().updateChat(chatId, patch));
   const isMaster = chat.kind === "master";
+  const leave = () => { if (popout) window.close(); else if (st.masterChatId) void st.openChat(st.masterChatId); };
 
   return (
-    <div className={`chat-layout ${st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
+    <div className={`chat-layout ${popout ? "chat-popout " : ""}${st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
       <section className="chat">
         <header className="chat-header">
           <div className="chat-title-block">
@@ -133,12 +135,12 @@ export function ChatView({ chatId }: { chatId: string }) {
               { label: "Reset context", icon: <RotateCcw size={15} />, disabled: busy, onClick: () => api().resetContext(chatId).catch((er) => st.toast("warn", String(er?.message ?? er))) },
               { label: "Copy as Markdown", icon: <Copy size={15} />, onClick: async () => { await navigator.clipboard.writeText(await api().exportChat(chatId)); st.toast("info", "Chat copied as Markdown"); } },
               ...(!isMaster ? [{ separator: true, label: "" },
-                { label: "Archive", icon: <Archive size={15} />, onClick: async () => { st.upsertChat(await api().updateChat(chatId, { archived: true, pinned: false })); if (st.masterChatId) void st.openChat(st.masterChatId); } },
+                { label: "Archive", icon: <Archive size={15} />, onClick: async () => { st.upsertChat(await api().updateChat(chatId, { archived: true, pinned: false })); leave(); } },
                 { label: "Delete", icon: <Trash2 size={15} />, danger: true, onClick: async () => {
                   if (!confirm(`Delete chat "${chat.title}"?`)) return;
                   await api().deleteChat(chatId);
                   st.removeChat(chat);
-                  if (st.masterChatId) void st.openChat(st.masterChatId);
+                  leave();
                 } }] : []),
             ], true)}><MoreHorizontal size={17} /></button>
           </div>
@@ -158,7 +160,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             </div>
           </div>
           <div className="pill-stack">
-            <SpecialistsPill />
+            {!popout && <SpecialistsPill />}
             <AgentsPill chatId={chatId} />
           </div>
         </div>

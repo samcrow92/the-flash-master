@@ -910,6 +910,8 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .thread-side .avatar { width: 24px; height: 24px; font-size: 12px; }
 .thread-window { height: 100vh; display: grid; background: var(--bg); }
 .thread-standalone { border-left: none; animation: none; }
+.chat-window { height: 100vh; display: grid; background: var(--bg); min-height: 0; }
+.chat-window > .chat-layout { min-height: 0; }
 
 /* =====================================================================================================
    Liquid glass: frameless window, Windows-style floating controls, floating translucent panels.
@@ -1242,6 +1244,15 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .agent-row .chip-main { flex: 1; min-width: 0; gap: 8px; text-align: left; }
 .agent-row .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .agent-row .chip-label small { display: block; line-height: 14px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.spec-row { position: relative; display: flex; align-items: center; }
+.spec-row > .palette-item { flex: 1; min-width: 0; padding-right: 34px; }
+/* "Open in a new window": quiet until the row is hovered or focused, so the list stays minimal. */
+.row-popout { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border-radius: 8px; line-height: 0;
+  background: transparent; border: none; color: var(--muted); opacity: 0; transition: opacity .15s, background .15s, color .15s; }
+.spec-row > .row-popout { position: absolute; right: 6px; }
+.spec-row:hover > .row-popout, .agent-row:hover .row-popout, .row-popout:focus-visible { opacity: 1; }
+.row-popout:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 9%, transparent); }
+@media (hover: none) { .row-popout { opacity: 1; } }
 @keyframes spec-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
 
 /* Long project names stay on one line with an ellipsis (full path in the tooltip) instead of wrapping or scrolling sideways. */

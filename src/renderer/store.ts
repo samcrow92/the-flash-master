@@ -68,12 +68,15 @@ interface State {
   /** Open a search hit: its chat, its thread when it is a reply, then scroll to it. */
   jumpTo(hit: Pick<SearchHit, "chatId" | "messageId" | "parentId">): Promise<void>;
 
-  init(): Promise<void>;
+  /** `chatId`: a popped-out chat window, which opens that chat instead of the last one and doesn't change what the main window restores. */
+  init(opts?: { chatId?: string }): Promise<void>;
   setView(v: View): void;
-  openChat(chatId: string): Promise<void>;
-  /** Open an agent's chat: where it works now, else its latest chat in the current project, else a new one. */
+  /** `remember: false` keeps the chat out of "restore last chat" (popped-out windows). */
+  openChat(chatId: string, opts?: { remember?: boolean }): Promise<void>;
   /** Open the agent's chat (where it works now, its latest chat, or a new one); `showFlow: false` skips the progress overlay. */
   chatWithAgent(role: string, opts?: { showFlow?: boolean }): Promise<void>;
+  /** Open the agent's dedicated chat in its own window (creating the chat if it has none); focuses the window if already open. */
+  openAgentWindow(role: string): Promise<void>;
   openThread(chatId: string, rootId: string): Promise<void>;
   closeThread(rootId: string): void;
   toggleThread(chatId: string, rootId: string): void;
@@ -175,7 +178,7 @@ export const useStore = create<State>((set, get) => ({
     set({ focusMessage: { id: hit.messageId, rootId: hit.parentId, at: Date.now() } });
   },
 
-  async init() {
+  async init(opts) {
     const a = api();
     const [projects, master, roles, skills, s, agents, tasks, mcp, models] = await Promise.all([
       a.listProjects(), a.getMasterChat(), a.listRoles(), a.listSkills(), a.getSettings(), a.listAgents({}), a.listTasks({}), a.mcpStatus(), a.allModels(),
@@ -192,6 +195,7 @@ export const useStore = create<State>((set, get) => ({
     set({ ready: true });
     let last: string | null = null;
     try { last = localStorage.getItem("lastChat"); } catch { /* storage unavailable */ }
+    if (opts?.chatId) { await get().openChat(opts.chatId, { remember: false }); return; }
     await get().openChat(s.settings.general.restoreLastChat && last && get().chatById[last] ? last : master.id);
   },
 
@@ -199,12 +203,12 @@ export const useStore = create<State>((set, get) => ({
     set({ view: v });
   },
 
-  async openChat(chatId) {
+  async openChat(chatId, opts) {
     const chat = get().chatById[chatId];
     set({ view: { kind: "chat", chatId }, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
       // The master chat and "No project" chats have no project: don't keep the last one, or new agents would land in it.
       artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat ? chat.projectId : get().currentProjectId });
-    try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
+    if (opts?.remember !== false) try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
     set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
   },
@@ -222,6 +226,21 @@ export const useStore = create<State>((set, get) => ({
     const c = await api().createChat({ projectId: t.projectId, agentRole: role, title: r?.title ?? role });
     st.upsertChat(c);
     await st.openChat(c.id);
+  },
+
+  async openAgentWindow(role) {
+    const st = get();
+    const t = pickAgentChat(role, { agents: st.agents, chats: st.chats, projectIds: st.projects.map((p) => p.id),
+      currentProjectId: st.currentProjectId, masterChatId: st.masterChatId }, { dedicated: true });
+    let chatId: string;
+    if (t.kind === "open") chatId = t.chatId;
+    else {
+      const r = st.roles.find((x) => x.name === role);
+      const c = await api().createChat({ projectId: t.projectId, agentRole: role, title: r?.title ?? role });
+      st.upsertChat(c);
+      chatId = c.id;
+    }
+    await api().openChatWindow(chatId);
   },
 
   async openThread(chatId, rootId) {
