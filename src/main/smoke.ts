@@ -392,19 +392,23 @@ async function smokeTerminal(js: <T = unknown>(code: string) => Promise<T>): Pro
 }
 
 async function smokeChatWindow(win: BrowserWindow, js: <T = unknown>(code: string) => Promise<T>, demo: string | undefined): Promise<string> {
-  const chatWins = () => BrowserWindow.getAllWindows().filter((w) => w !== win && !w.isDestroyed() && w.webContents.getURL().includes("#chat/"));
-  await js("window.flash.api.getMasterChat().then((c) => window.flash.api.openChatWindow(c.id))");
+  const others = () => BrowserWindow.getAllWindows().filter((w) => w !== win && !w.isDestroyed());
+  const before = new Set(others());
+  const open = () => js<string>("window.flash.api.getMasterChat().then((c) => window.flash.api.openChatWindow(c.id)).then(() => 'ok', (e) => String(e?.message ?? e))");
+  const first = await open();
+  if (first !== "ok") return `open failed: ${first}`;
   let cw: BrowserWindow | undefined;
-  for (let i = 0; i < 40 && !cw; i++) { await sleep(250); cw = chatWins()[0]; }
+  for (let i = 0; i < 40 && !cw; i++) { cw = others().find((w) => !before.has(w)); if (!cw) await sleep(250); }
   if (!cw) return "no window";
   let rendered = false;
-  for (let i = 0; i < 40 && !rendered; i++) { await sleep(250); rendered = await cw.webContents.executeJavaScript("!!document.querySelector('.chat-popout .chat-header')").catch(() => false); }
-  if (!rendered) return "chat not rendered";
-  await js("window.flash.api.getMasterChat().then((c) => window.flash.api.openChatWindow(c.id))");
+  for (let i = 0; i < 60 && !rendered; i++) { await sleep(250); rendered = await cw.webContents.executeJavaScript("!!document.querySelector('.chat-popout .chat-header')").catch(() => false); }
+  if (!rendered) { const url = cw.webContents.getURL(); cw.close(); return `chat not rendered (${url.slice(url.indexOf("#")) || url || "no url"})`; }
+  const second = await open();
   await sleep(400);
-  const count = chatWins().length;
+  const count = others().filter((w) => !before.has(w)).length;
   if (demo) writeFileSync(join(demo, "2-chat-window.png"), (await cw.webContents.capturePage()).toPNG());
   cw.close();
   win.focus();
+  if (second !== "ok") return `reopen failed: ${second}`;
   return count === 1 ? "ok" : `duplicated (${count})`;
 }
