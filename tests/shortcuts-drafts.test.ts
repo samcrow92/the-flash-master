@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Chat } from "@shared/types";
+import type { Chat, Message } from "@shared/types";
 import { chatOrder, matchShortcut, rankCommands, scoreCommand, SHORTCUTS, shortcutLabel, stepChat, type KeyLike, type ShortcutId } from "../src/renderer/commands";
 import { createDraftStore, draftKey, MAX_DRAFTS } from "../src/renderer/drafts";
+import { canBrowse, sentHistory, stepHistory } from "../src/renderer/history";
 
 const key = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({ key: k, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...mods });
 
@@ -142,5 +143,38 @@ describe("per-chat drafts", () => {
     const d = createDraftStore(null);
     d.set("c", { text: "t" });
     expect(d.get("c").text).toBe("t");
+  });
+});
+
+describe("composer message history", () => {
+  const msg = (seq: number, author: "user" | "agent", content: string, parentId: string | null = null) =>
+    ({ id: `m${seq}`, seq, author, content, parentId }) as Message;
+  const list = [msg(1, "user", "first"), msg(2, "agent", "reply"), msg(3, "user", "second"), msg(4, "user", "second"),
+    msg(5, "user", "(see attachments)"), msg(6, "user", "in thread", "root"), msg(7, "user", "  third  ")];
+
+  it("lists your sent messages newest first, per chat or thread, without repeats", () => {
+    expect(sentHistory(list, null)).toEqual(["third", "second", "first"]);
+    expect(sentHistory(list, "root")).toEqual(["in thread"]);
+    expect(sentHistory(undefined, null)).toEqual([]);
+  });
+
+  it("only takes Up on the first line and Down on the last", () => {
+    expect(canBrowse("up", "", 0, 0)).toBe(true);
+    expect(canBrowse("up", "a\nb", 3, 3)).toBe(false);
+    expect(canBrowse("up", "a\nb", 1, 1)).toBe(true);
+    expect(canBrowse("down", "a\nb", 1, 1)).toBe(false);
+    expect(canBrowse("down", "a\nb", 3, 3)).toBe(true);
+    expect(canBrowse("up", "abc", 0, 2)).toBe(false); // a selection is left alone
+  });
+
+  it("steps older with Up, back to the draft with Down", () => {
+    const h = ["third", "second", "first"];
+    expect(stepHistory(h, null, "up")).toBe(0);
+    expect(stepHistory(h, 0, "up")).toBe(1);
+    expect(stepHistory(h, 2, "up")).toBeUndefined(); // nothing older
+    expect(stepHistory(h, 1, "down")).toBe(0);
+    expect(stepHistory(h, 0, "down")).toBeNull(); // back to the draft
+    expect(stepHistory(h, null, "down")).toBeUndefined();
+    expect(stepHistory([], null, "up")).toBeUndefined();
   });
 });
