@@ -123,10 +123,10 @@ export function ChatView({ chatId }: { chatId: string }) {
                 value={chat.model ?? ""} disabled={!!chat.mode} onChange={(v) => update({ model: v || null })} />
             </label>
             {chat.mode && <span className={`pill mode-pill mode-${chat.mode}`} title="Drive mode overrides the harness/model below">{chat.mode.toUpperCase()}</span>}
-            <button className={st.flowPanel?.chatId === chatId ? "toggle on" : ""} title="Flow chart of where the agents are in their task"
-              onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={15} /> Progress</button>
-            <button className={`${st.artifactsPanel === chatId ? "toggle on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Files changed, saved artifacts and code from this chat — download and diff"
-              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, flowPanel: null })}><Package size={15} /> Artifacts</button>
+            <button className={`ghost icon-only ${st.flowPanel?.chatId === chatId ? "toggle on" : ""}`} title="Progress: flow chart of where the agents are in their task"
+              onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={16} /><span className="sr-only">Progress</span></button>
+            <button className={`ghost icon-only ${st.artifactsPanel === chatId ? "toggle on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Artifacts: files changed, saved artifacts and code from this chat — download and diff"
+              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, flowPanel: null })}><Package size={16} /><span className="sr-only">Artifacts</span></button>
             {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={13} fill="currentColor" /> Stop</button>}
             <button className="ghost icon-only" title="More actions" onClick={(e) => openMenu(e, [
               ...(!isMaster ? [{ label: "Rename", icon: <Pencil size={15} />, onClick: () => setEditingTitle(true) },
@@ -278,12 +278,12 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
           {!inThread && m.replyCount > 0 && <ThreadPill root={m} open={threadOpen} inPanel={inPanel} onClick={toggleThread} />}
           {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title={`${REACTIONS[r]?.label ?? r} — click to remove`}><ReactionIcon emoji={r} /></button>)}
           <div className="msg-actions">
-            <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={14} /></button>
-            {!inThread && <button onClick={reply} title="Reply in thread"><CornerUpLeft size={13} /> Reply</button>}
-            <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={13} /></button>
-            {rewind === "edit" && !editing && <button onClick={() => setEditing(true)} title="Edit and send again — the replies after it are replaced"><Pencil size={13} /> Edit</button>}
-            {rewind === "retry" && <button onClick={(e) => openMenu(e, retryMenu(m), true)} title="Run this turn again, on the same or another model"><RefreshCw size={13} /> Retry</button>}
-            {m.status !== "streaming" && <button className="msg-delete" onClick={() => void deleteMessage(m)} title={!inThread && m.replyCount > 0 ? "Delete this message and its thread" : "Delete this message"}><Trash2 size={13} /></button>}
+            <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={15} /></button>
+            {!inThread && <button onClick={reply} title="Reply in thread"><CornerUpLeft size={14} /><span className="sr-only">Reply</span></button>}
+            <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={14} /></button>
+            {rewind === "edit" && !editing && <button onClick={() => setEditing(true)} title="Edit and send again — the replies after it are replaced"><Pencil size={14} /><span className="sr-only">Edit</span></button>}
+            {rewind === "retry" && <button onClick={(e) => openMenu(e, retryMenu(m), true)} title="Run this turn again, on the same or another model"><RefreshCw size={14} /><span className="sr-only">Retry</span></button>}
+            {m.status !== "streaming" && <button className="msg-delete" onClick={() => void deleteMessage(m)} title={!inThread && m.replyCount > 0 ? "Delete this message and its thread" : "Delete this message"}><Trash2 size={14} /></button>}
           </div>
           {picker && <div className="emoji-picker">{EMOJIS.map((e, i) => <button key={e} style={{ animationDelay: `${i * 22}ms` }} title={REACTIONS[e]?.label} onClick={() => react(e)}><ReactionIcon emoji={e} size={17} /></button>)}</div>}
         </div>
