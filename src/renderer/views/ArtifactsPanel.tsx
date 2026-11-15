@@ -1,3 +1,4 @@
+import { ResizeHandle } from "../components/ResizeHandle";
 import { useEffect, useMemo, useState } from "react";
 import type { ChatArtifacts } from "@shared/types";
 import { unifiedPatch } from "@shared/diff";
@@ -131,6 +132,7 @@ export function ArtifactsPanel({ chatId, onClose }: { chatId: string; onClose: (
         </>}
       </div>
       {viewer && <ViewerModal v={viewer} onClose={() => setViewer(null)} />}
+      <ResizeHandle panel="side" edge="left" label="Resize Artifacts panel" />
     </aside>
   );
 }

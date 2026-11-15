@@ -1,3 +1,4 @@
+import { ResizeHandle } from "../components/ResizeHandle";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check, Circle, CircleAlert, CircleCheck, Compass as CompassIcon, CornerLeftUp, Expand, KeyRound, MessageSquare, Pause, RoleIcon, Wrench, X, type LucideIcon } from "../components/icons";
 import { Dots } from "../components/Dots";
@@ -149,6 +150,7 @@ export function FlowPanel({ chatId, agentId, onClose }: { chatId: string; agentI
       <div className="flow-scroll">
         {current ? <FlowChart agentId={current} onSelect={setSel} compact /> : <div className="empty">No agent has worked in this chat yet.</div>}
       </div>
+      <ResizeHandle panel="side" edge="left" label="Resize Progress panel" />
     </aside>
   );
 }

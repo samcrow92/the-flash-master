@@ -1,3 +1,4 @@
+import { ResizeHandle } from "./ResizeHandle";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Chat, Project } from "@shared/types";
 import { api, useStore } from "../store";
@@ -183,6 +184,7 @@ export function Sidebar() {
           onClick={() => st.setView({ kind: "settings", tab: "general" })}><UserAvatar size={26} /></button>
         <button className={`nav-btn ${view.kind === "settings" ? "active" : ""}`} onClick={() => st.setView({ kind: "settings" })}><span className="nav-icon"><Settings size={17} /></span> Settings</button>
       </div>
+      <ResizeHandle panel="sidebar" edge="right" label="Resize sidebar" />
     </aside>
   );
 }

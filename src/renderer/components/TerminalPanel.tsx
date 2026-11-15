@@ -4,6 +4,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api, useStore } from "../store";
+import { ResizeHandle } from "./ResizeHandle";
 import { Maximize2, Minimize2, Plus, SquareTerminal, X } from "./icons";
 
 /**
@@ -119,6 +120,8 @@ export function TerminalPanel() {
       <div className="term-body">
         {tabs.map((t) => <TermView key={t.id} id={t.id} visible={open && t.id === active} />)}
       </div>
+      {!expanded && <ResizeHandle panel="termW" edge="left" label="Resize terminal width" />}
+      {!expanded && <ResizeHandle panel="termH" edge="bottom" label="Resize terminal height" />}
     </section>
   );
 }
