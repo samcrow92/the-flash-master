@@ -40,6 +40,13 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(300);
       await shot(join(demo, "1b-agents-pill.png"));
       await js(`document.querySelector('.agents-float .spec-pill')?.click()`);
+      // Each Specialists row shows its "open in a new window" button on hover.
+      await js(`document.querySelector('.pill-stack > .spec-float:not(.agents-float) .spec-pill')?.click()`);
+      await sleep(300);
+      const row = await js<{ x: number; y: number } | null>(`(()=>{const r=document.querySelectorAll('.spec-row')[1]?.getBoundingClientRect();return r?{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}:null})()`);
+      if (row) { win.webContents.sendInputEvent({ type: "mouseMove", x: row.x, y: row.y }); await sleep(300); }
+      await shot(join(demo, "1c-specialists-popout.png"));
+      await js(`document.querySelector('.pill-stack > .spec-float:not(.agents-float) .spec-pill')?.click()`);
       await sleep(4500);
       await js(`[...document.querySelectorAll('.msg-agent .msg-actions button')].find(b=>b.title==='Reply in thread')?.click()`);
       await sleep(500);
@@ -353,7 +360,12 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     const term = ok && !demo ? await smokeTerminal(js) : "skipped";
     const termOk = term === "ok" || term === "skipped";
     log(termOk ? "info" : "error", `smoke: ui=${ok} terminal=${term}`);
-    app.exit(ok && iconOk && termOk ? 0 : 1);
+    // An agent's chat popped out into its own window: it renders the chat, and opening it again focuses it instead of
+    // duplicating it. Runs last: the new window takes focus, and macOS throttles the main window's timers behind it.
+    const pop = ok ? await smokeChatWindow(win, js, demo) : "skipped";
+    const popOk = pop === "ok" || pop === "skipped";
+    log(popOk ? "info" : "error", `smoke-chat-window: ${pop}`);
+    app.exit(ok && iconOk && termOk && popOk ? 0 : 1);
   } catch (e) {
     log("error", `smoke failed: ${String(e)}`);
     app.exit(2);
@@ -377,4 +389,26 @@ async function smokeTerminal(js: <T = unknown>(code: string) => Promise<T>): Pro
     if (r === "ok" || i === 1) return r;
   }
   return "unreachable";
+}
+
+async function smokeChatWindow(win: BrowserWindow, js: <T = unknown>(code: string) => Promise<T>, demo: string | undefined): Promise<string> {
+  const others = () => BrowserWindow.getAllWindows().filter((w) => w !== win && !w.isDestroyed());
+  const before = new Set(others());
+  const open = () => js<string>("window.flash.api.getMasterChat().then((c) => window.flash.api.openChatWindow(c.id)).then(() => 'ok', (e) => String(e?.message ?? e))");
+  const first = await open();
+  if (first !== "ok") return `open failed: ${first}`;
+  let cw: BrowserWindow | undefined;
+  for (let i = 0; i < 40 && !cw; i++) { cw = others().find((w) => !before.has(w)); if (!cw) await sleep(250); }
+  if (!cw) return "no window";
+  let rendered = false;
+  for (let i = 0; i < 60 && !rendered; i++) { await sleep(250); rendered = await cw.webContents.executeJavaScript("!!document.querySelector('.chat-popout .chat-header')").catch(() => false); }
+  if (!rendered) { const url = cw.webContents.getURL(); cw.close(); return `chat not rendered (${url.slice(url.indexOf("#")) || url || "no url"})`; }
+  const second = await open();
+  await sleep(400);
+  const count = others().filter((w) => !before.has(w)).length;
+  if (demo) writeFileSync(join(demo, "2-chat-window.png"), (await cw.webContents.capturePage()).toPNG());
+  cw.close();
+  win.focus();
+  if (second !== "ok") return `reopen failed: ${second}`;
+  return count === 1 ? "ok" : `duplicated (${count})`;
 }

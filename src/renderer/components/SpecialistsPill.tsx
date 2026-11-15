@@ -3,7 +3,8 @@ import { useStore } from "../store";
 import { specialistRows } from "../specialists";
 import { AgentImportDialog } from "./AgentImport";
 import { Dots } from "./Dots";
-import { ChevronDown, Pause, Plus, RoleIcon, Users } from "./icons";
+import { AppWindow, ChevronDown, Pause, Plus, RoleIcon, Users } from "./icons";
+import { opensNewWindow } from "../specialists";
 
 /**
  * Specialists, as a floating glass pill on the right of the chat (moved out of the sidebar to give Projects room).
@@ -43,21 +44,29 @@ export function SpecialistsPill() {
             <button className="icon-btn" title="Add your own agent (template / import)" onClick={() => setImporting(true)}><Plus size={15} /></button>
           </div>
           <div className="spec-list">
-            {rows.map(({ role: r, working: w, paused: p, busyAgents }) => (
-              <button key={r.name} className={`palette-item ${w ? "is-working" : p ? "is-paused" : ""}`}
-                title={`${r.description}\n\n${w ? "Working now — click to open its chat." : `Click: open your chat with ${r.title}.`}\nTip: type @${r.name} in any chat.`}
-                onClick={() => {
-                  setOpen(false);
-                  // Opens the specialist's chat: where it is working now, else its latest chat, else a new one.
-                  void st.chatWithAgent(r.name, { showFlow: false });
-                }}>
-                <span className="palette-icon"><RoleIcon role={r.name} size={24} state={w ? "working" : p ? "paused" : undefined} /></span>
-                <span className="palette-title">{r.title}</span>
-                {w > 0 && <Dots size={5} count={w} title={busyAgents.map((a) => `${a.name ?? r.title}${a.lastActivity ? ` — ${a.lastActivity}` : ""}`).join("\n")} />}
-                {!w && p > 0 && <span className="paused-tag" title={`${p} paused`}><Pause size={12} /></span>}
-                {r.source === "user" && <span className="custom-tag">custom</span>}
-              </button>
-            ))}
+            {rows.map(({ role: r, working: w, paused: p, busyAgents }) => {
+              const popOut = () => { setOpen(false); void st.openAgentWindow(r.name).catch((e) => st.toast("error", String(e?.message ?? e))); };
+              return (
+                <div key={r.name} className={`spec-row ${w ? "is-working" : p ? "is-paused" : ""}`}>
+                  <button className={`palette-item ${w ? "is-working" : p ? "is-paused" : ""}`}
+                    title={`${r.description}\n\n${w ? "Working now — click to open its chat." : `Click: open your chat with ${r.title}.`}\nCtrl+click or middle-click: open it in a new window.\nTip: type @${r.name} in any chat.`}
+                    onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); popOut(); } }}
+                    onClick={(e) => {
+                      if (opensNewWindow(e)) { popOut(); return; }
+                      setOpen(false);
+                      // Opens the specialist's chat: where it is working now, else its latest chat, else a new one.
+                      void st.chatWithAgent(r.name, { showFlow: false });
+                    }}>
+                    <span className="palette-icon"><RoleIcon role={r.name} size={24} state={w ? "working" : p ? "paused" : undefined} /></span>
+                    <span className="palette-title">{r.title}</span>
+                    {w > 0 && <Dots size={5} count={w} title={busyAgents.map((a) => `${a.name ?? r.title}${a.lastActivity ? ` — ${a.lastActivity}` : ""}`).join("\n")} />}
+                    {!w && p > 0 && <span className="paused-tag" title={`${p} paused`}><Pause size={12} /></span>}
+                    {r.source === "user" && <span className="custom-tag">custom</span>}
+                  </button>
+                  <button className="row-popout" title={`Open ${r.title}'s chat in a new window`} aria-label={`Open ${r.title}'s chat in a new window`} onClick={popOut}><AppWindow size={14} /></button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

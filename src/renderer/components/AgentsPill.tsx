@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { agentTitle, api, useStore } from "../store";
-import { chatAgentRows } from "../specialists";
+import { chatAgentRows, opensNewWindow } from "../specialists";
 import { Dots } from "./Dots";
-import { Activity, ChevronDown, Pause, Play, RoleIcon, Square } from "./icons";
+import { Activity, AppWindow, ChevronDown, Pause, Play, RoleIcon, Square } from "./icons";
 
 /**
  * The chat's agents (running first), as a glass pill under the Specialists pill. Replaces the chip strip that used to
@@ -43,9 +43,12 @@ export function AgentsPill({ chatId }: { chatId: string }) {
             <span>{running} running</span>
           </div>
           <div className="spec-list">
-            {rows.map((a) => (
-              <span key={a.id} className={`agent-chip agent-row st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
-                <button className="chip-main" onClick={() => { setOpen(false); st.openFlow(chatId, a.id); }}>
+            {rows.map((a) => {
+              const popOut = () => { setOpen(false); void st.openAgentWindow(a.role).catch((e) => st.toast("error", String(e?.message ?? e))); };
+              return (
+              <span key={a.id} className={`agent-chip agent-row st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow · Ctrl+click or middle-click: open its chat in a new window`}>
+                <button className="chip-main" onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); popOut(); } }}
+                  onClick={(e) => { if (opensNewWindow(e)) { popOut(); return; } setOpen(false); st.openFlow(chatId, a.id); }}>
                   <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} />
                   <span className="chip-label">{agentTitle(a)}
                     <small>{a.harness} · {a.status}{a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}</small></span>
@@ -54,8 +57,10 @@ export function AgentsPill({ chatId }: { chatId: string }) {
                 {a.status === "paused" && <button className="chip-act" onClick={() => api().resumeAgent(a.id)} title="Resume"><Play size={12} /></button>}
                 {a.status === "interrupted" && <button className="chip-act" onClick={() => void api().resumeInterrupted(a.id).catch((e) => st.toast("error", String(e?.message ?? e)))} title="Resume (the app closed while it was working)"><Play size={12} /></button>}
                 <button className="chip-act" onClick={() => api().stopAgent(a.id)} title="Stop"><Square size={10} fill="currentColor" /></button>
+                <button className="chip-act row-popout" onClick={popOut} title={`Open ${agentTitle(a)}'s chat in a new window`} aria-label={`Open ${agentTitle(a)}'s chat in a new window`}><AppWindow size={12} /></button>
               </span>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

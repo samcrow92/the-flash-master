@@ -31,3 +31,8 @@ export function chatAgentRows(agents: Record<string, AgentRun>, chatId: string):
     .map(({ a }) => a);
   return { rows, running: rows.filter((a) => a.status === "running").length, paused: rows.filter((a) => a.status === "paused" || a.status === "interrupted").length };
 }
+
+/** Ctrl+click (Cmd+click on macOS) on a pill row opens the agent's chat in a new window instead of in place. */
+export function opensNewWindow(e: { ctrlKey: boolean; metaKey: boolean }): boolean {
+  return e.ctrlKey || e.metaKey;
+}

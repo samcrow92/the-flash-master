@@ -163,7 +163,8 @@ describe("native modules", () => {
   it("the smoke test fails when the integrated terminal can't run a command", () => {
     const smoke = read("src/main/smoke.ts");
     expect(smoke).toMatch(/const termOk = term === "ok"/);
-    expect(smoke).toMatch(/app\.exit\([^)]*termOk \? 0 : 1\)/);
+    expect(smoke).toMatch(/app\.exit\([^)]*termOk[^)]*\? 0 : 1\)/);
+    expect(smoke).toMatch(/app\.exit\([^)]*popOk \? 0 : 1\)/);
   });
 });
 
