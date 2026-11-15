@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: taskbar icon on Windows.** The `.ico` stored every size as PNG, which some Windows icon paths (the taskbar among them) don't draw; small sizes are now classic bitmaps, with 20, 24 and 40 px added for scaled displays. The icon is found whether the app runs packaged, from `npm run dev` or straight from `out/main`, is logged at startup, and the smoke test on Windows CI fails if it doesn't load.
 - **Windows-style window controls, no title bar.** Minimise, maximise and close now sit at the top right like any Windows app, next to the light/dark toggle, with nothing drawn behind them. The lightning-bolt app icon is back at the top left of the window. macOS keeps its own traffic lights.
 - **Runs on macOS.** The app now works on Apple silicon and Intel Macs, with the system's own traffic lights and vibrancy.
   - **Agent CLIs are found from the Dock:** on start the app reads your login shell's PATH, so CLIs in `~/.local/bin`, Homebrew or npm's global folder are detected even when it's not launched from Terminal.

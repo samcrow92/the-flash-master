@@ -101,6 +101,27 @@ describe("window chrome", () => {
     expect(windows.filter((w) => !/icon: appIcon/.test(w)), "BrowserWindow without icon: appIcon").toEqual([]);
     expect(src).toMatch(/setAppUserModelId\(/);
   });
+  it("the Windows .ico has the taskbar sizes, small frames as BMP, and ships with the app", () => {
+    // An all-PNG .ico left the taskbar without the bolt; scripts/make-ico.py rebuilds it in this layout.
+    const ico = readFileSync(join(root, "build/icon.ico"));
+    expect([ico.readUInt16LE(0), ico.readUInt16LE(2)]).toEqual([0, 1]);
+    const frames = Array.from({ length: ico.readUInt16LE(4) }, (_, i) => {
+      const e = 6 + 16 * i;
+      const off = ico.readUInt32LE(e + 12);
+      return { size: ico[e] || 256, png: ico.subarray(off, off + 4).toString("latin1") === "\x89PNG" };
+    });
+    expect(frames.map((f) => f.size)).toEqual(expect.arrayContaining([16, 24, 32, 48, 256]));
+    expect(frames.filter((f) => f.size < 256 && f.png).map((f) => f.size), "small .ico frames stored as PNG").toEqual([]);
+    const builder = read("electron-builder.yml");
+    expect(builder).toMatch(/from: build\/icon\.ico\s+to: build\/icon\.ico/);
+    expect(builder).toMatch(/win:\s+icon: build\/icon\.ico/);
+  });
+  it("the app icon is resolved for packaged and source runs, and the smoke test checks it loaded", () => {
+    const src = read("src/main/index.ts");
+    expect(src).toMatch(/iconCandidates\(\{[^}]*process\.resourcesPath[^}]*app\.getAppPath\(\)[^}]*join\(here, "\.\.", "\.\."\)/);
+    expect(src).toMatch(/runSmoke\(win!, log, appIcon\)/);
+    expect(read("src/main/smoke.ts")).toMatch(/app\.exit\(ok && iconOk \? 0 : 1\)/);
+  });
   it("the frameless title bar shows the app icon and Windows-style caption buttons", () => {
     const tsx = read("src/renderer/components/TitleBar.tsx");
     expect(tsx).toMatch(/import appIcon from "\.\.\/assets\/app-icon\.png"/);
