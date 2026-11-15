@@ -13,6 +13,7 @@ import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
 import { paragraphBreak } from "@shared/replySegments";
+import { planEdit, planRetry, type RewindPlan } from "@shared/rewind";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
@@ -170,7 +171,64 @@ export class Orchestrator {
       delivery: steer ? "sent" : queued ? "queued" : undefined });
     this.d.emit({ type: "message.created", message: userMsg });
     if (steer && busyLive) { await this.steer(busyLive, content, attachments, userMsg.id); return userMsg; }
+    await this.dispatch(chat, threadRoot, userMsg, content, attachments);
+    return userMsg;
+  }
 
+  /**
+   * Edit & resend: your last message in its chat or thread gets the new text, the replies after it are removed and
+   * the agents of that conversation start a fresh session (theirs still holds the old exchange), then it runs again.
+   */
+  async editAndResend(messageId: string, content: string): Promise<Message> {
+    if (!content.trim()) throw new Error("The message is empty.");
+    const { chat, scope, plan } = this.rewindPlan(messageId, planEdit);
+    this.rewind(chat, scope, plan.user, plan.remove);
+    const edited = this.d.db.editMessage(plan.user.id, content);
+    this.d.emit({ type: "message.updated", message: edited });
+    await this.dispatch(chat, scope, edited, content, edited.attachments);
+    return edited;
+  }
+
+  /** Retry: remove the latest reply (and the rest of its turn) and send the message behind it again, optionally elsewhere. */
+  async retryReply(messageId: string, pick?: { harness: HarnessId; model: string | null }): Promise<void> {
+    const { chat, scope, plan } = this.rewindPlan(messageId, planRetry);
+    this.rewind(chat, scope, plan.user, plan.remove);
+    await this.dispatch(chat, scope, plan.user, plan.user.content, plan.user.attachments, pick);
+  }
+
+  private rewindPlan(messageId: string, planner: typeof planEdit): { chat: Chat; scope: string | null; plan: Extract<RewindPlan, { ok: true }> } {
+    const m = this.d.db.getMessage(messageId);
+    if (!m) throw new Error("That message no longer exists.");
+    const chat = this.mustChat(m.chatId);
+    const scope = m.parentId;
+    const plan = planner(this.d.db.history(chat.id, scope), messageId);
+    if (!plan.ok) throw new Error(plan.reason);
+    return { chat, scope, plan };
+  }
+
+  /** Remove `remove` (and threads under it) and close the conversation's idle agent sessions so the rerun starts clean. */
+  private rewind(chat: Chat, scope: string | null, user: Message, remove: Message[]): void {
+    const roots = new Set(remove.map((x) => x.id));
+    const lives = [...this.live.values()].filter((l) => l.chatId === chat.id && (l.threadRoot === scope || (l.threadRoot && roots.has(l.threadRoot))));
+    if (lives.some((l) => l.busy)) throw new Error("An agent is still working here — stop it first, then edit or retry.");
+    for (const l of lives) {
+      l.session?.close();
+      this.live.delete(l.key);
+      this.byAgent.delete(l.agentId);
+      this.emitAgent(this.d.db.updateAgent(l.agentId, { status: "done", ended: true, sessionId: null, lastActivity: "Restarted for an edited or retried message" }));
+    }
+    for (const x of remove) this.liveText.delete(x.id);
+    const removed = this.d.db.deleteMessages(remove.map((x) => x.id));
+    if (removed.length) this.d.emit({ type: "messages.removed", chatId: chat.id, removed });
+    // The rolling summary may already cover the removed turn: drop it back to the last context reset.
+    const cs = this.d.db.getChatSummary(chat.id);
+    if (cs.upto >= user.seq) this.d.db.setChatSummary(chat.id, "", this.d.db.lastResetBefore(chat.id, user.seq));
+  }
+
+  /** Run a stored user message: slash commands, @mentions, then the agent's turn. */
+  private async dispatch(chat: Chat, threadRoot: string | null, userMsg: Message, content: string, attachments: Attachment[],
+    pick?: { harness: HarnessId; model: string | null }): Promise<void> {
+    const chatId = chat.id;
     const slash = parseSlash(content);
     if (slash.command === "superpowers") {
       const on = !chat.superpowers;
@@ -178,10 +236,10 @@ export class Orchestrator {
       this.system(chatId, threadRoot, on
         ? "⚡ Superpowers workflow **enabled** for this chat. Agents will brainstorm → plan → implement with TDD → review → verify. Use `/superpowers` again to turn it off."
         : "Superpowers workflow **disabled** for this chat.");
-      return userMsg;
+      return;
     }
-    if (slash.command === "stop") { await this.stopChat(chatId); return userMsg; }
-    if (slash.command === "help") { this.system(chatId, threadRoot, this.helpText()); return userMsg; }
+    if (slash.command === "stop") { await this.stopChat(chatId); return; }
+    if (slash.command === "help") { this.system(chatId, threadRoot, this.helpText()); return; }
 
     const roles = this.d.roles();
     const mention = parseMention(slash.command ? slash.text : content, roles.map((r) => r.name));
@@ -189,9 +247,8 @@ export class Orchestrator {
     const role = this.role(roleName);
     const skills = this.activeSkills(chat, slash.command);
     const text = slash.command && skills.length ? slash.text || content : mention.text;
-    void this.turn({ chat, threadRoot, role, input: text, attachments, skills, depth: 0, brief: null, msgIds: [userMsg.id] }).catch((e) =>
+    void this.turn({ chat, threadRoot, role, input: text, attachments, skills, depth: 0, brief: null, msgIds: [userMsg.id], pick }).catch((e) =>
       this.system(chatId, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
-    return userMsg;
   }
 
   /** Start a specialist with a brief in a fresh chat (palette / "Analyse with agent" / tasks). */
@@ -583,9 +640,11 @@ export class Orchestrator {
     /** Round of text delegation this turn belongs to (results fed back to the coordinator), to stop runaway loops. */
     textRound?: number;
     /** The same request again after the harness was switched (the failed reply stays out of the history). */
-    retry?: boolean }): Promise<void> {
+    retry?: boolean;
+    /** Harness / model for a new session (retry with another model); an existing session keeps its own. */
+    pick?: { harness: HarnessId; model: string | null } }): Promise<void> {
     const s = this.d.settings();
-    const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth);
+    const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth, undefined, undefined, undefined, t.pick);
     if (!live) return;
     const item = { input: t.input, attachments: t.attachments ?? [], msgIds: t.msgIds };
     if (live.paused || live.busy) for (const id of t.msgIds ?? []) { const m = this.d.db.setDelivery(id, "queued"); if (m) this.d.emit({ type: "message.updated", message: m }); }

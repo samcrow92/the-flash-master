@@ -5,8 +5,9 @@ import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
 import {
   Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
-  Download, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Settings, SquareKanban, Trash2, Zap,
+  Download, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Search, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
+import { SHORTCUTS, shortcutLabel } from "../commands";
 
 const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
 
@@ -113,6 +114,8 @@ export function Sidebar() {
       <nav className="nav">
         <NavBtn active={isChat(st.masterChatId ?? "")} working={Object.values(st.agents).some((a) => a.role === "flashmaster" && a.status === "running")}
           onClick={() => st.masterChatId && st.openChat(st.masterChatId)} icon={<Zap size={17} />} label="Master chat" />
+        <NavBtn active={st.searchOpen} onClick={() => useStore.setState({ searchOpen: true })} icon={<Search size={17} />} label="Search chats"
+          extra={<kbd className="nav-kbd">{shortcutLabel(SHORTCUTS.search.keys, st.window?.platform === "darwin")}</kbd>} />
         <NavBtn active={view.kind === "agents"} onClick={() => st.setView({ kind: "agents" })} icon={<Bot size={17} />} label="Agents"
           extra={running > 0 && <span className="badge">{running}</span>} />
         <NavBtn active={view.kind === "dashboard"} onClick={() => st.setView({ kind: "dashboard" })} icon={<LayoutDashboard size={17} />} label="Dashboard" />

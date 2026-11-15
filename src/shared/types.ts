@@ -71,6 +71,20 @@ export interface Message {
   replyCount: number;
 }
 
+/** A message found by the chat search. `snippet` wraps each match in \u0002…\u0003 (drawn highlighted). */
+export interface SearchHit {
+  messageId: string;
+  chatId: string;
+  chatTitle: string;
+  projectId: string | null;
+  archived: boolean;
+  parentId: string | null; // thread root when the match is a thread reply
+  author: MessageAuthor;
+  role: string | null;
+  snippet: string;
+  createdAt: number;
+}
+
 /** One command or tool call shown under an agent reply: what ran, and what came back. */
 export interface ToolRun {
   id: string;
@@ -345,6 +359,8 @@ export type AppEvent =
   | { type: "message.delta"; messageId: string; chatId: string; delta: string }
   | { type: "message.tools"; messageId: string; chatId: string; tools: ToolRun[] }
   | { type: "message.updated"; message: Message }
+  /** Edit & resend / retry removed these messages (with the threads under them); parentId = their thread root. */
+  | { type: "messages.removed"; chatId: string; removed: { id: string; parentId: string | null }[] }
   | { type: "reaction.changed"; messageId: string; chatId: string; reactions: string[] }
   | { type: "agent.updated"; agent: AgentRun }
   | { type: "task.updated"; task: Task }
