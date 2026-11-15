@@ -24,7 +24,7 @@ import { prepareInstructions } from "./harness/instructions";
 import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
-  parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
+  parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
 export interface OrchestratorDeps {
@@ -917,7 +917,10 @@ export class Orchestrator {
       finalStatus = redirected ? "redirected" : status;
       if (redirected) text += "\n\n_↪ Redirected by your steering message._";
       else if (res.error) text += `\n\n⚠️ ${res.error}`;
-      const final = this.d.db.updateMessage(reply.id, { content: text.slice(base) || (status === "paused" ? "_(paused)_" : "_(no output)_"),
+      // Text-mode TOOL lines show in the reply's tool-call panel; don't repeat them in the prose.
+      const shown = live.textTools && status === "done" && !redirected && !switchedToText && !live.queue.length
+        ? stripTextToolCalls(text.slice(base), new Set(this.toolSetFor(live).map((x) => x.name))) : text.slice(base);
+      const final = this.d.db.updateMessage(reply.id, { content: shown || (shown !== text.slice(base) ? "" : status === "paused" ? "_(paused)_" : "_(no output)_"),
         status: res.stopReason === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
       this.d.emit({ type: "message.updated", message: final });
       const compact = resultForParent(text, t.role.maxResultTokens) + (live.branch ? `\nbranch: ${live.branch} (isolated copy; the user merges it)` : "");
