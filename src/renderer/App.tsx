@@ -13,6 +13,7 @@ import { MarketplaceView } from "./views/MarketplaceView";
 import { DocsView } from "./views/DocsView";
 import { ContextMenuHost } from "./components/ContextMenu";
 import { CommandPalette, useShortcuts } from "./components/CommandPalette";
+import { SearchDialog } from "./components/SearchDialog";
 import { TitleBar } from "./components/TitleBar";
 import { Dots } from "./components/Dots";
 import { Zap } from "./components/icons";
@@ -65,6 +66,7 @@ export function App() {
       </main>
       <ContextMenuHost />
       <CommandPalette />
+      <SearchDialog />
       <div className="toasts">
         {toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}
       </div>

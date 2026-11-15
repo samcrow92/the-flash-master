@@ -34,7 +34,7 @@ describe("keyboard shortcuts", () => {
       const parts = keys.split("+");
       const last = parts.pop()!;
       const k = { "↑": "ArrowUp", "↓": "ArrowDown", Esc: "Escape" }[last] ?? last.toLowerCase();
-      return key(k, { altKey: parts.includes("Alt") });
+      return key(k, { altKey: parts.includes("Alt"), shiftKey: parts.includes("Shift") });
     };
     for (const mac of [false, true]) {
       for (const [id, s] of Object.entries(SHORTCUTS) as [ShortcutId, { keys: string }][]) {

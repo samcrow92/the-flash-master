@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
+import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SearchHit, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { pickAgentChat } from "./agentChat";
 
@@ -55,6 +55,12 @@ interface State {
   update: UpdateState | null;
   setModels(m: HarnessModels): void;
   toasts: Toast[];
+  /** The chat search window (Ctrl/Cmd+Shift+F). */
+  searchOpen: boolean;
+  /** A message to scroll to and flash (from search); `at` makes repeat jumps to the same message fire again. */
+  focusMessage: { id: string; rootId: string | null; at: number } | null;
+  /** Open a search hit: its chat, its thread when it is a reply, then scroll to it. */
+  jumpTo(hit: Pick<SearchHit, "chatId" | "messageId" | "parentId">): Promise<void>;
 
   init(): Promise<void>;
   setView(v: View): void;
@@ -140,6 +146,15 @@ export const useStore = create<State>((set, get) => ({
     set((st) => ({ models: { ...st.models, [m.harness]: m } }));
   },
   toasts: [],
+  searchOpen: false,
+  focusMessage: null,
+
+  async jumpTo(hit) {
+    set({ searchOpen: false });
+    await get().openChat(hit.chatId);
+    if (hit.parentId) await get().openThread(hit.chatId, hit.parentId);
+    set({ focusMessage: { id: hit.messageId, rootId: hit.parentId, at: Date.now() } });
+  },
 
   async init() {
     const a = api();
@@ -303,6 +318,17 @@ export const useStore = create<State>((set, get) => ({
           messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], m.id, keep) ?? [] },
           threads: patchThreads(st.threads, m.id, keep),
         });
+        break;
+      }
+      case "messages.removed": {
+        const gone = new Set(e.removed.map((r) => r.id));
+        const lost = new Map<string, number>(); // thread root → replies removed from it
+        for (const r of e.removed) if (r.parentId && !gone.has(r.parentId)) lost.set(r.parentId, (lost.get(r.parentId) ?? 0) + 1);
+        const keep = (list: Message[]) => list.filter((m) => !gone.has(m.id))
+          .map((m) => (lost.has(m.id) ? { ...m, replyCount: Math.max(0, m.replyCount - lost.get(m.id)!) } : m));
+        const threads: Record<string, Message[]> = {};
+        for (const [root, list] of Object.entries(st.threads)) if (!gone.has(root)) threads[root] = keep(list);
+        set({ messages: st.messages[e.chatId] ? { ...st.messages, [e.chatId]: keep(st.messages[e.chatId]!) } : st.messages, threads });
         break;
       }
       case "reaction.changed": {
