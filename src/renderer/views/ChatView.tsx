@@ -146,13 +146,14 @@ export function ChatView({ chatId }: { chatId: string }) {
             {chatAgents.map((a) => (
               <span key={a.id} className={`agent-chip st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
                 <button className="chip-main" onClick={() => st.openFlow(chatId, a.id)}>
-                  <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /> {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
-                  {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}
+                  <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} />
+                  <span className="chip-label">{roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
+                    {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}</span>
                 </button>
-                {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
-                {a.status === "paused" && <button onClick={() => api().resumeAgent(a.id)} title="Resume"><Play size={12} /></button>}
-                {a.status === "interrupted" && <button onClick={() => void api().resumeInterrupted(a.id).catch((e) => st.toast("error", String(e?.message ?? e)))} title="Resume (the app closed while it was working)"><Play size={12} /></button>}
-                <button onClick={() => api().stopAgent(a.id)} title="Stop"><Square size={11} fill="currentColor" /></button>
+                {a.status === "running" && <button className="chip-act" onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
+                {a.status === "paused" && <button className="chip-act" onClick={() => api().resumeAgent(a.id)} title="Resume"><Play size={12} /></button>}
+                {a.status === "interrupted" && <button className="chip-act" onClick={() => void api().resumeInterrupted(a.id).catch((e) => st.toast("error", String(e?.message ?? e)))} title="Resume (the app closed while it was working)"><Play size={12} /></button>}
+                <button className="chip-act" onClick={() => api().stopAgent(a.id)} title="Stop"><Square size={10} fill="currentColor" /></button>
               </span>
             ))}
           </div>
