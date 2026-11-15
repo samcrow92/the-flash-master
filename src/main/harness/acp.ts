@@ -141,6 +141,10 @@ export class AcpSession implements HarnessSession {
   private peer: JsonRpcPeer;
   private exited = false;
   private stderrTail = "";
+  /** Text of a silent command (null = normal turn, events go to the chat). */
+  private quiet: string | null = null;
+  /** A silent command still running; the next prompt waits for it. */
+  private pendingQuiet: Promise<void> = Promise.resolve();
 
   constructor(command: string, args: string[], private o: SessionOptions) {
     this.child = spawnTool(command, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ["pipe", "pipe", "pipe"] });
@@ -200,13 +204,33 @@ export class AcpSession implements HarnessSession {
   }
 
   async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
+    await this.pendingQuiet;
+    let result: TurnResult;
     try {
       const r = await this.peer.request<Json>("session/prompt", { sessionId: this.sessionId, prompt: promptBlocks(text, attachments, this.caps) });
       const u = r?.usage ?? r?._meta?.usage;
       const usage = u ? { tokensIn: Number(u.inputTokens ?? u.input_tokens ?? 0), tokensOut: Number(u.outputTokens ?? u.output_tokens ?? 0) } : undefined;
-      return { stopReason: r?.stopReason ?? "end_turn", usage };
+      result = { stopReason: r?.stopReason ?? "end_turn", usage };
     } catch (e: any) {
       return { stopReason: "error", error: String(e?.message ?? e) };
+    }
+    if (this.o.onUsage && result.stopReason !== "error" && this.alive) this.pendingQuiet = this.reportUsage();
+    return result;
+  }
+
+  /** Runs the built-in /usage without showing it in the chat (only when advertised, so no model sees it). */
+  private async reportUsage(): Promise<void> {
+    const onUsage = this.o.onUsage!;
+    const sessionId = this.sessionId ?? "";
+    if (!this.commands.includes("usage")) { onUsage({ sessionId, text: null, commands: this.commands }); return; }
+    this.quiet = "";
+    try {
+      const r = await withTimeout(this.peer.request<Json>("session/prompt", { sessionId: this.sessionId, prompt: [{ type: "text", text: "/usage" }] }), 30000, "/usage timed out");
+      const text: string = this.quiet ?? "";
+      this.quiet = null;
+      if (r?.stopReason !== "error" && text.trim()) onUsage({ sessionId, text, commands: this.commands });
+    } catch { /* the meter just keeps the previous numbers */ } finally {
+      this.quiet = null;
     }
   }
 
@@ -231,6 +255,14 @@ export class AcpSession implements HarnessSession {
   private onNotification(method: string, p: Json): void {
     if (method !== "session/update") return;
     const u = p.update ?? {};
+    if (this.quiet !== null && u.sessionUpdate !== "available_commands_update") {
+      // A silent command (/usage): keep its text, show nothing in the chat.
+      if (u.sessionUpdate !== "agent_thought_chunk") {
+        const t = u.content?.text ?? (Array.isArray(u.content) ? u.content.map((c: Json) => c?.text ?? c?.content?.text ?? "").join("") : "");
+        if (typeof t === "string") this.quiet += t;
+      }
+      return;
+    }
     switch (u.sessionUpdate) {
       case "available_commands_update":
         this.commands = (u.availableCommands ?? []).map((c: Json) => String(c?.name ?? "").replace(/^\//, "")).filter(Boolean);

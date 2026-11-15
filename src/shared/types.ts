@@ -271,46 +271,44 @@ export interface UpdateState {
   feed: string;
 }
 
-/** This month's Copilot usage from GitHub's billing API, for usage-based billing. */
+/**
+ * This month's Copilot usage. Available credits come from Copilot via its existing sign-in (or the user's setting);
+ * the per-model breakdown from Copilot itself (/usage in the app's sessions + Copilot's session log).
+ */
 export interface CopilotBilling {
-  /** "ai-credits" since June 2026; "requests" for accounts still billed by premium requests. */
-  unit: "ai-credits" | "requests";
+  /** What Copilot counts in: credits, or premium requests on older plans. */
+  unit: "credits" | "requests";
   period: { year: number; month: number };
-  user: string;
-  /** Everything consumed this month. */
+  /** Everything Copilot reported for this month. */
   used: number;
-  /** Part of `used` covered by the plan's included allowance. */
-  included: number;
-  /** Part of `used` billed on top of the plan. */
-  billed: number;
-  /** USD before and after the included allowance. */
-  grossAmount: number;
-  netAmount: number;
-  pricePerUnit: number | null;
-  /** Included allowance per month (from Copilot or the user's setting); null when unknown. */
+  /** Copilot sessions counted, and how many of them were the app's own (live /usage). */
+  sessions: number;
+  appSessions: number;
+  /** Credits per month: from Copilot, else the user's setting; null when neither is known. */
   allowance: number | null;
-  /** Credits the monthly budget buys beyond the plan (budget / price per credit); null without a budget or price. */
-  budgetCredits: number | null;
-  /** Credits available this month in total: plan allowance + what the budget buys. null when neither is known. */
+  /** Same as allowance: the credits available this month in total. */
   availableTotal: number | null;
-  /** Credits still available now. From Copilot's own count when it gives one, else availableTotal − used. */
+  /** Credits still available: Copilot's own count, else availableTotal − used. */
   available: number | null;
-  availableFrom: "copilot" | "computed" | null;
-  /** Usage computed from the available credits: availableTotal − available (falls back to `used`). */
+  availableFrom: "copilot" | "setting" | null;
+  /** Usage computed from the available credits: availableTotal − available (`used` without a total). */
   usedOfAvailable: number;
+  /** Used beyond the plan (pay as you go), as Copilot counts it. */
+  overage: number;
+  unlimited: boolean;
+  plan: string | null;
+  /** Where the sign-in used to ask Copilot came from, e.g. "Copilot's sign-in (system keychain)". */
+  signIn: string | null;
   /** usedOfAvailable as % of availableTotal; null when the total is unknown. */
   percent: number | null;
-  /** Monthly spending budget in USD set in the app, and what is left of it. */
-  budget: number | null;
-  budgetRemaining: number | null;
   /** Largest consumer first; `share` is % of `used`. */
-  models: { model: string; quantity: number; amount: number; netAmount: number; share: number }[];
+  models: { model: string; quantity: number; share: number }[];
 }
 
 export interface CopilotUsage {
   ok: boolean;
-  /** "github" = billing API (account-wide, per model); "cli" = Copilot CLI's /usage text. */
-  source?: "github" | "cli";
+  /** "cli" = read from Copilot itself (/usage and its session log). */
+  source?: "cli";
   billing?: CopilotBilling;
   fetchedAt: number;
   error: string | null;

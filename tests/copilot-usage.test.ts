@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseCopilotUsage } from "../src/main/copilot-usage";
 import { AcpAdapter } from "../src/main/harness/acp";
+import { parseSessionUsage } from "../src/main/copilot-ledger";
 
 const FAKE = join(__dirname, "fixtures", "fake-acp-agent.mjs");
 
@@ -39,7 +40,7 @@ describe("running /usage over ACP", () => {
   it("sends /usage when the agent advertises it and returns the printed text", async () => {
     const r = await adapter.runCommand(probe(), "usage", true);
     expect(r.advertised).toBe(true);
-    expect(parseCopilotUsage(r.text).premium).toMatchObject({ used: 123, limit: 300, percent: 41 });
+    expect(parseSessionUsage(r.text)).toMatchObject({ total: 7, unit: "requests", models: { "claude-sonnet-4.5": 5, "gpt-5": 2 } });
   });
 
   it("does not send it when not advertised (no premium request spent)", async () => {
