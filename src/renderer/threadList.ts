@@ -20,6 +20,8 @@ export interface ThreadSummary {
   lastAt: number;
   /** An agent is still writing a reply in it. */
   working: boolean;
+  /** Archived: listed under "Archived" in the panel and folded to a small chip in the chat. */
+  archived: boolean;
 }
 
 /** One-line preview of a message for lists. */
@@ -48,9 +50,15 @@ export function chatThreads(roots: Message[], threads: Record<string, Message[] 
       replyCount: Math.max(root.replyCount, replies?.length ?? 0),
       lastAt: last?.createdAt ?? root.createdAt,
       working: !!replies?.some((r) => r.status === "streaming"),
+      archived: !!root.threadArchived,
     });
   }
   return out;
+}
+
+/** Split the panel's list: active threads on top, archived ones in their own section. */
+export function splitArchived(list: ThreadSummary[]): { active: ThreadSummary[]; archived: ThreadSummary[] } {
+  return { active: list.filter((t) => !t.archived), archived: list.filter((t) => t.archived) };
 }
 
 /**

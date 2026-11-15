@@ -594,6 +594,10 @@ const api: FlashApi = {
     orch.onReaction(messageId, emoji, reactions);
     return reactions;
   },
+  archiveThread: async (rootId, archived) => orch.archiveThread(String(rootId), !!archived),
+  deleteThread: async (rootId) => orch.deleteThread(String(rootId)),
+  deleteMessage: async (messageId) => orch.deleteMessage(String(messageId)),
+  clearChat: async (chatId) => orch.clearChat(String(chatId)),
   listAgents: async (f) => db.listAgents(f ?? {}),
   startAgent: async (i) => orch.startAgent(i.projectId, i.role, i.brief),
   pauseAgent: async (id) => orch.pause(id),
