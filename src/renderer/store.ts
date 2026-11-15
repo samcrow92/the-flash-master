@@ -72,7 +72,8 @@ interface State {
   setView(v: View): void;
   openChat(chatId: string): Promise<void>;
   /** Open an agent's chat: where it works now, else its latest chat in the current project, else a new one. */
-  chatWithAgent(role: string): Promise<void>;
+  /** Open the agent's chat (where it works now, its latest chat, or a new one); `showFlow: false` skips the progress overlay. */
+  chatWithAgent(role: string, opts?: { showFlow?: boolean }): Promise<void>;
   openThread(chatId: string, rootId: string): Promise<void>;
   closeThread(rootId: string): void;
   toggleThread(chatId: string, rootId: string): void;
@@ -208,13 +209,13 @@ export const useStore = create<State>((set, get) => ({
     set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
   },
 
-  async chatWithAgent(role) {
+  async chatWithAgent(role, opts) {
     const st = get();
     const t = pickAgentChat(role, { agents: st.agents, chats: st.chats, projectIds: st.projects.map((p) => p.id),
       currentProjectId: st.currentProjectId, masterChatId: st.masterChatId });
     if (t.kind === "open") {
       await st.openChat(t.chatId);
-      if (t.agentId) st.openFlow(t.chatId, t.agentId);
+      if (t.agentId && opts?.showFlow !== false) st.openFlow(t.chatId, t.agentId);
       return;
     }
     const r = st.roles.find((x) => x.name === role);

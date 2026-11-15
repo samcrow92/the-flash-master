@@ -203,3 +203,12 @@ describe("agents without a project", () => {
     expect(read("src/renderer/store.ts")).toMatch(/refreshChats\(null\)/);
   });
 });
+
+describe("specialists pill", () => {
+  // Clicking a specialist in the pill's list opens its chat (the one it works in, its latest, or a new one), not always a new chat.
+  it("opens the specialist's own chat", () => {
+    const tsx = read("src/renderer/components/SpecialistsPill.tsx");
+    expect(tsx).toMatch(/st\.chatWithAgent\(r\.name, \{ showFlow: false \}\)/);
+    expect(tsx).not.toMatch(/createChat\(/);
+  });
+});

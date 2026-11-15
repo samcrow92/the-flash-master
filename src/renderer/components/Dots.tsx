@@ -28,10 +28,13 @@ export function Dots({ pattern = "auto", cycle = false, size = 6, count, title, 
   }, [pattern, cycle]);
   const p = pattern === "auto" ? auto : pattern;
   const n = DOT_PATTERNS[p];
-  return (
-    <span key={p} className={`dots dots-${p} ${className}`} style={{ "--d": `${size}px`, "--n": n } as CSSProperties} title={title} role="status" aria-label={title ?? "Working"}>
+  const dots = (
+    <span key={p} className={`dots dots-${p} ${count && count > 1 ? "" : className}`} style={{ "--d": `${size}px`, "--n": n } as CSSProperties}
+      title={title} role="status" aria-label={title ?? "Working"}>
       {Array.from({ length: n }, (_, i) => <i key={i} style={{ "--i": i } as CSSProperties} />)}
-      {count && count > 1 ? <b>{count}</b> : null}
     </span>
   );
+  // The count sits beside the dots, never inside them: some patterns rotate the whole dots box (orbit, quad), which spun the number.
+  if (!count || count < 2) return dots;
+  return <span className={`dots-group ${className}`} title={title}>{dots}<b className="dots-count">{count}</b></span>;
 }
