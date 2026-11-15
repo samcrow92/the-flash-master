@@ -330,11 +330,33 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     // Chat search must answer through IPC (the main log says whether FTS5 or the LIKE fallback is in use).
     const search = await js<string>("window.flash.api.searchMessages('brake').then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
     log(search === "ok" ? "info" : "error", `smoke-search: ${search}`);
-    log("info", `smoke: ui=${ok}`);
     if (search !== "ok") { app.exit(1); return; }
-    app.exit(ok && iconOk ? 0 : 1);
+    // The integrated terminal: open it from the title bar, run a command in the real shell and see its output rendered.
+    const term = ok && !demo ? await smokeTerminal(js) : "skipped";
+    const termOk = term === "ok" || term === "skipped";
+    log(termOk ? "info" : "error", `smoke: ui=${ok} terminal=${term}`);
+    app.exit(ok && iconOk && termOk ? 0 : 1);
   } catch (e) {
     log("error", `smoke failed: ${String(e)}`);
     app.exit(2);
   }
+}
+
+/** Clicks the title bar's terminal button and runs a command whose output differs from what was typed. */
+async function smokeTerminal(js: <T = unknown>(code: string) => Promise<T>): Promise<string> {
+  const cmd = process.platform === "win32" ? "Write-Output ('flash'+'-smoke')" : "echo flash''-smoke";
+  for (let i = 0; i < 2; i++) {
+    const r = await js<string>(`(async () => {
+      const wait = async (f, ms) => { const end = Date.now() + ms; while (Date.now() < end) { const v = f(); if (v) return v; await new Promise((r) => setTimeout(r, 200)); } return null; };
+      if (!document.querySelector('.term-panel.open')) document.querySelector('.titlebar .term-toggle')?.click();
+      const view = await wait(() => document.querySelector('.term-panel.open .term-view.visible'), 15000);
+      if (!view) return 'no panel';
+      const rows = () => view.querySelector('.xterm-rows')?.textContent ?? '';
+      await wait(() => rows().trim().length > 0, 15000); // the prompt
+      await window.flash.api.terminalWrite(view.dataset.term, ${JSON.stringify(cmd + "\r")});
+      return (await wait(() => rows().split(${JSON.stringify(cmd)}).join('').includes('flash-smoke'), 20000)) ? 'ok' : 'no output: ' + rows().slice(-300);
+    })()`).catch((e) => `error: ${String(e)}`);
+    if (r === "ok" || i === 1) return r;
+  }
+  return "unreachable";
 }

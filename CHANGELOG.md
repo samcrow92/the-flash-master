@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Integrated terminal in the top bar.** A terminal button next to the light/dark toggle (or Ctrl+`) drops down a glass panel with a real shell: PowerShell on Windows (PowerShell 7 when installed), your login shell on macOS. It uses xterm.js, the terminal VS Code uses, on ConPTY.
+  - Starts in the current project's folder; several tabs, an expand button to fill the window, and hiding keeps the shells running.
+  - Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V pastes. The smoke test on every CI platform opens it and runs a command.
 - **Fix: taskbar icon on Windows.** The `.ico` stored every size as PNG, which some Windows icon paths (the taskbar among them) don't draw; small sizes are now classic bitmaps, with 20, 24 and 40 px added for scaled displays. The icon is found whether the app runs packaged, from `npm run dev` or straight from `out/main`, is logged at startup, and the smoke test on Windows CI fails if it doesn't load.
 - **Windows-style window controls, no title bar.** Minimise, maximise and close now sit at the top right like any Windows app, next to the light/dark toggle, with nothing drawn behind them. The lightning-bolt app icon is back at the top left of the window. macOS keeps its own traffic lights.
 - **Runs on macOS.** The app now works on Apple silicon and Intel Macs, with the system's own traffic lights and vibrancy.

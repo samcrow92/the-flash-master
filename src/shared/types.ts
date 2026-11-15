@@ -376,6 +376,8 @@ export type AppEvent =
   | { type: "update.state"; state: UpdateState }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "window.state"; state: WindowState }
+  | { type: "terminal.data"; id: string; data: string }
+  | { type: "terminal.exit"; id: string; code: number }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string };
 
 /** The app window, for the custom (frameless) title bar. `material` is the native blur behind the window, if any. */

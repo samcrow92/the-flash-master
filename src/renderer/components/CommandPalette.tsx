@@ -4,8 +4,9 @@ import { api, toggleTheme, useStore, type View } from "../store";
 import { chatOrder, matchShortcut, rankCommands, SHORTCUTS, shortcutLabel, stepChat, type Command, type ShortcutId } from "../commands";
 import { TABS as SETTINGS_TABS } from "../views/SettingsView";
 import { useMenu } from "./ContextMenu";
+import { toggleTerminal } from "./TerminalPanel";
 import {
-  BookOpen, Bot, ClipboardList, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SunMoon, TextCursorInput, Zap, RoleIcon,
+  BookOpen, Bot, ClipboardList, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
 } from "./icons";
 
 export const usePalette = create<{ open: boolean; setOpen(v: boolean): void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
@@ -70,6 +71,8 @@ export function useShortcuts(): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || !useStore.getState().ready) return;
+      // Keys typed in the integrated terminal belong to the shell (Ctrl+K, Ctrl+L, Esc in vim…), never to app shortcuts.
+      if (e.target instanceof Element && e.target.closest(".term-panel")) return;
       const id = matchShortcut(e, isMac());
       if (!id) return;
       if (id === "stop") {
@@ -112,6 +115,7 @@ function PaletteBox({ onClose }: { onClose: () => void }) {
       ...(currentChat && runningInChat(currentChat).length ? [{ id: "a:stop", group: "Action", label: "Stop agents in this chat", keywords: "cancel halt", icon: <Square size={14} />, run: () => runShortcut("stop"), shortcut: "stop" as const }] : []),
       ...(currentChat ? [{ id: "a:focus", group: "Action", label: "Focus the message box", keywords: "composer type write", icon: <TextCursorInput size={16} />, run: focusComposer, shortcut: "focusComposer" as const }] : []),
       { id: "a:search", group: "Action", label: "Search all chats", keywords: "find messages history", icon: <Search size={16} />, run: () => runShortcut("search"), shortcut: "search" },
+      { id: "a:terminal", group: "Action", label: "Show or hide the terminal", keywords: "shell console powershell command line", icon: <SquareTerminal size={16} />, run: () => toggleTerminal() },
       { id: "a:theme", group: "Action", label: "Switch light / dark theme", keywords: "appearance mode", icon: <SunMoon size={16} />, run: () => toggleTheme() },
     ];
     const order = chatOrder(st.masterChatId, st.projects.map((p) => p.id), st.chats);

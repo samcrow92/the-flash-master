@@ -15,6 +15,7 @@ import { ContextMenuHost } from "./components/ContextMenu";
 import { CommandPalette, useShortcuts } from "./components/CommandPalette";
 import { SearchDialog } from "./components/SearchDialog";
 import { TitleBar } from "./components/TitleBar";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { Dots } from "./components/Dots";
 import { Zap } from "./components/icons";
 
@@ -40,7 +41,8 @@ export function App() {
 
   return (
     <div className="shell">
-    <TitleBar />
+    <TitleBar terminal />
+    <TerminalPanel />
     <div className="app"
       onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}

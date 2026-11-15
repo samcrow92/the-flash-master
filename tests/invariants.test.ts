@@ -120,7 +120,7 @@ describe("window chrome", () => {
     const src = read("src/main/index.ts");
     expect(src).toMatch(/iconCandidates\(\{[^}]*process\.resourcesPath[^}]*app\.getAppPath\(\)[^}]*join\(here, "\.\.", "\.\."\)/);
     expect(src).toMatch(/runSmoke\(win!, log, appIcon\)/);
-    expect(read("src/main/smoke.ts")).toMatch(/app\.exit\(ok && iconOk \? 0 : 1\)/);
+    expect(read("src/main/smoke.ts")).toMatch(/app\.exit\(ok && iconOk && [^)]*\? 0 : 1\)/);
   });
   it("the frameless title bar shows the app icon and Windows-style caption buttons", () => {
     const tsx = read("src/renderer/components/TitleBar.tsx");
@@ -143,6 +143,36 @@ describe("role icons", () => {
   it("show activity through the glyph itself, not a circular ring", () => {
     expect(read("src/renderer/components/icons.tsx")).toMatch(/className="role-echo"/);
     for (const f of ["src/renderer/components/SpecialistsPill.tsx", "src/renderer/styles.css"]) expect(read(f)).not.toContain("activity-ring");
+  });
+});
+
+describe("native modules", () => {
+  // The main bundle inlines devDependencies; a native module can't be inlined, so it must be a runtime dependency
+  // (externalised by electron-vite, shipped by electron-builder) and unpacked from app.asar so its binaries can run.
+  it("every runtime dependency is a native module that electron-builder unpacks from asar", () => {
+    const pkg = JSON.parse(read("package.json")) as { dependencies?: Record<string, string> };
+    const builder = read("electron-builder.yml");
+    const deps = Object.keys(pkg.dependencies ?? {});
+    expect(deps).toEqual(["node-pty"]);
+    for (const d of deps) expect(builder, `${d} must be in asarUnpack`).toContain(`node_modules/${d}/**`);
+  });
+  it("node-pty's macOS spawn-helper is made executable after install", () => {
+    const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
+    expect(pkg.scripts.postinstall).toContain("scripts/fix-node-pty.mjs");
+  });
+  it("the smoke test fails when the integrated terminal can't run a command", () => {
+    const smoke = read("src/main/smoke.ts");
+    expect(smoke).toMatch(/const termOk = term === "ok"/);
+    expect(smoke).toMatch(/app\.exit\([^)]*termOk \? 0 : 1\)/);
+  });
+});
+
+describe("integrated terminal", () => {
+  // Esc used to stop the chat's agents and Ctrl+K/L/N opened app features while typing in the shell.
+  it("app-wide shortcuts ignore keys typed in the terminal", () => {
+    const src = read("src/renderer/components/CommandPalette.tsx");
+    const handler = src.slice(src.indexOf("export function useShortcuts"), src.indexOf("matchShortcut(e, isMac())"));
+    expect(handler).toMatch(/closest\("\.term-panel"\)\) return;/);
   });
 });
 

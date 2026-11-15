@@ -2,14 +2,15 @@ import { useEffect } from "react";
 import { api, toggleTheme, useStore } from "../store";
 import { Moon, Sun } from "./icons";
 import appIcon from "../assets/app-icon.png";
+import { TerminalButton } from "./TerminalPanel";
 
 /**
- * Frameless window chrome with no visible bar: the app icon floats at the top left, and the light/dark toggle plus
+ * Frameless window chrome with no visible bar: the app icon floats at the top left, and the terminal button, the light/dark toggle plus
  * Windows-style minimise · maximise · close buttons float at the top right. The empty strip between them stays a drag
  * handle (double-click maximises; Windows Snap still works through it).
  * On macOS the system draws its own traffic lights at the top left, so only a spacer is kept there.
  */
-export function TitleBar() {
+export function TitleBar({ terminal = false }: { terminal?: boolean }) {
   const ws = useStore((s) => s.window);
   const native = ws?.platform === "darwin";
   const blurred = ws ? !ws.focused : false;
@@ -27,6 +28,7 @@ export function TitleBar() {
     <header className={`titlebar ${blurred ? "blurred" : ""}`} onDoubleClick={(e) => { if (e.target === e.currentTarget) void api().windowControl("maximize"); }}>
       {native ? <span className="lights-spacer" /> : <img className="titlebar-icon" src={appIcon} alt="TheFlashMaster" draggable={false} />}
       <div className="titlebar-right">
+        {terminal && <TerminalButton />}
         <button className="theme-toggle" title={light ? "Switch to dark mode" : "Switch to light mode"} aria-label={light ? "Switch to dark mode" : "Switch to light mode"} onClick={() => void toggleTheme()}>
           <span key={light ? "moon" : "sun"} className="theme-icon">{light ? <Moon size={15} /> : <Sun size={15} />}</span>
         </button>

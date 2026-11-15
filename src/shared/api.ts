@@ -161,6 +161,12 @@ export interface FlashApi {
   // window (custom title bar)
   windowState(): Promise<WindowState>;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
+  // integrated terminal (title bar); output arrives as terminal.data / terminal.exit events
+  /** Start the user's shell (PowerShell on Windows, login shell elsewhere) in `cwd`, or the home folder. */
+  terminalOpen(input: { cols: number; rows: number; cwd?: string | null }): Promise<{ id: string; shell: string; cwd: string }>;
+  terminalWrite(id: string, data: string): Promise<void>;
+  terminalResize(id: string, cols: number, rows: number): Promise<void>;
+  terminalClose(id: string): Promise<void>;
 }
 
 export interface ExamSetupResult {
@@ -180,7 +186,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",
-  "windowState", "windowControl",
+  "windowState", "windowControl", "terminalOpen", "terminalWrite", "terminalResize", "terminalClose",
 ];
 
 export interface FlashBridge {
