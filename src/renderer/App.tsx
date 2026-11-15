@@ -19,6 +19,7 @@ import { TitleBar } from "./components/TitleBar";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { Dots } from "./components/Dots";
 import { Zap } from "./components/icons";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export function App() {
   const { ready, view, toasts, init, apply, toast } = useStore();
@@ -57,6 +58,7 @@ export function App() {
       {dragging && <div className="drop-hint">Drop agent .md files to import them</div>}
       <Sidebar />
       <main className="main" key={view.kind === "chat" ? "chat" : view.kind}>
+        <ErrorBoundary name="this view" resetKey={JSON.stringify(view)}>
         {view.kind === "chat" && <ChatView key={view.chatId} chatId={view.chatId} />}
         {view.kind === "agents" && <AgentsView />}
         {view.kind === "review" && <ReviewView agentId={view.agentId} />}
@@ -67,6 +69,7 @@ export function App() {
         {view.kind === "flow" && <FlowPage key={view.agentId} agentId={view.agentId} />}
         {view.kind === "marketplace" && <MarketplaceView />}
         {view.kind === "docs" && <DocsView initialPage={view.page} />}
+        </ErrorBoundary>
       </main>
       <ContextMenuHost />
       <CommandPalette />

@@ -31,6 +31,7 @@ import { DEFAULT_SETTINGS } from "@shared/settings";
 import { networkEnv } from "./orchestrator";
 import { prepareInstructions } from "./harness/instructions";
 import { makeLogger } from "./log";
+import { guardWebContents } from "./crash-guard";
 import { Marketplace, normaliseUrl } from "./marketplace";
 import { runSmoke } from "./smoke";
 import { iconCandidates } from "./app-icon";
@@ -866,6 +867,8 @@ function createWindow(): void {
   win.on("maximize", pushState).on("unmaximize", pushState).on("restore", pushState).on("focus", pushState).on("blur", pushState)
     .on("enter-full-screen", pushState).on("leave-full-screen", pushState);
   win.once("ready-to-show", () => win?.show());
+  const mainWin = win;
+  guardWebContents(mainWin.webContents, "main window", log, (reason) => void rendererGaveUp(mainWin, reason));
   win.on("closed", () => { terminals.closeAll(); for (const w of threadWins.values()) if (!w.isDestroyed()) w.close(); });
   // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
@@ -878,6 +881,18 @@ function createWindow(): void {
   else void win.loadFile(join(here, "../renderer/index.html"));
 }
 
+/** The renderer keeps crashing right after reloads: stop reloading and let the user choose. */
+async function rendererGaveUp(w: BrowserWindow | null, reason: string): Promise<void> {
+  if (!w || w.isDestroyed()) return;
+  const { response } = await dialog.showMessageBox(w, {
+    type: "error", buttons: ["Reload", "Quit"], defaultId: 0, cancelId: 1, title: "TheFlashMaster",
+    message: "The window stopped working several times in a row.",
+    detail: `Reason: ${reason}. Details are in ${join(dataDir, "logs", "main.log")}.`,
+  });
+  if (response === 0 && !w.isDestroyed()) w.webContents.reload();
+  else if (response === 1) app.quit();
+}
+
 /** A thread in its own window: same renderer, started on `#thread/<chat>/<root>`, which shows only that thread. */
 function openThreadWindow(chatId: string, rootId: string): void {
   const open = threadWins.get(rootId);
@@ -888,6 +903,7 @@ function openThreadWindow(chatId: string, rootId: string): void {
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   threadWins.set(rootId, w);
+  guardWebContents(w.webContents, "thread window", log, (reason) => void rendererGaveUp(w, reason));
   w.on("closed", () => threadWins.delete(rootId));
   w.once("ready-to-show", () => w.show());
   w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
@@ -897,6 +913,8 @@ function openThreadWindow(chatId: string, rootId: string): void {
   else void w.loadFile(join(here, "../renderer/index.html"), { hash });
 }
 
+// A crashed GPU process turns every window into a flat gray frame until Chromium restarts it: keep a record.
+app.on("child-process-gone", (_e, d) => { if (d.reason !== "clean-exit") log("error", `${d.type} process gone: ${d.reason} (exit ${d.exitCode})${d.name ? ` ${d.name}` : ""}`); });
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 
 /**
