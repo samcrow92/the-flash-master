@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SearchHit, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
-import { pickAgentChat } from "./agentChat";
+import { chatKey, pickAgentChat } from "./agentChat";
 
 export const api = () => window.flash.api;
 
@@ -74,7 +74,8 @@ interface State {
   openSideThread(chatId: string, rootId: string): void;
   closeSideThread(): void;
   refreshProjects(): Promise<void>;
-  refreshChats(projectId: string): Promise<void>;
+  /** Reload one project's chats, or (null) the chats that belong to no project. */
+  refreshChats(projectId: string | null): Promise<void>;
   upsertChat(c: Chat): void;
   removeChat(c: Chat): void;
   setSettings(s: Settings): void;
@@ -168,7 +169,7 @@ export const useStore = create<State>((set, get) => ({
       agents: Object.fromEntries(agents.map((x) => [x.id, x])), tasks: Object.fromEntries(tasks.map((t) => [t.id, t])), mcp,
       models: Object.fromEntries(models.filter((m) => m.fetchedAt).map((m) => [m.harness, m])),
     });
-    await Promise.all(projects.map((p) => get().refreshChats(p.id)));
+    await Promise.all([...projects.map((p) => get().refreshChats(p.id)), get().refreshChats(null)]);
     applyTheme(s.settings.general.theme);
     set({ ready: true });
     let last: string | null = null;
@@ -183,7 +184,8 @@ export const useStore = create<State>((set, get) => ({
   async openChat(chatId) {
     const chat = get().chatById[chatId];
     set({ view: { kind: "chat", chatId }, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
-      artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
+      // The master chat and "No project" chats have no project: don't keep the last one, or new agents would land in it.
+      artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat ? chat.projectId : get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
     set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
@@ -193,7 +195,6 @@ export const useStore = create<State>((set, get) => ({
     const st = get();
     const t = pickAgentChat(role, { agents: st.agents, chats: st.chats, projectIds: st.projects.map((p) => p.id),
       currentProjectId: st.currentProjectId, masterChatId: st.masterChatId });
-    if (t.kind === "no-project") { st.toast("warn", "Add a project folder first — specialists work inside a project."); return; }
     if (t.kind === "open") {
       await st.openChat(t.chatId);
       if (t.agentId) st.openFlow(t.chatId, t.agentId);
@@ -243,12 +244,14 @@ export const useStore = create<State>((set, get) => ({
 
   async refreshChats(projectId) {
     const list = await api().listChats(projectId);
-    set((st) => ({ chats: { ...st.chats, [projectId]: list }, chatById: { ...st.chatById, ...Object.fromEntries(list.map((c) => [c.id, c])) } }));
+    set((st) => ({ chats: { ...st.chats, [chatKey(projectId)]: list }, chatById: { ...st.chatById, ...Object.fromEntries(list.map((c) => [c.id, c])) } }));
   },
 
   upsertChat(c) {
+    // The master chat has its own nav entry; it is not one of the "No project" chats.
+    if (c.kind === "master") { set((st) => ({ chatById: { ...st.chatById, [c.id]: c } })); return; }
     set((st) => {
-      const key = c.projectId ?? "__none";
+      const key = chatKey(c.projectId);
       const list = st.chats[key] ?? [];
       const i = list.findIndex((x) => x.id === c.id);
       const next = i < 0 ? [...list, c] : list.map((x) => (x.id === c.id ? c : x));
@@ -258,7 +261,7 @@ export const useStore = create<State>((set, get) => ({
 
   removeChat(c) {
     set((st) => {
-      const key = c.projectId ?? "__none";
+      const key = chatKey(c.projectId);
       const { [c.id]: _gone, ...rest } = st.chatById;
       return { chats: { ...st.chats, [key]: (st.chats[key] ?? []).filter((x) => x.id !== c.id) }, chatById: rest };
     });
@@ -283,6 +286,7 @@ export const useStore = create<State>((set, get) => ({
         if (!st.chatById[m.chatId]) {
           // A chat created in the main process (e.g. startAgent): reload the chat lists.
           for (const p of st.projects) void st.refreshChats(p.id);
+          void st.refreshChats(null);
         }
         if (m.parentId === null) {
           if (st.messages[m.chatId]) set({ messages: { ...st.messages, [m.chatId]: upsertMsg(st.messages[m.chatId]!, m) } });

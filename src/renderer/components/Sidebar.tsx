@@ -8,6 +8,7 @@ import {
   Download, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Search, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
 import { SHORTCUTS, shortcutLabel } from "../commands";
+import { NO_PROJECT } from "../agentChat";
 
 const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
 
@@ -162,6 +163,9 @@ export function Sidebar() {
             </div>
           );
         })}
+        <NoProjectSection chats={st.chats[NO_PROJECT] ?? []} open={open[NO_PROJECT] ?? true} showArchived={!!showArchived[NO_PROJECT]}
+          onToggle={() => setOpen((o) => ({ ...o, [NO_PROJECT]: !(o[NO_PROJECT] ?? true) }))}
+          onToggleArchived={() => setShowArchived((o) => ({ ...o, [NO_PROJECT]: !o[NO_PROJECT] }))} row={chatRow} />
       </div>
 
       {st.update && ["available", "downloading", "ready"].includes(st.update.status) && (
@@ -177,6 +181,33 @@ export function Sidebar() {
         <button className={`nav-btn ${view.kind === "settings" ? "active" : ""}`} onClick={() => st.setView({ kind: "settings" })}><span className="nav-icon"><Settings size={17} /></span> Settings</button>
       </div>
     </aside>
+  );
+}
+
+/** Agents and chats whose project couldn't be determined (started from the master chat with no project selected). */
+function NoProjectSection({ chats: all, open, showArchived, onToggle, onToggleArchived, row }: {
+  chats: Chat[]; open: boolean; showArchived: boolean; onToggle: () => void; onToggleArchived: () => void; row: (c: Chat) => ReactNode;
+}) {
+  if (!all.length) return null;
+  const chats = all.filter((c) => !c.archived).sort(byPinned);
+  const archived = all.filter((c) => c.archived);
+  return (
+    <div className="project no-project">
+      <div className="project-row">
+        <button className="project-name" title="Chats and agents that don't belong to a project" onClick={onToggle}>
+          <ChevronRight size={14} className={`chev ${open ? "open" : ""}`} /> <span className="project-label">No project</span>
+        </button>
+      </div>
+      {open && <div className="chat-list">
+        {chats.map((c) => row(c))}
+        {archived.length > 0 && (
+          <button className="archived-toggle" onClick={onToggleArchived}>
+            <Archive size={12} /> {showArchived ? "Hide" : "Show"} archived ({archived.length})
+          </button>
+        )}
+        {showArchived && archived.map((c) => row(c))}
+      </div>}
+    </div>
   );
 }
 

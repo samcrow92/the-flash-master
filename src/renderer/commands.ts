@@ -1,4 +1,5 @@
 import type { Chat } from "@shared/types";
+import { NO_PROJECT } from "./agentChat";
 
 /**
  * App-wide keyboard shortcuts and command palette ranking (pure, so tests can cover them without a DOM).
@@ -43,11 +44,11 @@ export function shortcutLabel(keys: string, mac: boolean): string {
   return keys.replace("Mod+", "⌘").replace("Alt+", "⌥").replace("Shift+", "⇧");
 }
 
-/** Chats in the order the sidebar shows them: master chat, then each project's open chats (pinned first). */
+/** Chats in the order the sidebar shows them: master chat, each project's open chats (pinned first), then "No project". */
 export function chatOrder(masterChatId: string | null, projectIds: string[], chats: Record<string, Chat[]>): string[] {
   const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
   const ids = masterChatId ? [masterChatId] : [];
-  for (const p of projectIds) ids.push(...(chats[p] ?? []).filter((c) => !c.archived).sort(byPinned).map((c) => c.id));
+  for (const p of [...projectIds, NO_PROJECT]) ids.push(...(chats[p] ?? []).filter((c) => !c.archived).sort(byPinned).map((c) => c.id));
   return ids;
 }
 

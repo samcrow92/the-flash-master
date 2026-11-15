@@ -26,8 +26,8 @@ export function SpecialistsPill() {
   }, [open]);
 
   const start = async (role: string) => {
-    const pid = st.currentProjectId ?? st.projects[0]?.id;
-    if (!pid) { st.toast("warn", "Add a project folder first — specialists work inside a project."); return; }
+    // No project selected (master chat, "No project" chat): the new chat goes to "No project", never the first project.
+    const pid = st.currentProjectId;
     const r = st.roles.find((x) => x.name === role);
     const c = await api().createChat({ projectId: pid, agentRole: role, title: r?.title ?? role });
     st.upsertChat(c);
