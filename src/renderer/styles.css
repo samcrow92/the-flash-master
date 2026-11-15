@@ -1217,3 +1217,24 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .projects { overflow-x: hidden; }
 .project-name { min-width: 0; flex: 1; }
 .project-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ===================== command palette (Ctrl/Cmd+K) ===================== */
+.palette-back { position: fixed; inset: 0; z-index: 900; display: flex; justify-content: center; align-items: flex-start; padding: 14vh 16px 0;
+  background: rgba(0, 0, 0, .22); backdrop-filter: blur(4px); animation: fade-in .14s ease-out; }
+.palette { width: min(620px, 100%); max-height: 64vh; display: flex; flex-direction: column; overflow: hidden; border-radius: 18px;
+  background: var(--glass-strong); border: 1px solid var(--rim); backdrop-filter: blur(40px) saturate(180%); box-shadow: var(--hi), var(--shadow);
+  animation: menu-pop .16s cubic-bezier(.2, .9, .3, 1.2); transform-origin: top center; }
+.pal-input { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.pal-input input { flex: 1; background: none; border: none; outline: none; box-shadow: none; padding: 2px 0; font-size: 15px; color: var(--fg); }
+.pal-list { overflow: auto; padding: 6px; }
+.pal-item { display: flex; align-items: center; gap: 10px; width: 100%; border: none; border-radius: 10px; background: none; box-shadow: none; padding: 7px 10px; text-align: left; font-size: 13.5px; }
+.pal-item:hover { background: none; }
+.pal-item.sel, .pal-item.sel:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.pal-icon { width: 20px; display: inline-grid; place-content: center; color: var(--muted); flex: none; }
+.pal-item.sel .pal-icon { color: var(--accent); }
+.pal-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-hint { margin-left: 8px; font-size: 12px; color: var(--muted); }
+.pal-group { font-size: 11.5px; color: var(--muted); flex: none; }
+.pal-empty { padding: 18px; text-align: center; color: var(--muted); font-size: 13px; }
+.pal-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.palette kbd { font: 11px/1 var(--mono, ui-monospace, monospace); padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: color-mix(in srgb, var(--bg3) 70%, transparent); color: var(--muted); flex: none; }

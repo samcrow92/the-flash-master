@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, Chat, DriveMode } from "@shared/types";
 import { DRIVE_MODES } from "@shared/types";
 import type { ReactNode } from "react";
 import { api, useStore } from "../store";
+import { draftKey, drafts } from "../drafts";
 import { RoleIcon, ArrowUp, AtSign, File, Flag, Home, Hourglass, Leaf, Paperclip, Plane, RotateCcw, Settings, Slash, Sofa, Sparkles, CornerDownRight, X } from "./icons";
 
 const MODE_META: Record<DriveMode, { label: string; icon: ReactNode; hint: string }> = {
@@ -19,12 +20,21 @@ const toBase64 = (f: File) => new Promise<string>((res, rej) => {
   r.readAsDataURL(f);
 });
 
-/** Chat input: text, attachments (attach / paste / drop), @agents, /commands, superpowers, autopilot, queue-or-steer while busy. */
-export function Composer({ chat, parentId, placeholder, busy, compact }: { chat: Chat; parentId: string | null; placeholder: string; busy: boolean; compact?: boolean }) {
+type ComposerProps = { chat: Chat; parentId: string | null; placeholder: string; busy: boolean; compact?: boolean };
+
+/** Chat input: text, attachments (attach / paste / drop), @agents, /commands, superpowers, autopilot, queue-or-steer while busy.
+ *  Keyed by chat and thread so each one keeps its own draft. */
+export function Composer(props: ComposerProps) {
+  return <ComposerBox key={draftKey(props.chat.id, props.parentId)} {...props} />;
+}
+
+function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerProps) {
   const { roles, skills, toast, settings, upsertChat } = useStore();
-  const [text, setText] = useState("");
+  const key = draftKey(chat.id, parentId);
+  const [text, setText] = useState(() => drafts.get(key).text);
   const [sel, setSel] = useState(0);
-  const [atts, setAtts] = useState<Attachment[]>([]);
+  const [atts, setAtts] = useState<Attachment[]>(() => drafts.get(key).attachments);
+  useEffect(() => { drafts.set(key, { text, attachments: atts }); }, [key, text, atts]);
   const [uploading, setUploading] = useState(0);
   const [whileBusy, setWhileBusy] = useState<"queue" | "steer">(settings?.chat.defaultSendWhileBusy ?? "steer");
   const [resetting, setResetting] = useState(false);
@@ -35,6 +45,13 @@ export function Composer({ chat, parentId, placeholder, busy, compact }: { chat:
   };
   const [dragOver, setDragOver] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
+  // Ctrl/Cmd+L and the command palette focus the main composer of the open chat.
+  useEffect(() => {
+    if (parentId) return;
+    const focus = () => { ta.current?.focus(); const n = ta.current?.value.length ?? 0; ta.current?.setSelectionRange(n, n); };
+    window.addEventListener("flash:focus-composer", focus);
+    return () => window.removeEventListener("flash:focus-composer", focus);
+  }, [parentId]);
 
   const suggestions = useMemo(() => {
     const at = /^@([\w-]*)$/.exec(text);

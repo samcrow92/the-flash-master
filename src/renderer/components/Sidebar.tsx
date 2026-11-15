@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Chat, Project } from "@shared/types";
 import { api, useStore } from "../store";
 import { UserAvatar } from "./UserAvatar";
@@ -18,6 +18,9 @@ export function Sidebar() {
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const view = st.view;
   const isChat = (id: string) => view.kind === "chat" && view.chatId === id;
+  // Opening a chat from the palette or a shortcut reveals it here too.
+  const currentProject = st.currentProjectId;
+  useEffect(() => { if (currentProject) setOpen((o) => (o[currentProject] ? o : { ...o, [currentProject]: true })); }, [currentProject]);
   const isBusy = (chatId: string) => Object.values(st.agents).some((a) => a.chatId === chatId && a.status === "running");
 
   const addProject = async () => {
