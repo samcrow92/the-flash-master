@@ -1409,6 +1409,18 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .tpl-jump { flex: none; margin-top: 6px; opacity: 0; transition: opacity .15s; }
 .tpl-item:hover .tpl-jump, .tpl-jump:focus-visible { opacity: 1; }
 .tpl-body { animation: it-item-in .36s var(--it-ease) both; }
+/* Archived threads: a quiet section at the end of the panel list, folded by default. */
+.tpl-archived { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tpl-archived-head { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600;
+  color: var(--muted); background: transparent; border: none; box-shadow: none; border-radius: 999px; }
+.tpl-archived-head:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.tpl-archived-head .tpl-chev { margin-top: 0; }
+.tpl-archived.open .tpl-archived-head .tpl-chev { transform: rotate(90deg); }
+.tpl-archived .tpl-item:not(.open) { opacity: .72; }
+/* An archived thread in the chat: a small muted chip instead of the "N replies" pill. */
+.thread-pill.archived { color: var(--muted); background: color-mix(in srgb, var(--fg) 5%, transparent); padding-left: 8px; }
+.thread-pill.archived:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 9%, transparent); box-shadow: none; }
+.it-archived-note { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
 .tpl-replies { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 2px 4px; }
 .tpl-replies .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 8px; animation: none; }
 .tpl-replies .msg-body { min-width: 0; }

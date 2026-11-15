@@ -14,8 +14,9 @@ import { Composer } from "../components/Composer";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
+import { AppWindow, Archive, ArchiveRestore, ChevronDown, Eraser, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
 import { Dots } from "../components/Dots";
+import { archiveThread, clearChat, deleteMessage, threadMenu } from "../threadActions";
 import { SpecialistsPill } from "../components/SpecialistsPill";
 import { AgentsPill } from "../components/AgentsPill";
 import { ThreadsPanel } from "./ThreadsPanel";
@@ -134,6 +135,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
                 { label: chat.pinned ? "Unpin" : "Pin to top", icon: chat.pinned ? <PinOff size={15} /> : <Pin size={15} />, onClick: () => update({ pinned: !chat.pinned }) }] : []),
               { label: "Reset context", icon: <RotateCcw size={15} />, disabled: busy, onClick: () => api().resetContext(chatId).catch((er) => st.toast("warn", String(er?.message ?? er))) },
               { label: "Copy as Markdown", icon: <Copy size={15} />, onClick: async () => { await navigator.clipboard.writeText(await api().exportChat(chatId)); st.toast("info", "Chat copied as Markdown"); } },
+              { label: "Clear chat…", icon: <Eraser size={15} />, danger: true, disabled: busy, hint: busy ? "Stop the agents first" : undefined, onClick: () => void clearChat(chat) },
               ...(!isMaster ? [{ separator: true, label: "" },
                 { label: "Archive", icon: <Archive size={15} />, onClick: async () => { st.upsertChat(await api().updateChat(chatId, { archived: true, pinned: false })); leave(); } },
                 { label: "Delete", icon: <Trash2 size={15} />, danger: true, onClick: async () => {
@@ -283,6 +285,7 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
             <button onClick={() => navigator.clipboard.writeText(m.content)} title="Copy"><Copy size={13} /></button>
             {rewind === "edit" && !editing && <button onClick={() => setEditing(true)} title="Edit and send again — the replies after it are replaced"><Pencil size={13} /> Edit</button>}
             {rewind === "retry" && <button onClick={(e) => openMenu(e, retryMenu(m), true)} title="Run this turn again, on the same or another model"><RefreshCw size={13} /> Retry</button>}
+            {m.status !== "streaming" && <button className="msg-delete" onClick={() => void deleteMessage(m)} title={!inThread && m.replyCount > 0 ? "Delete this message and its thread" : "Delete this message"}><Trash2 size={13} /></button>}
           </div>
           {picker && <div className="emoji-picker">{EMOJIS.map((e, i) => <button key={e} style={{ animationDelay: `${i * 22}ms` }} title={REACTIONS[e]?.label} onClick={() => react(e)}><ReactionIcon emoji={e} size={17} /></button>)}</div>}
         </div>
@@ -347,6 +350,15 @@ export function ThreadPill({ root, open, inPanel, onClick }: { root: Message; op
   const faces: Message[] = [];
   for (const r of replies ?? []) if (!faces.some((f) => f.author === r.author && f.role === r.role)) faces.push(r);
   const last = replies?.at(-1);
+  if (root.threadArchived) {
+    return (
+      <button className={`thread-pill archived ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open}
+        title={open ? "Collapse archived thread" : "Archived thread — click to look inside or restore it"}>
+        <Archive size={12} /><span className="tp-count">Archived thread · {plural(root.replyCount)}</span>
+        <ChevronDown size={13} className="tp-chev" />
+      </button>
+    );
+  }
   return (
     <button className={`thread-pill ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open} title={open ? "Collapse thread" : "Expand thread"}>
       <span className="tp-faces">
@@ -412,7 +424,10 @@ function ThreadCard({ root }: { root: Message }) {
           <header className="it-head">
             <span className="it-title"><MessageCircle size={14} /> Thread</span>
             <span className="it-sub">{n ? plural(n) : "No replies yet"}</span>
+            {root.threadArchived && <span className="it-archived-note"><Archive size={12} /> Archived</span>}
             <span className="it-tools">
+              {root.threadArchived && <button className="it-collapse" title="Restore thread" onClick={() => void archiveThread(root, false)}><ArchiveRestore size={14} /></button>}
+              <button className="it-collapse" title="Thread actions" aria-label="Thread actions" onClick={(e) => openMenu(e, threadMenu(root), true)}><MoreHorizontal size={14} /></button>
               <button className="it-collapse" title="Show in Threads panel" onClick={() => useStore.getState().openSideThread(root.chatId, root.id)}><PanelRight size={14} /></button>
               <button className="it-collapse" title="Open in new window" onClick={() => void api().openThreadWindow(root.chatId, root.id)}><AppWindow size={14} /></button>
               <button className="it-collapse" title="Collapse thread" onClick={() => useStore.getState().closeThread(root.id)}><ChevronUp size={15} /></button>

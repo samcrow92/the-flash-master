@@ -348,7 +348,7 @@ export const useStore = create<State>((set, get) => ({
         } else {
           const root = m.parentId;
           set({
-            messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], root, (r) => ({ ...r, replyCount: r.replyCount + 1 })) ?? [] },
+            messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], root, (r) => ({ ...r, replyCount: r.replyCount + 1, threadArchived: undefined })) ?? [] },
             threads: st.threads[root] ? { ...st.threads, [root]: upsertMsg(st.threads[root], m) } : st.threads,
           });
         }

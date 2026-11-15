@@ -50,6 +50,14 @@ export interface FlashApi {
   /** A whole chat (an agent's dedicated chat) in its own window; focuses the window if that chat is already open in one. */
   openChatWindow(chatId: string): Promise<void>;
   toggleReaction(messageId: string, emoji: string): Promise<string[]>;
+  /** Archive (hide) or restore the thread under a message; returns the updated root message. */
+  archiveThread(rootId: string, archived: boolean): Promise<Message>;
+  /** Delete a thread's replies for good (the message it hangs off stays). Refused while an agent is working in it. */
+  deleteThread(rootId: string): Promise<void>;
+  /** Delete one message and the thread under it (cleanup). Refused while it is still being written. */
+  deleteMessage(messageId: string): Promise<void>;
+  /** Delete every message of a chat; its agents start fresh. Refused while an agent is working there. */
+  clearChat(chatId: string): Promise<void>;
   /** Search messages across all chats (full text), best matches first. */
   searchMessages(query: string, limit?: number): Promise<SearchHit[]>;
   /** Change your last message in its chat or thread and send it again; the replies after it are removed. */
@@ -201,7 +209,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "openChatWindow", "toggleReaction", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "openChatWindow", "toggleReaction", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

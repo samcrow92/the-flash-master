@@ -69,6 +69,8 @@ export interface Message {
   tools?: ToolRun[];
   reactions: string[];
   replyCount: number;
+  /** Root messages only: its thread is archived (hidden from the Threads panel and inline; restorable). */
+  threadArchived?: boolean;
 }
 
 /** A message found by the chat search. `snippet` wraps each match in \u0002…\u0003 (drawn highlighted). */
