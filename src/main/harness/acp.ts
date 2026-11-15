@@ -129,6 +129,7 @@ const asKind = (k: unknown): ToolKind => (KINDS.includes(k as ToolKind) ? (k as 
 
 export class AcpSession implements HarnessSession {
   sessionId: string | null = null;
+  resumed = false;
   models: ModelInfo[] = [];
   private seenDiffs = new Set<string>();
   private toolTitles = new Map<string, string>();
@@ -145,6 +146,8 @@ export class AcpSession implements HarnessSession {
   private quiet: string | null = null;
   /** A silent command still running; the next prompt waits for it. */
   private pendingQuiet: Promise<void> = Promise.resolve();
+  /** session/load replays the whole conversation as updates before it answers: that history is already in the chat. */
+  private replaying = false;
 
   constructor(command: string, args: string[], private o: SessionOptions) {
     this.child = spawnTool(command, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ["pipe", "pipe", "pipe"] });
@@ -174,10 +177,14 @@ export class AcpSession implements HarnessSession {
     }));
     let resp: Json | undefined;
     if (this.o.resumeSessionId) {
+      this.replaying = true;
       try {
         resp = await this.peer.request("session/load", { sessionId: this.o.resumeSessionId, cwd: this.o.cwd, mcpServers });
         this.sessionId = this.o.resumeSessionId;
-      } catch { /* agent may not support loadSession — fall through to a new session */ }
+        this.resumed = true;
+      } catch { /* agent may not support loadSession — fall through to a new session */ } finally {
+        this.replaying = false;
+      }
     }
     if (!this.sessionId) {
       resp = await this.peer.request<Json>("session/new", { cwd: this.o.cwd, mcpServers });
@@ -255,6 +262,7 @@ export class AcpSession implements HarnessSession {
   private onNotification(method: string, p: Json): void {
     if (method !== "session/update") return;
     const u = p.update ?? {};
+    if (this.replaying && u.sessionUpdate !== "available_commands_update") return;
     if (this.quiet !== null && u.sessionUpdate !== "available_commands_update") {
       // A silent command (/usage): keep its text, show nothing in the chat.
       if (u.sessionUpdate !== "agent_thought_chunk") {

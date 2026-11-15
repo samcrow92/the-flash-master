@@ -1,12 +1,14 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Chat, Project } from "@shared/types";
 import { api, useStore } from "../store";
 import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
 import {
   Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
-  Download, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Settings, SquareKanban, Trash2, Zap,
+  Download, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Search, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
+import { SHORTCUTS, shortcutLabel } from "../commands";
+import { NO_PROJECT } from "../agentChat";
 
 const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
 
@@ -18,6 +20,9 @@ export function Sidebar() {
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const view = st.view;
   const isChat = (id: string) => view.kind === "chat" && view.chatId === id;
+  // Opening a chat from the palette or a shortcut reveals it here too.
+  const currentProject = st.currentProjectId;
+  useEffect(() => { if (currentProject) setOpen((o) => (o[currentProject] ? o : { ...o, [currentProject]: true })); }, [currentProject]);
   const isBusy = (chatId: string) => Object.values(st.agents).some((a) => a.chatId === chatId && a.status === "running");
 
   const addProject = async () => {
@@ -110,6 +115,8 @@ export function Sidebar() {
       <nav className="nav">
         <NavBtn active={isChat(st.masterChatId ?? "")} working={Object.values(st.agents).some((a) => a.role === "flashmaster" && a.status === "running")}
           onClick={() => st.masterChatId && st.openChat(st.masterChatId)} icon={<Zap size={17} />} label="Master chat" />
+        <NavBtn active={st.searchOpen} onClick={() => useStore.setState({ searchOpen: true })} icon={<Search size={17} />} label="Search chats"
+          extra={<kbd className="nav-kbd">{shortcutLabel(SHORTCUTS.search.keys, st.window?.platform === "darwin")}</kbd>} />
         <NavBtn active={view.kind === "agents"} onClick={() => st.setView({ kind: "agents" })} icon={<Bot size={17} />} label="Agents"
           extra={running > 0 && <span className="badge">{running}</span>} />
         <NavBtn active={view.kind === "dashboard"} onClick={() => st.setView({ kind: "dashboard" })} icon={<LayoutDashboard size={17} />} label="Dashboard" />
@@ -156,6 +163,9 @@ export function Sidebar() {
             </div>
           );
         })}
+        <NoProjectSection chats={st.chats[NO_PROJECT] ?? []} open={open[NO_PROJECT] ?? true} showArchived={!!showArchived[NO_PROJECT]}
+          onToggle={() => setOpen((o) => ({ ...o, [NO_PROJECT]: !(o[NO_PROJECT] ?? true) }))}
+          onToggleArchived={() => setShowArchived((o) => ({ ...o, [NO_PROJECT]: !o[NO_PROJECT] }))} row={chatRow} />
       </div>
 
       {st.update && ["available", "downloading", "ready"].includes(st.update.status) && (
@@ -171,6 +181,33 @@ export function Sidebar() {
         <button className={`nav-btn ${view.kind === "settings" ? "active" : ""}`} onClick={() => st.setView({ kind: "settings" })}><span className="nav-icon"><Settings size={17} /></span> Settings</button>
       </div>
     </aside>
+  );
+}
+
+/** Agents and chats whose project couldn't be determined (started from the master chat with no project selected). */
+function NoProjectSection({ chats: all, open, showArchived, onToggle, onToggleArchived, row }: {
+  chats: Chat[]; open: boolean; showArchived: boolean; onToggle: () => void; onToggleArchived: () => void; row: (c: Chat) => ReactNode;
+}) {
+  if (!all.length) return null;
+  const chats = all.filter((c) => !c.archived).sort(byPinned);
+  const archived = all.filter((c) => c.archived);
+  return (
+    <div className="project no-project">
+      <div className="project-row">
+        <button className="project-name" title="Chats and agents that don't belong to a project" onClick={onToggle}>
+          <ChevronRight size={14} className={`chev ${open ? "open" : ""}`} /> <span className="project-label">No project</span>
+        </button>
+      </div>
+      {open && <div className="chat-list">
+        {chats.map((c) => row(c))}
+        {archived.length > 0 && (
+          <button className="archived-toggle" onClick={onToggleArchived}>
+            <Archive size={12} /> {showArchived ? "Hide" : "Show"} archived ({archived.length})
+          </button>
+        )}
+        {showArchived && archived.map((c) => row(c))}
+      </div>}
+    </div>
   );
 }
 

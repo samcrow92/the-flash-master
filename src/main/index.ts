@@ -74,6 +74,7 @@ log("info", `starting TheFlashMaster ${app.getVersion()}`);
 if (appIcon.isEmpty()) log("error", "app icon not found or unreadable: windows and the taskbar fall back to the default icon");
 else log("info", `app icon: ${appIcon.file} (${appIcon.getSize().width} px)`);
 const db = new Db(join(dataDir, "flashmaster.db"));
+log("info", `message search index: ${db.searchIndex}`);
 db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
 settings.onChange((st) => { db.defaultAutopilot = st.general.autopilotDefault !== false; });
 const interruptedAtStart = db.interruptOrphans();
@@ -580,6 +581,9 @@ const api: FlashApi = {
     await shell.openPath(path);
   },
   openThreadWindow: async (chatId, rootId) => openThreadWindow(chatId, rootId),
+  searchMessages: async (query, limit) => db.searchMessages(String(query ?? ""), Math.min(Math.max(Number(limit) || 50, 1), 200)),
+  editMessage: async (i) => orch.editAndResend(i.messageId, i.content),
+  retryMessage: async (i) => orch.retryReply(i.messageId, i.harness ? { harness: i.harness, model: i.model ?? null } : undefined),
   toggleReaction: async (messageId, emoji) => {
     const reactions = db.toggleReaction(messageId, emoji);
     const m = db.getMessage(messageId);

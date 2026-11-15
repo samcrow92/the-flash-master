@@ -13,7 +13,7 @@ import { ModelInput } from "../components/ModelInput";
 import { unitName } from "@shared/usage-label";
 import { configUri, isGcWebLink } from "@shared/rm-config";
 
-const TABS = [
+export const TABS = [
   ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["usage", "Usage"], ["permissions", "Permissions"],
   ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
 ] as const;

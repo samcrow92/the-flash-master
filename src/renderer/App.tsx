@@ -12,6 +12,8 @@ import { FlowPage } from "./views/FlowView";
 import { MarketplaceView } from "./views/MarketplaceView";
 import { DocsView } from "./views/DocsView";
 import { ContextMenuHost } from "./components/ContextMenu";
+import { CommandPalette, useShortcuts } from "./components/CommandPalette";
+import { SearchDialog } from "./components/SearchDialog";
 import { TitleBar } from "./components/TitleBar";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { Dots } from "./components/Dots";
@@ -20,6 +22,7 @@ import { Zap } from "./components/icons";
 export function App() {
   const { ready, view, toasts, init, apply, toast } = useStore();
   const [dragging, setDragging] = useState(false);
+  useShortcuts();
 
   useEffect(() => {
     const off = window.flash.onEvent((e) => apply(e));
@@ -64,6 +67,8 @@ export function App() {
         {view.kind === "docs" && <DocsView initialPage={view.page} />}
       </main>
       <ContextMenuHost />
+      <CommandPalette />
+      <SearchDialog />
       <div className="toasts">
         {toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}
       </div>

@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, Task, TaskStatus, ToolRun, UsageSummary,
+  AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, SearchHit, Task, TaskStatus, ToolRun, UsageSummary,
 } from "@shared/types";
 
 export const MIGRATIONS: string[] = [
@@ -58,6 +58,8 @@ export const newId = () => randomUUID();
 export class Db {
   readonly raw: DatabaseSync;
   private seq = 0;
+  /** Full-text search over messages: "fts" when this SQLite has FTS5, else a plain LIKE scan. */
+  readonly searchIndex: "fts" | "like";
   /** Autopilot for new chats (Settings → General → Autopilot for new chats). */
   defaultAutopilot = true;
 
@@ -65,6 +67,7 @@ export class Db {
     this.raw = new DatabaseSync(file);
     this.raw.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;");
     this.migrate();
+    this.searchIndex = this.ensureSearchIndex();
     const r = this.raw.prepare("SELECT COALESCE(MAX(seq),0) AS s FROM messages").get() as Row;
     this.seq = Number(r.s);
   }
@@ -86,6 +89,37 @@ export class Db {
 
   close(): void {
     this.raw.close();
+  }
+
+  /**
+   * Message search index (FTS5), kept in step with `messages` by triggers. Deliberately not a migration: a SQLite
+   * build without FTS5 must still open the database, so this is created idempotently and search falls back to LIKE.
+   * The index row id is the message's `seq` (unique and stable, unlike the implicit rowid of a TEXT-keyed table).
+   */
+  private ensureSearchIndex(): "fts" | "like" {
+    try {
+      const fresh = !this.get("SELECT 1 FROM sqlite_master WHERE name='messages_fts'");
+      this.raw.exec("BEGIN");
+      try {
+        this.raw.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, tokenize='unicode61 remove_diacritics 2');
+          CREATE INDEX IF NOT EXISTS messages_seq ON messages(seq);
+          CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+            INSERT INTO messages_fts(rowid, content) VALUES (new.seq, new.content); END;
+          CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+            DELETE FROM messages_fts WHERE rowid = old.seq; END;
+          CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages WHEN new.content IS NOT old.content BEGIN
+            DELETE FROM messages_fts WHERE rowid = old.seq;
+            INSERT INTO messages_fts(rowid, content) VALUES (new.seq, new.content); END;`);
+        if (fresh) this.raw.exec("INSERT INTO messages_fts(rowid, content) SELECT seq, content FROM messages");
+        this.raw.exec("COMMIT");
+      } catch (e) {
+        this.raw.exec("ROLLBACK");
+        throw e;
+      }
+      return "fts";
+    } catch {
+      return "like";
+    }
   }
 
   private all(sql: string, ...p: any[]): Row[] {
@@ -225,6 +259,55 @@ export class Db {
     this.run("UPDATE messages SET meta=? WHERE id=?", JSON.stringify(meta), id);
     return this.getMessage(id);
   }
+  /** Edit a user message's text; it is no longer a steering/queued message (it is sent again as a normal one). */
+  editMessage(id: string, content: string): Message {
+    const r = this.get("SELECT meta FROM messages WHERE id=?", id);
+    if (!r) throw new Error(`message ${id} not found`);
+    let meta: Record<string, unknown> = {};
+    try { meta = r.meta ? JSON.parse(r.meta as string) : {}; } catch { /* ignore */ }
+    delete meta.steer;
+    delete meta.delivery;
+    this.run("UPDATE messages SET content=?, meta=? WHERE id=?", content, Object.keys(meta).length ? JSON.stringify(meta) : null, id);
+    return this.getMessage(id)!;
+  }
+  /** Delete messages and the threads under them; returns what was removed (id + thread root) so the UI can follow. */
+  deleteMessages(ids: string[]): { id: string; parentId: string | null }[] {
+    if (!ids.length) return [];
+    const marks = ids.map(() => "?").join(",");
+    const gone = this.all(`SELECT id, parent_id FROM messages WHERE id IN (${marks}) OR parent_id IN (${marks})`, ...ids, ...ids)
+      .map((r) => ({ id: r.id as string, parentId: (r.parent_id as string | null) ?? null }));
+    if (gone.length) this.run(`DELETE FROM messages WHERE id IN (${gone.map(() => "?").join(",")})`, ...gone.map((g) => g.id));
+    return gone;
+  }
+  /** Last context-reset divider of a chat at or before `seq` (0 = none): the boundary a rewind must not cross. */
+  lastResetBefore(chatId: string, seq: number): number {
+    return Number(this.get(`SELECT MAX(seq) AS s FROM messages WHERE chat_id=? AND parent_id IS NULL AND seq<=? AND meta LIKE '%"marker":"context-reset"%'`, chatId, seq)?.s ?? 0);
+  }
+
+  /** Search your and the agents' messages across all chats, best matches first. Matches are wrapped in \u0002…\u0003. */
+  searchMessages(query: string, limit = 50): SearchHit[] {
+    const terms = searchTerms(query);
+    if (!terms.length) return [];
+    const cols = "m.id, m.chat_id, m.parent_id, m.author, m.role, m.created_at, c.title AS chat_title, c.project_id, c.archived";
+    const own = "m.author IN ('user','agent')";
+    let rows: Row[];
+    if (this.searchIndex === "fts") {
+      const match = terms.map((t) => `"${t}"*`).join(" ");
+      rows = this.all(`SELECT ${cols}, snippet(messages_fts, 0, char(2), char(3), '…', 14) AS snip
+        FROM messages_fts JOIN messages m ON m.seq = messages_fts.rowid JOIN chats c ON c.id = m.chat_id
+        WHERE messages_fts MATCH ? AND ${own} ORDER BY c.archived, bm25(messages_fts), m.seq DESC LIMIT ?`, match, limit);
+    } else {
+      const like = terms.map(() => "m.content LIKE ? ESCAPE '\\'").join(" AND ");
+      rows = this.all(`SELECT ${cols}, m.content AS body FROM messages m JOIN chats c ON c.id = m.chat_id
+        WHERE ${like} AND ${own} ORDER BY c.archived, m.seq DESC LIMIT ?`, ...terms.map((t) => `%${t.replace(/[\\%_]/g, "\\$&")}%`), limit);
+    }
+    return rows.map((r) => ({
+      messageId: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, role: r.role ?? null, createdAt: Number(r.created_at),
+      chatTitle: r.chat_title, projectId: r.project_id ?? null, archived: !!r.archived,
+      snippet: r.snip != null ? String(r.snip).replace(/\s+/g, " ") : likeSnippet(String(r.body ?? ""), terms),
+    }));
+  }
+
   toggleReaction(messageId: string, emoji: string): string[] {
     const exists = this.get("SELECT 1 FROM reactions WHERE message_id=? AND emoji=?", messageId, emoji);
     if (exists) this.run("DELETE FROM reactions WHERE message_id=? AND emoji=?", messageId, emoji);
@@ -270,11 +353,14 @@ export class Db {
     return this.all(sql, ...p).map(toAgent);
   }
   updateAgent(id: string, patch: { status?: AgentStatus; sessionId?: string | null; resultSummary?: string; lastActivity?: string;
+    harness?: HarnessId; model?: string | null;
     ended?: boolean /* false = running again (clears the end time) */ }): AgentRun {
     const sets: string[] = [];
     const p: any[] = [];
     if (patch.status) { sets.push("status=?"); p.push(patch.status); }
     if (patch.sessionId !== undefined) { sets.push("session_id=?"); p.push(patch.sessionId); }
+    if (patch.harness) { sets.push("harness=?"); p.push(patch.harness); }
+    if (patch.model !== undefined) { sets.push("model=?"); p.push(patch.model); }
     if (patch.resultSummary !== undefined) { sets.push("result_summary=?"); p.push(patch.resultSummary); }
     if (patch.lastActivity !== undefined) { sets.push("last_activity=?"); p.push(patch.lastActivity.slice(0, 200)); }
     if (patch.ended) { sets.push("ended_at=?"); p.push(now()); }
@@ -453,6 +539,22 @@ export class Db {
     for (const t of ["projects", "chats", "messages", "reactions", "agents", "agent_events", "tasks", "usage", "artifacts", "file_changes"]) out[t] = this.all(`SELECT * FROM ${t}`);
     return out;
   }
+}
+
+/** Words of a search query (letters, digits, _), at most 8; quotes and FTS operators are never passed through. */
+export function searchTerms(q: string): string[] {
+  return (q.normalize("NFKC").match(/[\p{L}\p{N}_]+/gu) ?? []).slice(0, 8);
+}
+/** Snippet for the LIKE fallback: text around the first match, matches wrapped like FTS5's snippet(). */
+export function likeSnippet(text: string, terms: string[], width = 90): string {
+  const flat = text.replace(/\s+/g, " ");
+  const low = flat.toLowerCase();
+  const at = Math.max(0, Math.min(...terms.map((t) => { const i = low.indexOf(t.toLowerCase()); return i < 0 ? Infinity : i; })));
+  const start = Number.isFinite(at) ? Math.max(0, at - Math.floor(width / 3)) : 0;
+  let s = flat.slice(start, start + width);
+  const re = new RegExp(terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
+  s = s.replace(re, (x) => `\u0002${x}\u0003`);
+  return (start > 0 ? "…" : "") + s + (start + width < flat.length ? "…" : "");
 }
 
 const toChange = (r: Row): FileChange => ({
