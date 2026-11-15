@@ -54,10 +54,17 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       // The classic side panel, then the same thread popped out into its own window
       await js(`document.querySelector('.thread-pill')?.click()`);
       await sleep(700);
-      await js(`document.querySelector('.inline-thread.open button[title="Open in side panel"]')?.click()`);
+      await js(`document.querySelector('.inline-thread.open button[title="Show in Threads panel"]')?.click()`);
       await sleep(900);
-      await shot(join(demo, "2-thread-side-panel.png"));
-      await js(`document.querySelector('.thread-side button[title="Open in new window"]')?.click()`);
+      await shot(join(demo, "2-threads-panel.png"));
+      await js(`document.querySelector('.threads-panel button[title="Collapse the Threads panel"]')?.click()`);
+      await sleep(500);
+      await shot(join(demo, "2-threads-panel-rail.png"));
+      await js(`document.querySelector('.threads-panel .tpl-rail-btn')?.click()`);
+      await sleep(300);
+      await js(`document.querySelector('.thread-pill')?.click()`);
+      await sleep(700);
+      await js(`document.querySelector('.inline-thread.open button[title="Open in new window"]')?.click()`);
       await sleep(3500);
       const tw = BrowserWindow.getAllWindows().find((w) => w !== win && w.webContents.getURL().includes("#thread/"));
       if (tw) { writeFileSync(join(demo, "2-thread-window.png"), (await tw.webContents.capturePage()).toPNG()); tw.close(); }

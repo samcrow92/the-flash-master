@@ -35,10 +35,14 @@ interface State {
   messages: Record<string, Message[]>; // chatId → main-thread messages
   /** Thread messages per root (root first, then replies), loaded on first open and kept live by events. */
   threads: Record<string, Message[]>;
-  /** The thread shown in the side panel (or filling a pop-out thread window). */
-  sideThread: { chatId: string; rootId: string } | null;
   /** Thread roots currently expanded inline under their message. */
   openThreads: Record<string, boolean>;
+  /** The Threads panel on the right of a chat: shown as a full column (else a slim rail). Remembered across launches. */
+  threadsPanelOpen: boolean;
+  /** Thread roots expanded inside the Threads panel. A thread is expanded in one place at a time: panel or inline. */
+  panelThreads: Record<string, boolean>;
+  /** A thread for the panel to scroll to once it is shown; `at` makes repeat requests fire again. */
+  panelFocus: { rootId: string; at: number } | null;
   flowPanel: { chatId: string; agentId: string | null } | null;
   artifactsPanel: string | null; // chat id whose artifacts panel is open
   artifactsRev: Record<string, number>;
@@ -71,8 +75,12 @@ interface State {
   closeThread(rootId: string): void;
   toggleThread(chatId: string, rootId: string): void;
   loadThread(chatId: string, rootId: string): Promise<void>;
+  /** Show a thread in the Threads panel: opens the panel, expands the thread there and scrolls to it. */
   openSideThread(chatId: string, rootId: string): void;
-  closeSideThread(): void;
+  setThreadsPanel(open: boolean): void;
+  togglePanelThread(chatId: string, rootId: string): void;
+  /** Expand or collapse every listed thread in the panel. */
+  setPanelThreads(chatId: string, rootIds: string[], open: boolean): void;
   refreshProjects(): Promise<void>;
   /** Reload one project's chats, or (null) the chats that belong to no project. */
   refreshChats(projectId: string | null): Promise<void>;
@@ -84,6 +92,11 @@ interface State {
 }
 
 let toastId = 0;
+
+const PANEL_PREF = "threadsPanel";
+function readPanelPref(): boolean {
+  try { return globalThis.localStorage?.getItem(PANEL_PREF) !== "0"; } catch { return true; }
+}
 
 const bySeq = (a: Message, b: Message) => a.seq - b.seq;
 const upsertMsg = (list: Message[], m: Message) => {
@@ -129,7 +142,9 @@ export const useStore = create<State>((set, get) => ({
   messages: {},
   threads: {},
   openThreads: {},
-  sideThread: null,
+  threadsPanelOpen: readPanelPref(),
+  panelThreads: {},
+  panelFocus: null,
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
@@ -207,7 +222,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async openThread(chatId, rootId) {
-    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true } }));
+    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true }, panelThreads: { ...st.panelThreads, [rootId]: false } }));
     await get().loadThread(chatId, rootId);
   },
 
@@ -217,16 +232,34 @@ export const useStore = create<State>((set, get) => ({
   },
 
   openSideThread(chatId, rootId) {
-    set((st) => ({ sideThread: { chatId, rootId }, flowPanel: null, artifactsPanel: null, openThreads: { ...st.openThreads, [rootId]: false } }));
+    get().setThreadsPanel(true);
+    set((st) => ({ flowPanel: null, artifactsPanel: null, openThreads: { ...st.openThreads, [rootId]: false },
+      panelThreads: { ...st.panelThreads, [rootId]: true }, panelFocus: { rootId, at: Date.now() } }));
     void get().loadThread(chatId, rootId);
   },
 
-  closeSideThread() {
-    set({ sideThread: null });
+  setThreadsPanel(open) {
+    set({ threadsPanelOpen: open });
+    try { localStorage.setItem(PANEL_PREF, open ? "1" : "0"); } catch { /* storage unavailable */ }
+  },
+
+  togglePanelThread(chatId, rootId) {
+    const open = !get().panelThreads[rootId];
+    get().setPanelThreads(chatId, [rootId], open);
+  },
+
+  setPanelThreads(chatId, rootIds, open) {
+    set((st) => {
+      const panelThreads = { ...st.panelThreads };
+      const openThreads = { ...st.openThreads };
+      for (const id of rootIds) { panelThreads[id] = open; if (open) openThreads[id] = false; }
+      return { panelThreads, openThreads };
+    });
+    if (open) for (const id of rootIds) if (!get().threads[id]) void get().loadThread(chatId, id);
   },
 
   openFlow(chatId, agentId) {
-    set({ flowPanel: { chatId, agentId }, artifactsPanel: null, sideThread: null });
+    set({ flowPanel: { chatId, agentId }, artifactsPanel: null });
   },
 
   closeThread(rootId) {
