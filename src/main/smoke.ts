@@ -342,15 +342,16 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     const search = await js<string>("window.flash.api.searchMessages('brake').then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
     log(search === "ok" ? "info" : "error", `smoke-search: ${search}`);
     if (search !== "ok") { app.exit(1); return; }
-    // An agent's chat popped out into its own window: it renders the chat, and opening it again focuses it instead of duplicating it.
-    const pop = ok ? await smokeChatWindow(win, js, demo) : "skipped";
-    log(pop === "ok" || pop === "skipped" ? "info" : "error", `smoke-chat-window: ${pop}`);
-    if (pop !== "ok" && pop !== "skipped") { app.exit(1); return; }
     // The integrated terminal: open it from the title bar, run a command in the real shell and see its output rendered.
     const term = ok && !demo ? await smokeTerminal(js) : "skipped";
     const termOk = term === "ok" || term === "skipped";
     log(termOk ? "info" : "error", `smoke: ui=${ok} terminal=${term}`);
-    app.exit(ok && iconOk && termOk ? 0 : 1);
+    // An agent's chat popped out into its own window: it renders the chat, and opening it again focuses it instead of
+    // duplicating it. Runs last: the new window takes focus, and macOS throttles the main window's timers behind it.
+    const pop = ok ? await smokeChatWindow(win, js, demo) : "skipped";
+    const popOk = pop === "ok" || pop === "skipped";
+    log(popOk ? "info" : "error", `smoke-chat-window: ${pop}`);
+    app.exit(ok && iconOk && termOk && popOk ? 0 : 1);
   } catch (e) {
     log("error", `smoke failed: ${String(e)}`);
     app.exit(2);
@@ -390,5 +391,6 @@ async function smokeChatWindow(win: BrowserWindow, js: <T = unknown>(code: strin
   const count = chatWins().length;
   if (demo) writeFileSync(join(demo, "2-chat-window.png"), (await cw.webContents.capturePage()).toPNG());
   cw.close();
+  win.focus();
   return count === 1 ? "ok" : `duplicated (${count})`;
 }
