@@ -322,8 +322,10 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     log(iconOk ? "info" : "error", `smoke-icon: ok=${iconOk} file=${icon?.file ?? "-"} size=${icon?.getSize().width ?? 0}`);
     // Chat search must answer through IPC (the main log says whether FTS5 or the LIKE fallback is in use).
     const search = await js<string>("window.flash.api.searchMessages('brake').then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
-    log("info", `smoke: ui=${ok} search=${search}`);
-    app.exit(ok && iconOk && search === "ok" ? 0 : 1);
+    log(search === "ok" ? "info" : "error", `smoke-search: ${search}`);
+    log("info", `smoke: ui=${ok}`);
+    if (search !== "ok") { app.exit(1); return; }
+    app.exit(ok && iconOk ? 0 : 1);
   } catch (e) {
     log("error", `smoke failed: ${String(e)}`);
     app.exit(2);

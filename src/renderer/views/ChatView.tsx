@@ -56,19 +56,22 @@ export function ChatView({ chatId }: { chatId: string }) {
   const focus = useStore((s) => s.focusMessage);
   const threads = useStore((s) => s.threads);
   const scrolledFor = useRef<number | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
     if (!focus) return;
-    const el = listRef.current?.querySelector<HTMLElement>(`.msg[data-msg-id="${CSS.escape(focus.id)}"]`);
-    if (!el) {
-      if (scrolledFor.current !== focus.at) { scrolledFor.current = focus.at; vl.scrollToKey(focus.rootId ?? focus.id, "center"); }
-      return; // runs again when the item / thread mounts
+    // The list follows the bottom while pinned; scrollToKey unpins and anchors on the item, mounted or not.
+    if (scrolledFor.current !== focus.at) {
+      if (vl.scrollToKey(focus.rootId ?? focus.id, focus.rootId ? "start" : "center")) { scrolledFor.current = focus.at; requestAnimationFrame(() => setFocusTick((n) => n + 1)); }
+      return; // not loaded yet: runs again when the messages arrive
     }
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    const el = listRef.current?.querySelector<HTMLElement>(`.msg[data-msg-id="${CSS.escape(focus.id)}"]`);
+    if (!el) return; // runs again when the item / its thread mounts
+    if (focus.rootId) el.scrollIntoView({ block: "center" });
     el.classList.remove("msg-flash");
     void el.offsetWidth;
     el.classList.add("msg-flash");
     useStore.setState({ focusMessage: null });
-  }, [focus, messages, threads, vl.start, vl.end]);
+  }, [focus, messages, threads, vl.start, vl.end, focusTick]);
 
   if (!chat) return <div className="empty">Chat not found.</div>;
 
