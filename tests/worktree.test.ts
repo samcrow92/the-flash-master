@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canIsolate, createWorktree, mergeWorktree, removeWorktree, worktreeState } from "../src/main/worktree";
+import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState } from "../src/main/worktree";
+import { buildFixRequest } from "../src/shared/review";
 import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
 import { HarnessRegistry } from "../src/main/harness/registry";
@@ -96,5 +97,74 @@ describe("agent worktrees", () => {
     await orch.sendUserMessage(chat.id, "hello", null);
     await until(() => db.listAgents({}).some((x) => x.role === "flashmaster" && !!x.resultSummary));
     expect(db.listAgents({}).find((x) => x.role === "flashmaster")!.worktree).toBeNull();
+  });
+
+  it("lists every change on the agent's branch for review: committed, uncommitted and new files", async () => {
+    const r = repo();
+    writeFileSync(join(r, "gone.c"), "int g;\n");
+    git(r, "add", "-A"); git(r, "commit", "-qm", "more");
+    const wt = join(mkdtempSync(join(tmpdir(), "wt-")), "copy");
+    await createWorktree(r, wt, "flash/review");
+    commitIn(wt, "a.c", "int a;\nint b;\n");
+    git(wt, "rm", "-q", "gone.c"); git(wt, "commit", "-qm", "rm");
+    writeFileSync(join(wt, "a.c"), "int a;\nint b;\nint c;\n"); // uncommitted on top of the commit
+    writeFileSync(join(wt, "new file.h"), "#pragma once\nint n;\n");
+    commitIn(r, "other.c", "int o;\n"); // the project moved on: not the agent's change
+
+    const ch = await worktreeChanges(r, wt, "flash/review");
+    expect(ch.files).toEqual([
+      { path: "a.c", status: "modified", added: 2, removed: 0, binary: false, committed: true },
+      { path: "gone.c", status: "deleted", added: 0, removed: 1, binary: false, committed: true },
+      { path: "new file.h", status: "added", added: 2, removed: 0, binary: false, committed: false },
+    ]);
+    // Windows (core.autocrlf): git prints CRLF warnings into the same output; they are not files.
+    const noisy: typeof defaultGit = async (cwd, args) => {
+      const res = await defaultGit(cwd, args);
+      return { ...res, out: `warning: in the working copy of 'a.c', LF will be replaced by CRLF the next time Git touches it\n${res.out}` };
+    };
+    expect((await worktreeChanges(r, wt, "flash/review", noisy)).files).toEqual(ch.files);
+    expect(await worktreeFileDiff(r, wt, "flash/review", "a.c")).toEqual({ oldText: "int a;\n", newText: "int a;\nint b;\nint c;\n", binary: false, tooLarge: false });
+    expect((await worktreeFileDiff(r, wt, "flash/review", "gone.c")).oldText).toBe("int g;\n");
+    await expect(worktreeFileDiff(r, wt, "flash/review", "../../etc/passwd")).rejects.toThrow(/outside/);
+  });
+
+  it("turns line comments into one fix request with file, line and code", () => {
+    const text = buildFixRequest("flash/tester-1", [
+      { path: "src/b.c", line: 9, side: "new", code: "  return x;", text: "Return a copy" },
+      { path: "src/a.c", line: 3, side: "old", code: "int `a`;", text: " Keep this line " },
+      { path: "src/a.c", line: 4, side: "new", code: "", text: "   " },
+    ], "Run the tests too.");
+    expect(text).toBe([
+      "**Review of your changes on `flash/tester-1`.** Please address these 2 comments, then commit on the same branch.",
+      "1. `src/a.c` removed line 3 (`int 'a';`): Keep this line\n2. `src/b.c` line 9 (`return x;`): Return a copy",
+      "Also: Run the tests too.",
+    ].join("\n\n"));
+    expect(() => buildFixRequest("b", [], " ")).toThrow(/comment/);
+  });
+
+  it("sends review comments to a finished specialist, which works on in its own copy", async () => {
+    const db = new Db(":memory:");
+    const settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" } }) as Settings;
+    const roles = loadRoles(join(__dirname, "..", "agents"), "/none");
+    const mk = () => new Orchestrator({ db, harnesses: new HarnessRegistry([new MockAdapter(1)]), settings: () => settings, roles: () => roles,
+      skills: () => [], emit: () => undefined, mcpServersFor: () => [], homeDir: tmpdir(), dataDir: mkdtempSync(join(tmpdir(), "data-")) });
+    const orch = mk();
+    const p = db.createProject("p", repo());
+    const chat = db.createChat({ projectId: p.id, title: "c", kind: "project", agentRole: "flashmaster" });
+    const tester = roles.find((x) => x.name === "tester")!;
+    await (orch as any).turn({ chat, threadRoot: null, role: tester, input: "Add a test", skills: [], depth: 1, brief: "Goal: add a test" });
+    const a = db.listAgents({}).find((x) => x.role === "tester")!;
+    commitIn(a.worktree!, "t.c", "int t;\n");
+    expect((await orch.workChanges(a.id)).files.map((f) => f.path)).toEqual(["t.c"]);
+
+    // After a restart the agent has no session: the request brings it back on the same branch.
+    const again = mk();
+    const replies = () => db.listMessages(chat.id, null).filter((m) => m.author === "agent" && m.role === "tester").length;
+    const before = replies();
+    const msg = await again.requestWorkFixes(a.id, [{ path: "t.c", line: 1, side: "new", code: "int t;", text: "Name it test_count" }]);
+    expect(msg.content).toMatch(/`t\.c` line 1 \(`int t;`\): Name it test_count/);
+    await until(() => replies() > before && db.getAgent(a.id)!.status !== "running");
+    expect(db.getAgent(a.id)!.worktree).toBe(a.worktree);
+    await expect(again.requestWorkFixes(a.id, [], "")).rejects.toThrow(/comment/);
   });
 });

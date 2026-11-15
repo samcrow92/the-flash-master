@@ -1394,3 +1394,37 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .tpl-body .composer-wrap { background: color-mix(in srgb, var(--bg) 35%, transparent); border-top: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); border-radius: 0 0 14px 14px; }
 .tp-where { display: inline-grid; opacity: .8; }
 @media (prefers-reduced-motion: reduce) { .tpl-full, .tpl-body, .tpl-replies .it-item { animation: none; } }
+/* ---------- Review: an agent's branch with diffs, line comments, Merge/Discard ---------- */
+.review-page { gap: 12px; }
+.review-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px; }
+.review-agents { display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+.review-agent { display: flex; gap: 9px; align-items: flex-start; text-align: left; padding: 9px 10px; border-radius: 12px;
+  background: var(--glass-strong); border: 1px solid var(--rim); backdrop-filter: var(--blur); box-shadow: var(--hi); transition: background .15s, transform .12s; }
+.review-agent:hover { transform: translateY(-1px); }
+.review-agent.on { background: color-mix(in srgb, var(--accent) 12%, var(--glass-strong)); border-color: color-mix(in srgb, var(--accent) 45%, var(--rim)); }
+.review-agent-main { display: grid; gap: 1px; min-width: 0; }
+.review-agent-main code, .review-agent-main .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-main { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.review-bar { position: sticky; top: 0; z-index: 3; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 12px; border-radius: 14px; background: var(--glass-strong); border: 1px solid var(--rim); backdrop-filter: blur(30px) saturate(180%); box-shadow: var(--hi); }
+.review-bar-info { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
+.review-bar button { display: inline-flex; align-items: center; gap: 5px; }
+.review-note textarea { width: 100%; resize: vertical; border-radius: 12px; border: 1px solid var(--line); background: var(--bg2); padding: 8px 11px; }
+.review-files { display: flex; flex-direction: column; gap: 8px; }
+.review-file { border-radius: 12px; border: 1px solid var(--line); background: var(--bg2); overflow: hidden; }
+.review-file-head { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; border: none; border-radius: 0; background: transparent; padding: 8px 11px; }
+.review-file-head .ic.new { color: var(--green); } .review-file-head .ic.del { color: var(--red); } .review-file-head .ic.mod { color: var(--blue); }
+.review-path { flex: 1; min-width: 0; font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-count { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); }
+.review-diff { border-top: 1px solid var(--line); overflow-x: auto; }
+.review-loading { padding: 12px 14px; }
+.review-empty { display: grid; justify-items: center; gap: 8px; padding: 40px 20px; text-align: center; max-width: 560px; margin: 0 auto; line-height: 1.5; }
+.ln-btn { background: none; border: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; width: 100%; text-align: right; }
+.ln-btn:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); opacity: 1; }
+.diff-table tr.diff-note-row td { padding: 6px 10px 8px 88px; background: var(--bg2); white-space: normal; }
+.review-comment { display: flex; align-items: flex-start; gap: 7px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-size: 13px; padding: 7px 10px; border-radius: 10px;
+  background: var(--glass-strong); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--rim)); box-shadow: var(--hi); }
+.review-comment.editing { flex-direction: column; align-items: stretch; }
+.review-comment textarea { width: 100%; resize: vertical; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); padding: 6px 9px; font-family: inherit; }
+.review-comment-text { flex: 1; white-space: pre-wrap; }
+@media (max-width: 900px) { .review-body { grid-template-columns: 1fr; } .review-agents { flex-direction: row; overflow-x: auto; } .review-agent { min-width: 200px; } }

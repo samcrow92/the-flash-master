@@ -119,6 +119,7 @@ function WorkActions({ id, branch }: { id: string; branch: string }) {
   return (
     <span className="work-actions" title={`Works in its own copy of the project on branch ${branch}`}>
       <code className="small">{branch}</code>
+      <button disabled={busy} onClick={() => st.setView({ kind: "review", agentId: id })} title="See every changed file with diffs, comment on lines, then merge or discard">Review</button>
       <button disabled={busy} onClick={() => void merge()} title={`Merge ${branch} into your current branch`}>Merge</button>
       <button disabled={busy} className="ghost danger" onClick={() => void discard()} title="Remove the copy and its branch">Discard</button>
     </span>

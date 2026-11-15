@@ -18,7 +18,8 @@ import { planEdit, planRetry, type RewindPlan } from "@shared/rewind";
 import type { Db } from "./db";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
-import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeState, type Git, type WorkResult } from "./worktree";
+import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
+import { buildFixRequest, type ReviewComment } from "@shared/review";
 import { prepareInstructions } from "./harness/instructions";
 import { slugRole, type AgentSpec } from "./roles";
 import {
@@ -412,16 +413,54 @@ export class Orchestrator {
     this.emitAgent(this.d.db.setAgentWorktree(l.agentId, dir, branch));
     this.flow(l.agentId, { kind: "status", label: `working on branch ${branch}`, status: "isolated" });
     this.system(chatId, threadRoot, `🌿 **${l.role.icon} ${agentLabel(l, l.role.title)}** works in its own copy of the project on branch \`${branch}\`, `
-      + "so parallel agents don't overwrite each other. Merge or discard it from the Agents page when it's done.");
+      + "so parallel agents don't overwrite each other. Review, merge or discard it from the Review page when it's done.");
   }
 
-  private agentWork(agentId: string): { repo: string; dir: string; branch: string } {
+  /** `read`: looking at the changes is fine while the agent works; merging and discarding are not. */
+  private agentWork(agentId: string, read = false): { repo: string; dir: string; branch: string } {
     const a = this.d.db.getAgent(agentId);
     if (!a?.worktree || !a.branch) throw new Error("this agent has no separate copy of the project");
     const p = a.projectId ? this.d.db.getProject(a.projectId) : null;
     if (!p) throw new Error("the agent's project was removed");
-    if (this.byAgent.get(agentId)?.busy) throw new Error("the agent is still working; wait for it to finish or stop it first");
+    if (!read && this.byAgent.get(agentId)?.busy) throw new Error("the agent is still working; wait for it to finish or stop it first");
     return { repo: p.path, dir: a.worktree, branch: a.branch };
+  }
+
+  /** Review page: every file the agent changed in its copy (committed or not) since its branch started. */
+  async workChanges(agentId: string) {
+    const w = this.agentWork(agentId, true);
+    const [ch, st] = await Promise.all([worktreeChanges(w.repo, w.dir, w.branch, this.git), worktreeState(w.repo, w.dir, w.branch, this.git)]);
+    return { ...ch, ...st, branch: w.branch, dir: w.dir, busy: !!this.byAgent.get(agentId)?.busy };
+  }
+
+  async workFileDiff(agentId: string, path: string) {
+    const w = this.agentWork(agentId, true);
+    return worktreeFileDiff(w.repo, w.dir, w.branch, path, this.git);
+  }
+
+  /**
+   * Send the user's review comments to the agent as a message in its chat; it fixes them in its own copy. An agent whose
+   * session ended (finished, or the app restarted) is brought back with its brief and worktree. While it works the
+   * request waits in its queue.
+   */
+  async requestWorkFixes(agentId: string, comments: ReviewComment[], note = ""): Promise<Message> {
+    const w = this.agentWork(agentId, true);
+    const content = buildFixRequest(w.branch, comments, note);
+    const a = this.d.db.getAgent(agentId)!;
+    const chat = a.chatId ? this.d.db.getChat(a.chatId) : null;
+    if (!chat) throw new Error("the agent's chat was deleted");
+    let l = this.byAgent.get(agentId);
+    if (!l) {
+      l = this.reviveLive(a, chat);
+      this.emitAgent(this.d.db.updateAgent(agentId, { status: "idle", ended: false, lastActivity: "Fixing review comments" }));
+    }
+    const msg = this.d.db.addMessage({ chatId: chat.id, parentId: l.threadRoot, author: "user", content, delivery: l.busy || l.paused ? "queued" : undefined });
+    this.d.emit({ type: "message.created", message: msg });
+    this.flow(agentId, { kind: "status", label: `review: ${comments.length} comment(s) to fix`, status: "review" });
+    const fresh = !l.session?.alive;
+    void this.turn({ chat, threadRoot: l.threadRoot, role: l.role, input: content, skills: [], depth: l.depth, brief: fresh && a.parentAgentId ? a.brief : null,
+      liveKey: l.key, msgIds: [msg.id] }).catch((e) => this.system(chat.id, l.threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
+    return msg;
   }
 
   async workState(agentId: string) {
@@ -505,21 +544,12 @@ export class Orchestrator {
     if (!a || a.status !== "interrupted") throw new Error("this agent isn't waiting to be resumed");
     const chat = a.chatId ? this.d.db.getChat(a.chatId) : null;
     if (!chat) { this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped" })); throw new Error("its chat was deleted"); }
-    const role = this.role(a.role);
-    let depth = 0;
-    for (let p = a.parentAgentId; p && depth < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) depth++;
-    const threadRoot = this.d.db.lastThreadOf(agentId);
-    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}#${agentId}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
-    if (this.live.has(key) || this.byAgent.has(agentId)) {
+    let l: Live;
+    try { l = this.reviveLive(a, chat); } catch (e) {
       this.emitAgent(this.d.db.updateAgent(agentId, { status: "stopped", lastActivity: "Superseded: the same agent is already running again" }));
-      throw new Error(`${role.title} is already running again in this chat`);
+      throw e;
     }
-    const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
-    const l: Live = { key, agentId, name: a.name, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
-      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
-      worktree: a.worktree, branch: a.branch };
-    this.live.set(key, l);
-    this.byAgent.set(agentId, l);
+    const { role, depth, threadRoot, key } = l;
     this.emitAgent(this.d.db.updateAgent(agentId, { status: "idle", ended: false, lastActivity: "Resuming after the app restarted" }));
     this.flow(agentId, { kind: "status", label: "resumed after restart", status: "running" });
     const kids = this.d.db.childAgents(agentId).filter((c) => c.status !== "stopped");
@@ -531,6 +561,23 @@ export class Orchestrator {
     void this.turn({ chat, threadRoot, role, input, skills: [], depth, brief: a.parentAgentId ? a.brief : null, liveKey: key })
       .catch((e) => this.system(chat.id, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
     return this.d.db.getAgent(agentId)!;
+  }
+
+  /** Rebuild the in-memory state of an agent whose session is gone (app restart), keeping its chat, thread and worktree. */
+  private reviveLive(a: AgentRun, chat: Chat): Live {
+    const role = this.role(a.role);
+    let depth = 0;
+    for (let p = a.parentAgentId; p && depth < 10; p = this.d.db.getAgent(p)?.parentAgentId ?? null) depth++;
+    const threadRoot = this.d.db.lastThreadOf(a.id);
+    const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}#${a.id}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
+    if (this.live.has(key) || this.byAgent.has(a.id)) throw new Error(`${role.title} is already running again in this chat`);
+    const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
+    const l: Live = { key, agentId: a.id, name: a.name, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
+      paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
+      worktree: a.worktree, branch: a.branch };
+    this.live.set(key, l);
+    this.byAgent.set(a.id, l);
+    return l;
   }
 
   /** Resume every interrupted agent, specialists before the agents that delegated to them. */

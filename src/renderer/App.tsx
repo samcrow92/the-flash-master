@@ -4,6 +4,7 @@ import { api, applyWindow, useStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./views/ChatView";
 import { AgentsView } from "./views/AgentsView";
+import { ReviewView } from "./views/ReviewView";
 import { DashboardView } from "./views/DashboardView";
 import { TasksView } from "./views/TasksView";
 import { JazzView } from "./views/JazzView";
@@ -58,6 +59,7 @@ export function App() {
       <main className="main" key={view.kind === "chat" ? "chat" : view.kind}>
         {view.kind === "chat" && <ChatView key={view.chatId} chatId={view.chatId} />}
         {view.kind === "agents" && <AgentsView />}
+        {view.kind === "review" && <ReviewView agentId={view.agentId} />}
         {view.kind === "dashboard" && <DashboardView />}
         {view.kind === "tasks" && <TasksView />}
         {view.kind === "jazz" && <JazzView />}
