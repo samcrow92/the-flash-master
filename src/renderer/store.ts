@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
+import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SearchHit, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
-import { pickAgentChat } from "./agentChat";
+import { chatKey, pickAgentChat } from "./agentChat";
 import { agentLabel } from "@shared/instances";
 
 export const api = () => window.flash.api;
@@ -36,10 +36,14 @@ interface State {
   messages: Record<string, Message[]>; // chatId → main-thread messages
   /** Thread messages per root (root first, then replies), loaded on first open and kept live by events. */
   threads: Record<string, Message[]>;
-  /** The thread shown in the side panel (or filling a pop-out thread window). */
-  sideThread: { chatId: string; rootId: string } | null;
   /** Thread roots currently expanded inline under their message. */
   openThreads: Record<string, boolean>;
+  /** The Threads panel on the right of a chat: shown as a full column (else a slim rail). Remembered across launches. */
+  threadsPanelOpen: boolean;
+  /** Thread roots expanded inside the Threads panel. A thread is expanded in one place at a time: panel or inline. */
+  panelThreads: Record<string, boolean>;
+  /** A thread for the panel to scroll to once it is shown; `at` makes repeat requests fire again. */
+  panelFocus: { rootId: string; at: number } | null;
   flowPanel: { chatId: string; agentId: string | null } | null;
   artifactsPanel: string | null; // chat id whose artifacts panel is open
   artifactsRev: Record<string, number>;
@@ -56,6 +60,12 @@ interface State {
   update: UpdateState | null;
   setModels(m: HarnessModels): void;
   toasts: Toast[];
+  /** The chat search window (Ctrl/Cmd+Shift+F). */
+  searchOpen: boolean;
+  /** A message to scroll to and flash (from search); `at` makes repeat jumps to the same message fire again. */
+  focusMessage: { id: string; rootId: string | null; at: number } | null;
+  /** Open a search hit: its chat, its thread when it is a reply, then scroll to it. */
+  jumpTo(hit: Pick<SearchHit, "chatId" | "messageId" | "parentId">): Promise<void>;
 
   init(): Promise<void>;
   setView(v: View): void;
@@ -66,10 +76,15 @@ interface State {
   closeThread(rootId: string): void;
   toggleThread(chatId: string, rootId: string): void;
   loadThread(chatId: string, rootId: string): Promise<void>;
+  /** Show a thread in the Threads panel: opens the panel, expands the thread there and scrolls to it. */
   openSideThread(chatId: string, rootId: string): void;
-  closeSideThread(): void;
+  setThreadsPanel(open: boolean): void;
+  togglePanelThread(chatId: string, rootId: string): void;
+  /** Expand or collapse every listed thread in the panel. */
+  setPanelThreads(chatId: string, rootIds: string[], open: boolean): void;
   refreshProjects(): Promise<void>;
-  refreshChats(projectId: string): Promise<void>;
+  /** Reload one project's chats, or (null) the chats that belong to no project. */
+  refreshChats(projectId: string | null): Promise<void>;
   upsertChat(c: Chat): void;
   removeChat(c: Chat): void;
   setSettings(s: Settings): void;
@@ -78,6 +93,11 @@ interface State {
 }
 
 let toastId = 0;
+
+const PANEL_PREF = "threadsPanel";
+function readPanelPref(): boolean {
+  try { return globalThis.localStorage?.getItem(PANEL_PREF) !== "0"; } catch { return true; }
+}
 
 const bySeq = (a: Message, b: Message) => a.seq - b.seq;
 const upsertMsg = (list: Message[], m: Message) => {
@@ -123,7 +143,9 @@ export const useStore = create<State>((set, get) => ({
   messages: {},
   threads: {},
   openThreads: {},
-  sideThread: null,
+  threadsPanelOpen: readPanelPref(),
+  panelThreads: {},
+  panelFocus: null,
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
@@ -141,6 +163,15 @@ export const useStore = create<State>((set, get) => ({
     set((st) => ({ models: { ...st.models, [m.harness]: m } }));
   },
   toasts: [],
+  searchOpen: false,
+  focusMessage: null,
+
+  async jumpTo(hit) {
+    set({ searchOpen: false });
+    await get().openChat(hit.chatId);
+    if (hit.parentId) await get().openThread(hit.chatId, hit.parentId);
+    set({ focusMessage: { id: hit.messageId, rootId: hit.parentId, at: Date.now() } });
+  },
 
   async init() {
     const a = api();
@@ -154,7 +185,7 @@ export const useStore = create<State>((set, get) => ({
       agents: Object.fromEntries(agents.map((x) => [x.id, x])), tasks: Object.fromEntries(tasks.map((t) => [t.id, t])), mcp,
       models: Object.fromEntries(models.filter((m) => m.fetchedAt).map((m) => [m.harness, m])),
     });
-    await Promise.all(projects.map((p) => get().refreshChats(p.id)));
+    await Promise.all([...projects.map((p) => get().refreshChats(p.id)), get().refreshChats(null)]);
     applyTheme(s.settings.general.theme);
     set({ ready: true });
     let last: string | null = null;
@@ -169,7 +200,8 @@ export const useStore = create<State>((set, get) => ({
   async openChat(chatId) {
     const chat = get().chatById[chatId];
     set({ view: { kind: "chat", chatId }, flowPanel: get().flowPanel?.chatId === chatId ? get().flowPanel : null,
-      artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat?.projectId ?? get().currentProjectId });
+      // The master chat and "No project" chats have no project: don't keep the last one, or new agents would land in it.
+      artifactsPanel: get().artifactsPanel === chatId ? chatId : null, currentProjectId: chat ? chat.projectId : get().currentProjectId });
     try { localStorage.setItem("lastChat", chatId); } catch { /* storage unavailable */ }
     const msgs = await api().listMessages(chatId, null);
     set((st) => ({ messages: { ...st.messages, [chatId]: mergeLoaded(msgs, st.messages[chatId]) } }));
@@ -179,7 +211,6 @@ export const useStore = create<State>((set, get) => ({
     const st = get();
     const t = pickAgentChat(role, { agents: st.agents, chats: st.chats, projectIds: st.projects.map((p) => p.id),
       currentProjectId: st.currentProjectId, masterChatId: st.masterChatId });
-    if (t.kind === "no-project") { st.toast("warn", "Add a project folder first — specialists work inside a project."); return; }
     if (t.kind === "open") {
       await st.openChat(t.chatId);
       if (t.agentId) st.openFlow(t.chatId, t.agentId);
@@ -192,7 +223,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async openThread(chatId, rootId) {
-    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true } }));
+    set((st) => ({ openThreads: { ...st.openThreads, [rootId]: true }, panelThreads: { ...st.panelThreads, [rootId]: false } }));
     await get().loadThread(chatId, rootId);
   },
 
@@ -202,16 +233,34 @@ export const useStore = create<State>((set, get) => ({
   },
 
   openSideThread(chatId, rootId) {
-    set((st) => ({ sideThread: { chatId, rootId }, flowPanel: null, artifactsPanel: null, openThreads: { ...st.openThreads, [rootId]: false } }));
+    get().setThreadsPanel(true);
+    set((st) => ({ flowPanel: null, artifactsPanel: null, openThreads: { ...st.openThreads, [rootId]: false },
+      panelThreads: { ...st.panelThreads, [rootId]: true }, panelFocus: { rootId, at: Date.now() } }));
     void get().loadThread(chatId, rootId);
   },
 
-  closeSideThread() {
-    set({ sideThread: null });
+  setThreadsPanel(open) {
+    set({ threadsPanelOpen: open });
+    try { localStorage.setItem(PANEL_PREF, open ? "1" : "0"); } catch { /* storage unavailable */ }
+  },
+
+  togglePanelThread(chatId, rootId) {
+    const open = !get().panelThreads[rootId];
+    get().setPanelThreads(chatId, [rootId], open);
+  },
+
+  setPanelThreads(chatId, rootIds, open) {
+    set((st) => {
+      const panelThreads = { ...st.panelThreads };
+      const openThreads = { ...st.openThreads };
+      for (const id of rootIds) { panelThreads[id] = open; if (open) openThreads[id] = false; }
+      return { panelThreads, openThreads };
+    });
+    if (open) for (const id of rootIds) if (!get().threads[id]) void get().loadThread(chatId, id);
   },
 
   openFlow(chatId, agentId) {
-    set({ flowPanel: { chatId, agentId }, artifactsPanel: null, sideThread: null });
+    set({ flowPanel: { chatId, agentId }, artifactsPanel: null });
   },
 
   closeThread(rootId) {
@@ -229,12 +278,14 @@ export const useStore = create<State>((set, get) => ({
 
   async refreshChats(projectId) {
     const list = await api().listChats(projectId);
-    set((st) => ({ chats: { ...st.chats, [projectId]: list }, chatById: { ...st.chatById, ...Object.fromEntries(list.map((c) => [c.id, c])) } }));
+    set((st) => ({ chats: { ...st.chats, [chatKey(projectId)]: list }, chatById: { ...st.chatById, ...Object.fromEntries(list.map((c) => [c.id, c])) } }));
   },
 
   upsertChat(c) {
+    // The master chat has its own nav entry; it is not one of the "No project" chats.
+    if (c.kind === "master") { set((st) => ({ chatById: { ...st.chatById, [c.id]: c } })); return; }
     set((st) => {
-      const key = c.projectId ?? "__none";
+      const key = chatKey(c.projectId);
       const list = st.chats[key] ?? [];
       const i = list.findIndex((x) => x.id === c.id);
       const next = i < 0 ? [...list, c] : list.map((x) => (x.id === c.id ? c : x));
@@ -244,7 +295,7 @@ export const useStore = create<State>((set, get) => ({
 
   removeChat(c) {
     set((st) => {
-      const key = c.projectId ?? "__none";
+      const key = chatKey(c.projectId);
       const { [c.id]: _gone, ...rest } = st.chatById;
       return { chats: { ...st.chats, [key]: (st.chats[key] ?? []).filter((x) => x.id !== c.id) }, chatById: rest };
     });
@@ -269,6 +320,7 @@ export const useStore = create<State>((set, get) => ({
         if (!st.chatById[m.chatId]) {
           // A chat created in the main process (e.g. startAgent): reload the chat lists.
           for (const p of st.projects) void st.refreshChats(p.id);
+          void st.refreshChats(null);
         }
         if (m.parentId === null) {
           if (st.messages[m.chatId]) set({ messages: { ...st.messages, [m.chatId]: upsertMsg(st.messages[m.chatId]!, m) } });
@@ -304,6 +356,17 @@ export const useStore = create<State>((set, get) => ({
           messages: { ...st.messages, [m.chatId]: patchMsg(st.messages[m.chatId], m.id, keep) ?? [] },
           threads: patchThreads(st.threads, m.id, keep),
         });
+        break;
+      }
+      case "messages.removed": {
+        const gone = new Set(e.removed.map((r) => r.id));
+        const lost = new Map<string, number>(); // thread root → replies removed from it
+        for (const r of e.removed) if (r.parentId && !gone.has(r.parentId)) lost.set(r.parentId, (lost.get(r.parentId) ?? 0) + 1);
+        const keep = (list: Message[]) => list.filter((m) => !gone.has(m.id))
+          .map((m) => (lost.has(m.id) ? { ...m, replyCount: Math.max(0, m.replyCount - lost.get(m.id)!) } : m));
+        const threads: Record<string, Message[]> = {};
+        for (const [root, list] of Object.entries(st.threads)) if (!gone.has(root)) threads[root] = keep(list);
+        set({ messages: st.messages[e.chatId] ? { ...st.messages, [e.chatId]: keep(st.messages[e.chatId]!) } : st.messages, threads });
         break;
       }
       case "reaction.changed": {

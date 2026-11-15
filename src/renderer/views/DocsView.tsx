@@ -7,6 +7,8 @@ import {
   RoleIcon, User, ChevronRight, MessageCircle,
 } from "../components/icons";
 import { AGENT_DOCS, type AgentDoc } from "./agentDocs";
+import { customAgents } from "../agentOverview";
+import type { RoleDef } from "@shared/types";
 
 const CLI = {
   cursorInstall: "https://cursor.com/docs/cli/installation",
@@ -40,6 +42,8 @@ type PageId = (typeof PAGES)[number]["id"];
 /** A top-level page, or one agent's page ("agent:reviewer"). */
 type Page = PageId | `agent:${string}`;
 const agentOf = (p: Page) => (p.startsWith("agent:") ? AGENT_DOCS.find((a) => `agent:${a.name}` === p) : undefined);
+const DOC_NAMES = AGENT_DOCS.map((a) => a.name);
+const useCustomAgents = () => customAgents(useStore((s) => s.roles), DOC_NAMES);
 
 /** Lets pages link to each other without threading a callback through every component. */
 const DocsNav = createContext<(p: Page) => void>(() => {});
@@ -51,11 +55,14 @@ const PageLink = ({ to, children }: { to: Page; children: ReactNode }) => {
 type Check = { found: boolean; path: string | null; version: string | null; signedIn: boolean; detail: string } | null;
 
 export function DocsView({ initialPage }: { initialPage?: string }) {
+  const custom = useCustomAgents();
+  const customOf = (p: Page) => custom.find((r) => `agent:${r.name}` === p);
   const [page, setPage] = useState<Page>(() => {
     const p = initialPage as Page | undefined;
-    return p && (PAGES.some((x) => x.id === p) || agentOf(p)) ? p : "start";
+    return p && (PAGES.some((x) => x.id === p) || agentOf(p) || customOf(p)) ? p : "start";
   });
   const agent = agentOf(page);
+  const customAgent = agent ? undefined : customOf(page);
   const [check, setCheck] = useState<Check>(null);
   const [checking, setChecking] = useState(false);
   const run = async () => {
@@ -72,8 +79,8 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
           {PAGES.map((p) => (
             <Fragment key={p.id}>
               <button className={page === p.id ? "active" : ""} onClick={() => setPage(p.id)}><p.icon size={16} /> {p.label}</button>
-              {p.id === "agents" && (page === "agents" || agent) && AGENT_DOCS.map((a) => (
-                <button key={a.name} className={`sub ${agent?.name === a.name ? "active" : ""}`} onClick={() => setPage(`agent:${a.name}`)}>
+              {p.id === "agents" && (page === "agents" || agent || customAgent) && [...AGENT_DOCS, ...custom].map((a) => (
+                <button key={a.name} className={`sub ${page === `agent:${a.name}` ? "active" : ""}`} onClick={() => setPage(`agent:${a.name}`)}>
                   <RoleIcon role={a.name} size={18} /> {a.title}
                 </button>
               ))}
@@ -90,6 +97,7 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
           {page === "use" && <Use />}
           {page === "agents" && <Agents />}
           {agent && <AgentPage doc={agent} />}
+          {customAgent && <CustomAgentPage role={customAgent} />}
           {page === "superpowers" && <Superpowers />}
           {page === "trouble" && <Trouble />}
         </article>
@@ -338,7 +346,7 @@ function Trouble() {
 
 function Agents() {
   const roles = useStore((s) => s.roles);
-  const custom = roles.filter((r) => r.source === "user" && !AGENT_DOCS.some((a) => a.name === r.name));
+  const custom = useCustomAgents();
   const overridden = new Set(roles.filter((r) => r.source === "user").map((r) => r.name));
   return <>
     <h3>Agents &amp; when to use them</h3>
@@ -372,6 +380,14 @@ function Agents() {
       ))}
     </div>
 
+    <h4>Your custom agents</h4>
+    {custom.length > 0 ? <>
+      <p className="muted small">Agents you imported, installed from the Marketplace, or that TheFlashMaster created for you.</p>
+      <div className="agent-grid" data-testid="custom-agents">
+        {custom.map((r) => <CustomCard key={r.name} role={r} />)}
+      </div>
+    </> : <p className="muted small">None yet. Import an agent file from Settings → Agents, install one from the Marketplace, or ask TheFlashMaster to create one; it shows up here.</p>}
+
     <h4>How the agents work together</h4>
     <div className="agent-lanes">
       <div><b>Understand</b><span>Requirements Analyst, Jazz Work Item Analyst</span></div>
@@ -381,16 +397,6 @@ function Agents() {
       <div><b>Explain</b><span>NOW Analysis &amp; RCA, Presentation Expert</span></div>
     </div>
     <p className="small muted">TheFlashMaster moves work through these stages, and the <PageLink to="superpowers">Superpowers workflow</PageLink> makes the order strict.</p>
-
-    {custom.length > 0 && <>
-      <h4>Your custom agents</h4>
-      <p className="muted small">Agents you imported, installed from the Marketplace, or that TheFlashMaster created for you.</p>
-      <div className="use-grid">
-        {custom.map((r) => (
-          <UseItem key={r.name} icon={<RoleIcon role={r.name} size={22} />} title={`${r.title} (@${r.name})`}>{r.description}</UseItem>
-        ))}
-      </div>
-    </>}
 
     <h4>Tips</h4>
     <ul className="docs-list">
@@ -409,13 +415,50 @@ function PageCard({ doc: a, customised }: { doc: AgentDoc; customised: boolean }
     <button className="agent-card" onClick={() => go(`agent:${a.name}`)}>
       <RoleIcon role={a.name} size={30} framed />
       <div>
-        <b>{a.title}</b>{customised && <span className="pill">customised</span>}
+        <b>{a.title}{customised && <span className="pill">customised</span>}</b>
         <code>@{a.name}</code>
         <span className="muted small">{a.summary}</span>
       </div>
       <ChevronRight size={16} className="agent-card-go" />
     </button>
   );
+}
+
+function CustomCard({ role: r }: { role: RoleDef }) {
+  const go = useContext(DocsNav);
+  return (
+    <button className="agent-card" onClick={() => go(`agent:${r.name}`)}>
+      <RoleIcon role={r.name} size={30} framed />
+      <div>
+        <b>{r.title}<span className="pill">{r.source === "builtin" ? "built-in" : "custom"}</span></b>
+        <code>@{r.name}</code>
+        <span className="muted small">{r.description || "No description."}</span>
+      </div>
+      <ChevronRight size={16} className="agent-card-go" />
+    </button>
+  );
+}
+
+/** Page for an agent without hand-written docs: what its file says about it. */
+function CustomAgentPage({ role: r }: { role: RoleDef }) {
+  const chatWithAgent = useStore((s) => s.chatWithAgent);
+  return <>
+    <p className="small"><PageLink to="agents">Agents</PageLink> <span className="muted">/ {r.title}</span></p>
+    <header className="agent-hero">
+      <RoleIcon role={r.name} size={46} framed />
+      <div>
+        <h3>{r.title}</h3>
+        <div className="row gap wrap"><code>@{r.name}</code><span className="pill amber">custom agent</span></div>
+      </div>
+      <button className="primary agent-hero-chat" onClick={() => chatWithAgent(r.name)}><MessageCircle size={15} /> Chat with {r.title}</button>
+    </header>
+    <h4>Purpose</h4>
+    <p>{r.description || "This agent's file has no description."}</p>
+    <h4>Tools</h4>
+    <div className="agent-doc-tools">{r.tools.length ? r.tools.map((t) => <span key={t} className="pill">{t}</span>) : <span className="muted small">No tool servers.</span>}</div>
+    {r.skills.length > 0 && <><h4>Workflow skills</h4><div className="agent-doc-tools">{r.skills.map((k) => <span key={k} className="pill">/{k}</span>)}</div></>}
+    <p className="muted small">Runs on {r.harness ?? "the default harness"}{r.model ? ` with ${r.model}` : ""}. Edit or remove it in Settings → Agents.</p>
+  </>;
 }
 
 function Actor({ actor }: { actor: string }) {

@@ -31,8 +31,8 @@ async function stopChat(chatId: string): Promise<boolean> {
 
 async function newChat(): Promise<void> {
   const st = useStore.getState();
-  const projectId = st.currentProjectId ?? st.projects[0]?.id;
-  if (!projectId) { st.toast("warn", "Add a project folder first, then start a chat in it."); return; }
+  // No project selected: the chat goes to "No project", never into the first project in the list.
+  const projectId = st.currentProjectId;
   const c = await api().createChat({ projectId, agentRole: "flashmaster", title: "New chat" });
   st.upsertChat(c);
   await st.openChat(c.id);
@@ -53,6 +53,7 @@ function runShortcut(id: ShortcutId): void {
       break;
     }
     case "stop": if (chatId) void stopChat(chatId); break;
+    case "search": usePalette.getState().setOpen(false); useStore.setState((s) => ({ searchOpen: !s.searchOpen })); break;
   }
 }
 
@@ -110,6 +111,7 @@ function PaletteBox({ onClose }: { onClose: () => void }) {
       { id: "a:new", group: "Action", label: "New chat", keywords: "create start", icon: <MessageSquarePlus size={16} />, run: () => runShortcut("newChat"), shortcut: "newChat" },
       ...(currentChat && runningInChat(currentChat).length ? [{ id: "a:stop", group: "Action", label: "Stop agents in this chat", keywords: "cancel halt", icon: <Square size={14} />, run: () => runShortcut("stop"), shortcut: "stop" as const }] : []),
       ...(currentChat ? [{ id: "a:focus", group: "Action", label: "Focus the message box", keywords: "composer type write", icon: <TextCursorInput size={16} />, run: focusComposer, shortcut: "focusComposer" as const }] : []),
+      { id: "a:search", group: "Action", label: "Search all chats", keywords: "find messages history", icon: <Search size={16} />, run: () => runShortcut("search"), shortcut: "search" },
       { id: "a:theme", group: "Action", label: "Switch light / dark theme", keywords: "appearance mode", icon: <SunMoon size={16} />, run: () => toggleTheme() },
     ];
     const order = chatOrder(st.masterChatId, st.projects.map((p) => p.id), st.chats);

@@ -8,12 +8,13 @@ export function AgentsView() {
   const [project, setProject] = useState<string>("");
   const list = Object.values(st.agents)
     .filter((a) => filter === "all" || ["running", "paused", "idle", "interrupted"].includes(a.status))
-    .filter((a) => !project || (project === "master" ? a.projectId === null : a.projectId === project))
+    .filter((a) => !project || (project === "none" ? a.projectId === null : a.projectId === project))
     .sort((a, b) => b.startedAt - a.startedAt);
   const running = Object.values(st.agents).filter((a) => a.status === "running").length;
   const paused = Object.values(st.agents).filter((a) => a.status === "paused").length;
   const interrupted = Object.values(st.agents).filter((a) => a.status === "interrupted").length;
-  const pname = (id: string | null) => (id ? st.projects.find((p) => p.id === id)?.name ?? "—" : "Master");
+  const pname = (a: { projectId: string | null; role: string }) =>
+    a.projectId ? st.projects.find((p) => p.id === a.projectId)?.name ?? "—" : a.role === "flashmaster" ? "Master chat" : "No project";
 
   return (
     <div className="page">
@@ -29,7 +30,7 @@ export function AgentsView() {
           )}
           <select value={project} onChange={(e) => setProject(e.target.value)}>
             <option value="">All projects</option>
-            <option value="master">Master chat</option>
+            <option value="none">No project</option>
             {st.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <div className="seg">
@@ -53,7 +54,7 @@ export function AgentsView() {
                   <div className="row gap-s"><span className="avatar small"><RoleIcon role={a.role} size={24} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /></span> <strong>{agentTitle(a)}</strong></div>
                   {a.parentAgentId && <div className="muted small row gap-s"><CornerDownRight size={12} /> delegated by {agentTitle(st.agents[a.parentAgentId])}</div>}
                 </td>
-                <td>{pname(a.projectId)}</td>
+                <td>{pname(a)}</td>
                 <td>{a.harness}{a.harness === "duo" && <span className="warn-badge" title="GitLab Duo headless mode auto-approves its own tools">!</span>}</td>
                 <td><span className={`status st-${a.status}`}>{a.status}</span></td>
                 <td className="activity" title={a.lastActivity ?? ""}>

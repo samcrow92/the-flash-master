@@ -145,3 +145,31 @@ describe("role icons", () => {
     for (const f of ["src/renderer/components/SpecialistsPill.tsx", "src/renderer/styles.css"]) expect(read(f)).not.toContain("activity-ring");
   });
 });
+
+describe("running-agent chip", () => {
+  // The icon, label and round pause/stop buttons must share one centre line (they drifted when the label was inline text).
+  it("lays out icon, label and buttons as a centred flex row with fixed-size round buttons", () => {
+    const css = read("src/renderer/styles.css");
+    const rule = (sel: string) => css.match(new RegExp(`^${sel.replace(/\./g, "\\.")} \\{([^}]*)\\}`, "m"))?.[1] ?? "";
+    expect(rule(".agent-chip")).toMatch(/display: inline-flex;.*align-items: center;.*height: \d+px/);
+    expect(rule(".agent-chip .chip-main")).toMatch(/display: inline-flex;.*align-items: center/);
+    expect(rule(".agent-chip .chip-act")).toMatch(/place-items: center;.*width: (\d+)px; height: \1px;.*border-radius: 50%/);
+    expect(css).not.toMatch(/\.agent-chip \.role-badge \{[^}]*vertical-align/);
+    const tsx = read("src/renderer/views/ChatView.tsx");
+    expect(tsx).toContain('<span className="chip-label">');
+    expect(tsx.match(/className="chip-act"/g)?.length).toBe(4);
+  });
+});
+
+describe("agents without a project", () => {
+  // Starting an agent or chat with no project selected must not fall back to the first project in the list.
+  it("no renderer code that starts chats picks projects[0]", () => {
+    for (const f of ["src/renderer/agentChat.ts", "src/renderer/components/SpecialistsPill.tsx", "src/renderer/components/CommandPalette.tsx", "src/renderer/store.ts"]) {
+      expect(read(f), f).not.toMatch(/projects\[0\]|projectIds\[0\]/);
+    }
+  });
+  it("the sidebar shows a No project section and the store loads its chats", () => {
+    expect(read("src/renderer/components/Sidebar.tsx")).toContain("<NoProjectSection");
+    expect(read("src/renderer/store.ts")).toMatch(/refreshChats\(null\)/);
+  });
+});

@@ -54,10 +54,17 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       // The classic side panel, then the same thread popped out into its own window
       await js(`document.querySelector('.thread-pill')?.click()`);
       await sleep(700);
-      await js(`document.querySelector('.inline-thread.open button[title="Open in side panel"]')?.click()`);
+      await js(`document.querySelector('.inline-thread.open button[title="Show in Threads panel"]')?.click()`);
       await sleep(900);
-      await shot(join(demo, "2-thread-side-panel.png"));
-      await js(`document.querySelector('.thread-side button[title="Open in new window"]')?.click()`);
+      await shot(join(demo, "2-threads-panel.png"));
+      await js(`document.querySelector('.threads-panel button[title="Collapse the Threads panel"]')?.click()`);
+      await sleep(500);
+      await shot(join(demo, "2-threads-panel-rail.png"));
+      await js(`document.querySelector('.threads-panel .tpl-rail-btn')?.click()`);
+      await sleep(300);
+      await js(`document.querySelector('.thread-pill')?.click()`);
+      await sleep(700);
+      await js(`document.querySelector('.inline-thread.open button[title="Open in new window"]')?.click()`);
       await sleep(3500);
       const tw = BrowserWindow.getAllWindows().find((w) => w !== win && w.webContents.getURL().includes("#thread/"));
       if (tw) { writeFileSync(join(demo, "2-thread-window.png"), (await tw.webContents.capturePage()).toPNG()); tw.close(); }
@@ -320,7 +327,11 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     // The window/taskbar icon must load on this platform (Windows reads the .ico through its own icon loader).
     const iconOk = !!icon && !icon.isEmpty() && (process.platform !== "win32" || icon.file.endsWith(".ico"));
     log(iconOk ? "info" : "error", `smoke-icon: ok=${iconOk} file=${icon?.file ?? "-"} size=${icon?.getSize().width ?? 0}`);
+    // Chat search must answer through IPC (the main log says whether FTS5 or the LIKE fallback is in use).
+    const search = await js<string>("window.flash.api.searchMessages('brake').then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
+    log(search === "ok" ? "info" : "error", `smoke-search: ${search}`);
     log("info", `smoke: ui=${ok}`);
+    if (search !== "ok") { app.exit(1); return; }
     app.exit(ok && iconOk ? 0 : 1);
   } catch (e) {
     log("error", `smoke failed: ${String(e)}`);

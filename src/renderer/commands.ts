@@ -1,10 +1,11 @@
 import type { Chat } from "@shared/types";
+import { NO_PROJECT } from "./agentChat";
 
 /**
  * App-wide keyboard shortcuts and command palette ranking (pure, so tests can cover them without a DOM).
  * "Mod" is Cmd on macOS and Ctrl on Windows/Linux.
  */
-export type ShortcutId = "palette" | "newChat" | "settings" | "focusComposer" | "prevChat" | "nextChat" | "stop";
+export type ShortcutId = "palette" | "newChat" | "settings" | "focusComposer" | "prevChat" | "nextChat" | "stop" | "search";
 
 export const SHORTCUTS: Record<ShortcutId, { keys: string; label: string }> = {
   palette: { keys: "Mod+K", label: "Command palette" },
@@ -14,6 +15,7 @@ export const SHORTCUTS: Record<ShortcutId, { keys: string; label: string }> = {
   prevChat: { keys: "Alt+↑", label: "Previous chat" },
   nextChat: { keys: "Alt+↓", label: "Next chat" },
   stop: { keys: "Esc", label: "Stop agents in this chat" },
+  search: { keys: "Mod+Shift+F", label: "Search all chats" },
 };
 
 export interface KeyLike { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }
@@ -27,6 +29,7 @@ export function matchShortcut(e: KeyLike, mac: boolean): ShortcutId | null {
     if (key === ",") return "settings";
     if (key === "l") return "focusComposer";
   }
+  if (mod && !e.altKey && e.shiftKey && key === "f") return "search";
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
     if (key === "ArrowUp") return "prevChat";
     if (key === "ArrowDown") return "nextChat";
@@ -41,11 +44,11 @@ export function shortcutLabel(keys: string, mac: boolean): string {
   return keys.replace("Mod+", "⌘").replace("Alt+", "⌥").replace("Shift+", "⇧");
 }
 
-/** Chats in the order the sidebar shows them: master chat, then each project's open chats (pinned first). */
+/** Chats in the order the sidebar shows them: master chat, each project's open chats (pinned first), then "No project". */
 export function chatOrder(masterChatId: string | null, projectIds: string[], chats: Record<string, Chat[]>): string[] {
   const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
   const ids = masterChatId ? [masterChatId] : [];
-  for (const p of projectIds) ids.push(...(chats[p] ?? []).filter((c) => !c.archived).sort(byPinned).map((c) => c.id));
+  for (const p of [...projectIds, NO_PROJECT]) ids.push(...(chats[p] ?? []).filter((c) => !c.archived).sort(byPinned).map((c) => c.id));
   return ids;
 }
 
