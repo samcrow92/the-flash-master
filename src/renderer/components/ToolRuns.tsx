@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useKeptState } from "./virtual";
 import type { ToolRun } from "@shared/types";
 import { Brain, Check, ChevronRight, Copy, FileText, Globe, Loader2, Pencil, Search, SquareTerminal, Trash2, Wrench, X } from "./icons";
 
@@ -15,7 +16,7 @@ const duration = (r: ToolRun, now: number) => {
 
 /** Commands / tool calls an agent ran for a reply: one line each, click to see the command and its output. */
 export function ToolRuns({ tools }: { tools: ToolRun[] }) {
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useKeptState(`tools-all:${tools[0]?.id ?? ""}`, false);
   const hidden = tools.length > VISIBLE && !all ? tools.length - VISIBLE : 0;
   const shown = hidden ? tools.slice(-VISIBLE) : tools;
   return (
@@ -27,7 +28,7 @@ export function ToolRuns({ tools }: { tools: ToolRun[] }) {
 }
 
 function ToolRunRow({ run }: { run: ToolRun }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useKeptState(`tool-open:${run.id}`, false);
   const Icon = KIND_ICON[run.kind] ?? Wrench;
   const running = run.status === "pending" || run.status === "in_progress";
   const expandable = !!(run.input || run.output || running);

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { ToolRun } from "@shared/types";
 import { replySegments } from "@shared/replySegments";
 import { Markdown } from "./Markdown";
+import { useKeptState } from "./virtual";
 import { ToolRuns } from "./ToolRuns";
 import { Brain, ChevronDown, ChevronUp } from "./icons";
 
@@ -19,7 +20,7 @@ export function ReplyBody({ content, tools }: { content: string; tools?: ToolRun
 
 /** Reasoning stays visible (muted, set off by a rule); long blocks are clipped until "Show all". */
 function Thought({ run }: { run: ToolRun }) {
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useKeptState(`thought-all:${run.id}`, false);
   const [long, setLong] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const running = run.status === "pending" || run.status === "in_progress";

@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useVirtualList } from "../components/virtual";
 import { ToolRuns } from "../components/ToolRuns";
 import type { HarnessId, Message } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
@@ -16,6 +17,12 @@ import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, Compass, Copy, 
 import { Dots } from "../components/Dots";
 import { SpecialistsPill } from "../components/SpecialistsPill";
 
+/** Per open chat: scroll a message into view even when it isn't mounted (search results, jump-to-message). */
+const revealers = new Map<string, (id: string, block?: "start" | "center") => boolean>();
+export function revealMessage(chatId: string, messageId: string, block: "start" | "center" = "center"): boolean {
+  return revealers.get(chatId)?.(messageId, block) ?? false;
+}
+
 const EMOJIS = ["👍", "👎", "✅", "❌", "🎉", "👀", "❤️", "🚀"];
 
 export function ChatView({ chatId }: { chatId: string }) {
@@ -28,23 +35,21 @@ export function ChatView({ chatId }: { chatId: string }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
 
-  // Stick to the latest message: on open / chat switch, while content grows (streaming, images, diagrams)
-  // and for new messages — until the user scrolls up to read; scrolling back down re-attaches.
-  const innerRef = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
-  const toBottom = () => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; };
-  useLayoutEffect(() => { pinned.current = true; toBottom(); }, [chatId]);
-  useLayoutEffect(() => { if (pinned.current) toBottom(); }, [messages]);
+  // Only the messages near the viewport are mounted; the list sticks to the latest message (on open, while a reply
+  // streams, for new messages) until the user scrolls up to read, and scrolling back down re-attaches.
+  const keys = useMemo(() => messages.map((m) => m.id), [messages]);
+  const vl = useVirtualList(listRef, keys, chatId);
   useEffect(() => {
-    const el = listRef.current, inner = innerRef.current;
-    if (!el || !inner) return;
-    const onScroll = () => { pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
-    const ro = new ResizeObserver(() => { if (pinned.current) toBottom(); });
-    ro.observe(inner);
-    ro.observe(el);
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => { ro.disconnect(); el.removeEventListener("scroll", onScroll); };
-  }, [chatId, !!chat]);
+    revealers.set(chatId, vl.scrollToKey);
+    return () => { if (revealers.get(chatId) === vl.scrollToKey) revealers.delete(chatId); };
+  }, [chatId, vl.scrollToKey]);
+  // Messages already shown once don't replay their entrance animation when they scroll back into view.
+  const seen = useRef(new Set<string>());
+  const seenFor = useRef(chatId);
+  if (seenFor.current !== chatId) { seenFor.current = chatId; seen.current = new Set(); }
+  const slice = messages.slice(vl.start, vl.end);
+  const replay = new Set(slice.filter((m) => seen.current.has(m.id)).map((m) => m.id));
+  useEffect(() => { for (const m of slice) seen.current.add(m.id); });
 
   if (!chat) return <div className="empty">Chat not found.</div>;
 
@@ -133,9 +138,15 @@ export function ChatView({ chatId }: { chatId: string }) {
 
         <div className="messages-area">
           <div className="messages" ref={listRef}>
-            <div className="messages-inner" ref={innerRef}>
+            <div className="messages-inner virtual">
               {messages.length === 0 && <EmptyChat isMaster={isMaster} />}
-              {messages.map((m) => <MessageItem key={m.id} m={m} />)}
+              <div className="vl-pad" style={{ height: vl.padTop }} />
+              {slice.map((m) => (
+                <div key={m.id} className={`vl-item ${replay.has(m.id) ? "vl-seen" : ""}`} data-vkey={m.id} data-msg-id={m.id} ref={vl.measure}>
+                  <MessageItem m={m} />
+                </div>
+              ))}
+              <div className="vl-pad" style={{ height: vl.padBottom }} />
             </div>
           </div>
           <SpecialistsPill />
@@ -184,7 +195,8 @@ function DeliveryBadge({ steer, state }: { steer: boolean; state?: keyof typeof 
   );
 }
 
-export function MessageItem({ m, inThread }: { m: Message; inThread?: boolean }) {
+/** Memoised: a streaming reply re-renders only its own message, not the whole list. */
+export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Message; inThread?: boolean }) {
   const role = roleOf(m.role);
   const threadOpen = useStore((s) => !inThread && !!s.openThreads[m.id]);
   const [focusReq, setFocusReq] = useState(0);
@@ -250,7 +262,7 @@ export function MessageItem({ m, inThread }: { m: Message; inThread?: boolean })
       </div>
     </div>
   );
-}
+});
 
 const plural = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`;
 
@@ -281,7 +293,8 @@ function ThreadPill({ root, open, onClick }: { root: Message; open: boolean; onC
 function InlineThread({ root, open, focusReq }: { root: Message; open: boolean; focusReq: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(open);
-  const [shown, setShown] = useState(false);
+  // Already open when mounted (the message scrolled back into view, or the chat was reopened): show it without replaying the expand.
+  const [shown, setShown] = useState(open);
 
   useEffect(() => {
     if (open) { setMounted(true); return; }
