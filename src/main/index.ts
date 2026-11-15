@@ -34,6 +34,7 @@ import { makeLogger } from "./log";
 import { Marketplace, normaliseUrl } from "./marketplace";
 import { runSmoke } from "./smoke";
 import { iconCandidates } from "./app-icon";
+import { Terminals } from "./terminal";
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName("TheFlashMaster");
@@ -109,6 +110,8 @@ function createRole(spec: AgentSpec, createdBy: string, keep: boolean): RoleDef 
 }
 
 let win: BrowserWindow | null = null;
+/** Integrated terminals live in the main window only, so their output goes there and nowhere else. */
+const terminals = new Terminals((e) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("flash:event", e); });
 /** Threads popped out into their own windows, keyed by root message id; they get every app event like the main window. */
 const threadWins = new Map<string, BrowserWindow>();
 const emit = (e: AppEvent) => {
@@ -806,6 +809,10 @@ const api: FlashApi = {
     else if (action === "maximize") { if (win.isFullScreen()) win.setFullScreen(false); else if (win.isMaximized()) win.unmaximize(); else win.maximize(); }
     else if (action === "close") win.close();
   },
+  terminalOpen: async (input) => terminals.open(input),
+  terminalWrite: async (id, data) => terminals.write(id, data),
+  terminalResize: async (id, cols, rows) => terminals.resize(id, cols, rows),
+  terminalClose: async (id) => terminals.close(id),
 };
 
 for (const [name, fn] of Object.entries(api)) {
@@ -852,7 +859,9 @@ function createWindow(): void {
   win.on("maximize", pushState).on("unmaximize", pushState).on("restore", pushState).on("focus", pushState).on("blur", pushState)
     .on("enter-full-screen", pushState).on("leave-full-screen", pushState);
   win.once("ready-to-show", () => win?.show());
-  win.on("closed", () => { for (const w of threadWins.values()) if (!w.isDestroyed()) w.close(); });
+  win.on("closed", () => { terminals.closeAll(); for (const w of threadWins.values()) if (!w.isDestroyed()) w.close(); });
+  // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
+  win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
   if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
@@ -978,7 +987,7 @@ app.whenReady().then(async () => {
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
 });
 
-app.on("before-quit", () => { void orch.stopAll(); bridge.stop(); db.close(); });
+app.on("before-quit", () => { terminals.closeAll(); void orch.stopAll(); bridge.stop(); db.close(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 // macOS: clicking the Dock icon with no window open brings the main window back.
 app.on("activate", () => { if (!app.isReady()) return; if (!win || win.isDestroyed()) createWindow(); else win.show(); });

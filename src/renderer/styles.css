@@ -1212,3 +1212,31 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .projects { overflow-x: hidden; }
 .project-name { min-width: 0; flex: 1; }
 .project-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- integrated terminal: a glass panel that drops from the title bar, or fills the window when expanded ---------- */
+.titlebar .term-toggle.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.term-panel { position: fixed; top: 40px; right: 10px; width: min(860px, calc(100vw - 20px)); height: min(420px, calc(100vh - 60px)); z-index: 30;
+  display: flex; flex-direction: column; border-radius: 16px; border: 1px solid var(--rim); background: var(--glass-strong);
+  backdrop-filter: blur(40px) saturate(180%); box-shadow: var(--hi), var(--shadow); overflow: hidden;
+  opacity: 0; visibility: hidden; transform: translateY(-8px) scale(.985); transform-origin: top right;
+  transition: opacity .16s ease-out, transform .18s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .18s, width .2s, height .2s, top .2s, right .2s; }
+.term-panel.open { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.term-panel.expanded { top: 40px; right: 10px; width: calc(100vw - 20px); height: calc(100vh - 50px); }
+.term-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 4px 8px; border-bottom: 1px solid var(--line); flex: none; }
+.term-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.term-tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 9px; border-radius: 8px; color: var(--muted);
+  font-size: 12px; white-space: nowrap; cursor: default; user-select: none; }
+.term-tab:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg); }
+.term-tab.active { background: color-mix(in srgb, var(--fg) 9%, transparent); color: var(--fg); }
+.term-x, .term-btn { display: inline-grid; place-items: center; padding: 0 !important; border: none; background: transparent; color: var(--muted);
+  border-radius: 6px; box-shadow: none; }
+.term-x { width: 18px; height: 18px; opacity: 0; }
+.term-tab:hover .term-x, .term-tab.active .term-x { opacity: .8; }
+.term-btn { width: 26px; height: 26px; flex: none; }
+.term-x:hover, .term-btn:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); opacity: 1; }
+.term-actions { display: flex; gap: 2px; flex: none; }
+.term-body { position: relative; flex: 1; min-height: 0; }
+.term-view { position: absolute; inset: 6px 4px 6px 12px; visibility: hidden; }
+.term-view.visible { visibility: visible; }
+.term-view .xterm, .term-view .xterm-viewport, .term-view .xterm-screen { background: transparent !important; }
+.term-view .xterm-viewport { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent; }

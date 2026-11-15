@@ -13,6 +13,7 @@ import { MarketplaceView } from "./views/MarketplaceView";
 import { DocsView } from "./views/DocsView";
 import { ContextMenuHost } from "./components/ContextMenu";
 import { TitleBar } from "./components/TitleBar";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { Dots } from "./components/Dots";
 import { Zap } from "./components/icons";
 
@@ -37,7 +38,8 @@ export function App() {
 
   return (
     <div className="shell">
-    <TitleBar />
+    <TitleBar terminal />
+    <TerminalPanel />
     <div className="app"
       onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
