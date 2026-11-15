@@ -4,13 +4,13 @@
  *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, thread, reactions,
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  */
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, type NativeImage } from "electron";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m: string) => void): Promise<void> {
+export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m: string) => void, icon?: NativeImage & { file: string }): Promise<void> {
   const js = <T = unknown>(code: string) => win.webContents.executeJavaScript(code) as Promise<T>;
   const shot = async (file: string) => writeFileSync(file, (await win.webContents.capturePage()).toPNG());
   const click = (text: string, sel = "button") =>
@@ -317,8 +317,11 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(400);
       await shot(join(demo, "8-settings-mcp.png"));
     }
+    // The window/taskbar icon must load on this platform (Windows reads the .ico through its own icon loader).
+    const iconOk = !!icon && !icon.isEmpty() && (process.platform !== "win32" || icon.file.endsWith(".ico"));
+    log(iconOk ? "info" : "error", `smoke-icon: ok=${iconOk} file=${icon?.file ?? "-"} size=${icon?.getSize().width ?? 0}`);
     log("info", `smoke: ui=${ok}`);
-    app.exit(ok ? 0 : 1);
+    app.exit(ok && iconOk ? 0 : 1);
   } catch (e) {
     log("error", `smoke failed: ${String(e)}`);
     app.exit(2);

@@ -33,6 +33,7 @@ import { prepareInstructions } from "./harness/instructions";
 import { makeLogger } from "./log";
 import { Marketplace, normaliseUrl } from "./marketplace";
 import { runSmoke } from "./smoke";
+import { iconCandidates } from "./app-icon";
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName("TheFlashMaster");
@@ -47,12 +48,18 @@ mkdirSync(dataDir, { recursive: true });
 const resources = app.isPackaged ? process.resourcesPath : app.getAppPath();
 /**
  * The lightning-bolt app icon for every window. Windows takes the taskbar icon from the app ID's executable unless the app
- * sets its own ID; without it, running from source shows Electron's icon. The .ico carries all sizes (16–256 px).
+ * sets its own ID; without it, running from source shows Electron's icon. The .ico carries all sizes (16–256 px, small
+ * frames as BMP). It is loaded once as an image, falling back to the PNG when the .ico can't be read, so a bad path or file
+ * shows in the log (and fails the smoke test) instead of silently leaving the taskbar without an icon.
  */
 if (process.platform === "win32") app.setAppUserModelId("com.theflashmaster.app");
 const appIcon = (() => {
-  const ico = join(resources, "build", "icon.ico");
-  return process.platform === "win32" && existsSync(ico) ? ico : join(resources, "build", "icon.png");
+  const files = iconCandidates({ platform: process.platform, dirs: [app.isPackaged ? process.resourcesPath : undefined, app.getAppPath(), join(here, "..", ".."), process.cwd()] });
+  for (const file of files.filter((f) => existsSync(f))) {
+    const img = nativeImage.createFromPath(file);
+    if (!img.isEmpty()) return Object.assign(img, { file });
+  }
+  return Object.assign(nativeImage.createEmpty(), { file: "" });
 })();
 const userRolesDir = join(dataDir, "agents");
 mkdirSync(userRolesDir, { recursive: true });
@@ -63,6 +70,8 @@ const policyFile = process.platform === "win32" ? join(process.env.PROGRAMDATA ?
 const settings = new SettingsStore(join(dataDir, "settings.json"), policyFile);
 const log = makeLogger(join(dataDir, "logs"), () => settings.get().advanced.logLevel);
 log("info", `starting TheFlashMaster ${app.getVersion()}`);
+if (appIcon.isEmpty()) log("error", "app icon not found or unreadable: windows and the taskbar fall back to the default icon");
+else log("info", `app icon: ${appIcon.file} (${appIcon.getSize().width} px)`);
 const db = new Db(join(dataDir, "flashmaster.db"));
 db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
 settings.onChange((st) => { db.defaultAutopilot = st.general.autopilotDefault !== false; });
@@ -859,7 +868,7 @@ function createWindow(): void {
   win.once("ready-to-show", () => win?.show());
   win.on("closed", () => { for (const w of threadWins.values()) if (!w.isDestroyed()) w.close(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
-  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) win.webContents.once("did-finish-load", () => void runSmoke(win!, log));
+  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });
