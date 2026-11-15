@@ -17,6 +17,7 @@ const TOOL_KIND: Record<string, ToolKind> = { bash: "execute", read: "read", wri
 
 export class PiSession implements HarnessSession {
   sessionId: string | null = null;
+  resumed = false;
   private child: ChildProcess;
   private buf = "";
   private exited = false;
@@ -52,6 +53,7 @@ export class PiSession implements HarnessSession {
     const st = await this.command({ type: "get_state" });
     if (!st.success) throw new Error(`pi did not start: ${st.error ?? "no response"}`);
     this.sessionId = st.data?.sessionFile ?? st.data?.sessionId ?? null;
+    this.resumed = !!this.o.resumeSessionId && this.sessionId === this.o.resumeSessionId;
     this.currentModel = st.data?.model ? `${st.data.model.provider}/${st.data.model.id}` : null;
   }
 

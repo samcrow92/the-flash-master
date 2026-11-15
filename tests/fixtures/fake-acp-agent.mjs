@@ -1,5 +1,7 @@
 // A fake ACP agent for tests: streams chunks, asks permission, reads a file through the client, reports usage.
 import { createInterface } from "node:readline";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 let nextId = 1000;
 const pending = new Map();
@@ -24,6 +26,11 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       models: { currentModelId: "gpt-5", availableModels: [{ modelId: "gpt-5", name: "GPT-5" }, { modelId: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" }] },
       configOptions: [{ id: "reasoning_effort", name: "Reasoning", type: "select", category: "thought_level", currentValue: "medium",
         options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }] }] });
+    case "session/load":
+      // FAKE_LOAD=1: resumes sessions, replaying the old conversation first (as ACP agents do).
+      if (process.env.FAKE_LOAD !== "1") return send({ id: msg.id, error: { code: -32601, message: "loadSession not supported" } });
+      send({ method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "OLD HISTORY " } } } });
+      return reply({});
     case "session/set_config_option": thinking = msg.params.value; return reply({ configOptions: [] });
     case "session/set_model": model = msg.params.modelId; return reply({});
     case "session/cancel": cancelled = true; return;
@@ -32,6 +39,15 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       const sid = msg.params.sessionId;
       const text = msg.params.prompt[0].text;
       const upd = (update) => send({ method: "session/update", params: { sessionId: sid, update } });
+      // CRASHONCE: the process dies mid-reply the first time (a marker file in the cwd remembers it); CRASHALWAYS: every
+      // time, unless started with --steady (a second harness in the tests).
+      const marker = join(process.cwd(), ".fake-crashed");
+      if ((text.includes("CRASHONCE") && !existsSync(marker)) || (text.includes("CRASHALWAYS") && !process.argv.includes("--steady"))) {
+        writeFileSync(marker, "1");
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Partial answer " } });
+        return setTimeout(() => process.exit(3), 20);
+      }
+      if (text.includes("interrupted because the agent process exited")) upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "(continuing) " } });
       if (text.includes("NETFAIL") && netFails < 1) { netFails++; return send({ id: msg.id, error: { code: -32603, message: "Connection error.: other side closed (UND_ERR_SOCKET)" } }); }
       // Text-mode tools: an agent without the app's tools writes TOOL lines.
       if (text.includes("## Tool results")) {

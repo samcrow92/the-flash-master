@@ -581,7 +581,9 @@ export class Orchestrator {
     /** A specialist the coordinator is blocked waiting on runs in the coordinator's slot (else both could wait on each other forever). */
     borrowSlot?: boolean;
     /** Round of text delegation this turn belongs to (results fed back to the coordinator), to stop runaway loops. */
-    textRound?: number }): Promise<void> {
+    textRound?: number;
+    /** The same request again after the harness was switched (the failed reply stays out of the history). */
+    retry?: boolean }): Promise<void> {
     const s = this.d.settings();
     const live = t.liveKey ? this.live.get(t.liveKey)! : this.ensureLive(t.chat, t.threadRoot, t.role, t.depth);
     if (!live) return;
@@ -624,6 +626,7 @@ export class Orchestrator {
     let base = 0;
     let finalStatus = "";
     let switchedToText = false;
+    let crashed = false; // the harness exited and a restart did not help: offer another one
     let lastFlush = Date.now();
     const project = t.chat.projectId ? this.d.db.getProject(t.chat.projectId) : null;
     let promptText: string;
@@ -655,7 +658,14 @@ export class Orchestrator {
       };
       if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
       const workDir = live.worktree ?? project?.path ?? null;
-      if (firstTurn) live.session = await this.openSession(live, workDir, t.chat);
+      if (firstTurn) {
+        // A CLI that dies while starting gets one more try before the turn fails.
+        live.session = await this.openSession(live, workDir, t.chat).catch((e) => {
+          if (live.stopped || !HARNESS_EXIT.test(String(e?.message ?? e))) throw e;
+          this.flow(live.agentId, { kind: "status", label: `${live.harness} exited while starting — retrying`, status: "retry" });
+          return this.openSession(live, workDir, t.chat);
+        });
+      }
       // Coordinator: Pi has no MCP, so text mode right away; other harnesses get a few seconds to list the tools,
       // and are checked again after the first reply (some list them only when the first prompt arrives).
       let toolsPending = false;
@@ -677,28 +687,34 @@ export class Orchestrator {
         if (live.harness === "pi") this.enterTextDelegation(live, t);
         else toolsPending = !(await this.waitForTools(live, 5000));
       }
-      // On a (re)started session send a compact history instead of a transcript.
-      let summary: string | null = null;
-      let recent: Message[] = [];
-      if (firstTurn && !t.brief) {
-        const cs = this.d.db.getChatSummary(t.chat.id);
-        const hist = this.d.db.history(t.chat.id, t.threadRoot, cs.upto).filter((m) => m.id !== reply.id && m.status !== "streaming" && !m.marker);
-        hist.pop(); // the user message we are answering is sent as the request
-        const plan = planCompaction(hist, s.tokens.compactAfterTokens, s.tokens.keepRecentTurns);
-        summary = cs.summary || null;
-        if (plan.compact) {
-          summary = extractiveSummary(cs.summary, plan.summarise);
-          const lastSeq = hist[hist.length - plan.keep.length - 1]?.seq ?? cs.upto;
-          this.d.db.setChatSummary(t.chat.id, summary, lastSeq);
+      // On a (re)started session send a compact history instead of a transcript. `first` = the harness session is new
+      // (also after a crash restart that could not resume the old session).
+      const buildPrompt = (first: boolean): string => {
+        let summary: string | null = null;
+        let recent: Message[] = [];
+        if (first && !t.brief) {
+          const cs = this.d.db.getChatSummary(t.chat.id);
+          const hist = this.d.db.history(t.chat.id, t.threadRoot, cs.upto).filter((m) => m.id !== reply.id && m.status !== "streaming" && !m.marker);
+          // The user message we are answering is sent as the request. A retry on another harness also drops what
+          // followed it (the failed reply and the switch offer).
+          if (t.retry) { const u = hist.map((m) => m.author).lastIndexOf("user"); if (u >= 0) hist.splice(u); } else hist.pop();
+          const plan = planCompaction(hist, s.tokens.compactAfterTokens, s.tokens.keepRecentTurns);
+          summary = cs.summary || null;
+          if (plan.compact) {
+            summary = extractiveSummary(cs.summary, plan.summarise);
+            const lastSeq = hist[hist.length - plan.keep.length - 1]?.seq ?? cs.upto;
+            this.d.db.setChatSummary(t.chat.id, summary, lastSeq);
+          }
+          recent = (plan.compact ? plan.keep : hist).slice(-s.tokens.keepRecentTurns) as Message[];
         }
-        recent = (plan.compact ? plan.keep : hist).slice(-s.tokens.keepRecentTurns) as Message[];
-      }
-      // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
-      const roleSkills = firstTurn ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
-      promptText = buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
-        brief: t.brief, firstTurn, clean: s.agents.instructionMode === "clean",
-        houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
-          firstTurn && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", firstTurn && live.textDelegation ? TEXT_DELEGATION_RULES : "", firstTurn && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+        // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
+        const roleSkills = first ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
+        return buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
+          brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean",
+          houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+      };
+      promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
       // Autopilot is read per turn, so toggling it applies to the very next message.
       const chatNow = this.d.db.getChat(t.chat.id) ?? t.chat;
@@ -715,6 +731,42 @@ export class Orchestrator {
         res = await live.session!.prompt(text.trim()
           ? "Your previous response was cut off by a network error. Continue exactly where you stopped; do not repeat what you already wrote."
           : promptText, text.trim() ? [] : atts);
+      }
+      // The agent CLI itself exited mid-turn (crash, out of memory, killed): restart it once, resume its session
+      // and carry on instead of failing the turn. A second exit fails the turn and offers another harness.
+      if (res.stopReason === "error" && !live.stopped && live.session && !live.session.alive) {
+        const label = this.d.harnesses.get(live.harness).label;
+        const prev = live.session.sessionId;
+        const crash = res.error ?? "exited";
+        this.d.log?.("warn", `${label} exited during a turn (${live.role.name}): ${crash}`);
+        this.flow(live.agentId, { kind: "status", label: `${label} exited — restarting`, status: "retry" });
+        this.setStatus(live, "running", `${label} exited — restarting and resuming…`);
+        live.session.close();
+        live.session = null;
+        try {
+          live.session = await this.openSession(live, workDir, t.chat);
+        } catch (e: any) {
+          res = { stopReason: "error", error: String(e?.message ?? e) };
+        }
+        if (live.session && !live.stopped) {
+          const resumed = !!prev && !!live.session.resumed && live.session.sessionId === prev;
+          const wrote = text.slice(base).trim();
+          // Resumed: the agent still has the conversation, so ask it to continue. New session: send history + request again.
+          const again = resumed
+            ? (wrote ? CRASH_CONTINUE : promptText)
+            : buildPrompt(true) + (wrote ? `\n\n${CRASH_CONTINUE}\n\nWhat you had written:\n${wrote.slice(-2000)}` : "");
+          this.setStatus(live, "running", resumed ? `Resumed ${label} session — continuing…` : `Restarted ${label} — continuing…`);
+          res = await live.session.prompt(again, resumed && wrote ? [] : atts);
+          if (res.stopReason !== "error") {
+            this.flow(live.agentId, { kind: "status", label: resumed ? `${label} restarted, session resumed` : `${label} restarted in a new session`, status: "retry" });
+            this.system(t.chat.id, t.threadRoot, `↻ **${label}** exited unexpectedly during ${t.role.title}'s turn; TheFlashMaster restarted it`
+              + (resumed ? " and resumed the session." : " in a new session with the chat history."));
+          }
+        }
+        if (res.stopReason === "error" && !live.stopped && !(live.session?.alive ?? false)) {
+          res = { ...res, error: `${label} exited again after a restart: ${res.error ?? "exited"}` };
+          crashed = true;
+        }
       }
       this.d.db.updateMessage(reply.id, { content: text.slice(base) });
       // The harness was given our MCP servers but none of them reached the app: tools did not load.
@@ -777,6 +829,7 @@ export class Orchestrator {
       this.emitAgent(this.d.db.updateAgent(live.agentId, live.stopped ? { status: "stopped", lastActivity: "Stopped" } : { status: "error", lastActivity: msg }));
       live.session?.close();
       live.session = null;
+      if (!live.stopped && HARNESS_EXIT.test(msg)) crashed = true;
       this.finishWaiters(live, `error: ${msg}`);
       if (t.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(t.taskId, { status: "blocked" }) });
     } finally {
@@ -790,10 +843,11 @@ export class Orchestrator {
       live.currentMessageId = null;
       if (!borrowed) this.releaseSlot();
     }
+    if (crashed && !live.stopped) this.offerHarnessSwitch(live, t);
     if (switchedToText && finalStatus === "done" && !live.stopped && !live.paused && !parseTextDelegations(text).length) {
       // The first reply was written without the delegate tool: have the coordinator re-plan with DELEGATE lines.
       const extra = live.textTools ? this.textToolsFor(live) : "";
-      void this.turn({ ...t, input: `${TEXT_DELEGATION_RULES}${extra ? `\n\n${extra}` : ""}\n\nYour tools are not available, so use this text mode. Re-plan the user's last request now and delegate it with DELEGATE lines.`,
+      void this.turn({ ...t, retry: false, input: `${TEXT_DELEGATION_RULES}${extra ? `\n\n${extra}` : ""}\n\nYour tools are not available, so use this text mode. Re-plan the user's last request now and delegate it with DELEGATE lines.`,
         attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: 1 });
       return;
     }
@@ -807,15 +861,50 @@ export class Orchestrator {
     if (live.redirect && !live.stopped) {
       const r = live.redirect;
       live.redirect = null;
-      void this.turn({ ...t, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
+      void this.turn({ ...t, retry: false, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
         attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false, textRound: 0 });
       return;
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);
-      void this.turn({ ...t, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
+      void this.turn({ ...t, retry: false, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
         taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true, borrowSlot: false, textRound: 0 });
     }
+  }
+
+  /** The harness keeps exiting: offer (✅ / ❌ on a chat message) to move this agent to another harness and retry. */
+  private offerHarnessSwitch(live: Live, t: Parameters<Orchestrator["turn"]>[0]): void {
+    const s = this.d.settings();
+    const from = this.d.harnesses.get(live.harness).label;
+    const alt = this.d.harnesses.alternative(live.harness, s);
+    if (!alt) {
+      this.system(t.chat.id, t.threadRoot, `⚠️ **${from}** keeps exiting for ${t.role.title}, and no other harness is available to switch to. `
+        + "Check **Settings → Harnesses**.", "warn");
+      return;
+    }
+    const to = this.d.harnesses.get(alt).label;
+    const msg = this.d.db.addMessage({ chatId: t.chat.id, parentId: t.threadRoot, author: "system", role: live.role.name,
+      content: `⚠️ **${from}** keeps exiting, so ${t.role.title}'s turn failed.\n\nReact ✅ to switch ${t.role.title} to **${to}** and retry your last message, or ❌ to stay on ${from}.` });
+    this.d.emit({ type: "message.created", message: msg });
+    this.d.emit({ type: "notice", level: "warn", text: `${from} keeps exiting for ${t.role.title}: switch to ${to}?` });
+    this.pendingPermissions.set(msg.id, (yes) => {
+      if (!yes || live.stopped) return;
+      this.switchHarness(live, alt);
+      void this.turn({ ...t, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, retry: true });
+    });
+  }
+
+  /** Moves a live agent to another harness: the old session is closed and the next turn starts a fresh one. */
+  private switchHarness(live: Live, to: HarnessId): void {
+    const from = this.d.harnesses.get(live.harness).label;
+    live.session?.close();
+    live.session = null;
+    live.sessionTokens = 0;
+    live.harness = to;
+    live.model = null;
+    live.warnedTools = false;
+    this.emitAgent(this.d.db.updateAgent(live.agentId, { harness: to, model: null, sessionId: null }));
+    this.flow(live.agentId, { kind: "status", label: `switched from ${from} to ${this.d.harnesses.get(to).label}`, status: "retry" });
   }
 
   private async openSession(live: Live, projectPath: string | null, chat: Chat): Promise<HarnessSession> {
@@ -1046,7 +1135,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     }
     if (live.stopped || !this.live.has(live.key)) return;
     const parts = [results.length ? `## Specialist results\n${results.join("\n\n")}` : "", toolResults.length ? `## Tool results\n${toolResults.join("\n\n")}` : ""].filter(Boolean);
-    void this.turn({ ...t, input: `${parts.join("\n\n")}\n\nContinue: integrate these results and answer, or make further calls the same way.`,
+    void this.turn({ ...t, retry: false, input: `${parts.join("\n\n")}\n\nContinue: integrate these results and answer, or make further calls the same way.`,
       attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: round });
   }
 
@@ -1216,6 +1305,11 @@ const FALLBACK_ROLE: RoleDef = {
 export function isTransientNetworkError(e: string | undefined): boolean {
   return !!e && /connection error|UND_ERR_SOCKET|other side closed|ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|\b50[234]\b|stream (closed|ended)|network/i.test(e);
 }
+
+/** Sent after a crash restart that resumed the session (or with the partial reply, when it could not). */
+const CRASH_CONTINUE = "Your previous response was interrupted because the agent process exited. Continue exactly where you stopped; do not repeat what you already wrote.";
+/** Errors that mean the harness process itself is gone (not a model or protocol error). */
+const HARNESS_EXIT = /harness exited|failed to start|exited again after a restart/i;
 
 export function networkEnv(s: Settings): Record<string, string> {
   const env: Record<string, string> = {};

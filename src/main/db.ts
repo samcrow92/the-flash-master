@@ -270,11 +270,14 @@ export class Db {
     return this.all(sql, ...p).map(toAgent);
   }
   updateAgent(id: string, patch: { status?: AgentStatus; sessionId?: string | null; resultSummary?: string; lastActivity?: string;
+    harness?: HarnessId; model?: string | null;
     ended?: boolean /* false = running again (clears the end time) */ }): AgentRun {
     const sets: string[] = [];
     const p: any[] = [];
     if (patch.status) { sets.push("status=?"); p.push(patch.status); }
     if (patch.sessionId !== undefined) { sets.push("session_id=?"); p.push(patch.sessionId); }
+    if (patch.harness) { sets.push("harness=?"); p.push(patch.harness); }
+    if (patch.model !== undefined) { sets.push("model=?"); p.push(patch.model); }
     if (patch.resultSummary !== undefined) { sets.push("result_summary=?"); p.push(patch.resultSummary); }
     if (patch.lastActivity !== undefined) { sets.push("last_activity=?"); p.push(patch.lastActivity.slice(0, 200)); }
     if (patch.ended) { sets.push("ended_at=?"); p.push(now()); }
