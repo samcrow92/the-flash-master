@@ -21,7 +21,7 @@ export function ThreadWindow({ chatId, rootId }: { chatId: string; rootId: strin
     const st = useStore.getState();
     // init() loads roles, settings, theme and chats (and opens the chat, which also loads its messages).
     void st.init()
-      .then(() => { useStore.setState({ sideThread: { chatId, rootId } }); return useStore.getState().loadThread(chatId, rootId); })
+      .then(() => useStore.getState().loadThread(chatId, rootId))
       .catch((e) => useStore.getState().toast("error", String(e?.message ?? e)))
       .finally(() => setReady(true));
     return off;
