@@ -1,3 +1,4 @@
+import { ResizeHandle } from "../components/ResizeHandle";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Message } from "@shared/types";
 import { ago, roleOf, useStore } from "../store";
@@ -92,6 +93,7 @@ export function ThreadsPanel({ chatId, otherPanel }: { chatId: string; otherPane
           ? <div className="tpl-empty"><MessagesSquare size={22} /><span>No threads in this chat yet.</span><span className="muted small">Hover a message and click Reply to start one.</span></div>
           : list.map((t) => <ThreadRow key={t.rootId} chatId={chatId} t={t} expanded={!!panelThreads[t.rootId]} />)}
       </div>
+      <ResizeHandle panel="threads" edge="left" label="Resize Threads panel" />
     </aside>
   );
 }

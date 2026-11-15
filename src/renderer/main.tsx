@@ -4,6 +4,9 @@ import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ThreadWindow, threadRoute } from "./views/ThreadWindow";
 import "./styles.css";
+import { applyPanelSizes } from "./panelSize";
+
+applyPanelSizes();
 
 const thread = threadRoute(location.hash);
 // Thin, SF Symbols-like strokes everywhere (icons that pass their own strokeWidth keep it).

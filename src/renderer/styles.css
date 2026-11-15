@@ -49,11 +49,11 @@ a { color: var(--blue); }
 .splash { height: 100%; display: grid; place-content: center; text-align: center; color: var(--muted); gap: 8px; }
 .logo-big { font-size: 48px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 60%, transparent)); }
 
-.app { display: grid; grid-template-columns: 260px 1fr; height: 100%; }
+.app { display: grid; grid-template-columns: min(var(--sidebar-w, 252px), max(200px, 34vw)) minmax(0, 1fr); height: 100%; }
 .main { min-width: 0; height: 100%; overflow: hidden; }
 
 /* ---------- sidebar ---------- */
-.sidebar { background: var(--bg2); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; padding: 10px 8px; gap: 4px; }
+.sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; padding: 10px 8px; gap: 4px; }
 .brand { font-weight: 700; font-size: 16px; padding: 4px 8px 10px; letter-spacing: .2px; }
 .bolt { color: var(--accent); }
 .nav, .sidebar-footer { display: flex; flex-direction: column; gap: 2px; }
@@ -81,7 +81,7 @@ a { color: var(--blue); }
 /* ---------- chat ---------- */
 /* Chat, then the Threads panel (a full column or a slim rail), then Progress / Artifacts when one is open. */
 .chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto; height: 100%; }
-.chat-layout.with-thread { grid-template-columns: minmax(0, 1fr) auto 380px; }
+.chat-layout.with-thread { grid-template-columns: minmax(0, 1fr) auto min(var(--side-w, 380px), max(300px, 50vw)); }
 .chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg2); flex-wrap: wrap; }
 .chat-header h2 { margin: 0; font-size: 15px; }
@@ -111,7 +111,7 @@ a { color: var(--blue); }
 .vl-pad { flex: none; }
 .vl-seen > .msg, .vl-seen .ctx-divider { animation: none; }
 .empty-chat { margin: auto; text-align: center; max-width: 560px; padding: 30px; }
-.msg { display: grid; grid-template-columns: 32px 1fr; gap: 10px; padding: 8px 10px; border-radius: 10px; position: relative; }
+.msg { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding: 8px 10px; border-radius: 10px; position: relative; }
 .msg:hover { background: color-mix(in srgb, var(--bg3) 55%, transparent); }
 .msg-user .msg-content { background: var(--user); border-radius: 10px; padding: 8px 12px; display: inline-block; max-width: 100%; }
 .msg-system { opacity: .92; }
@@ -169,7 +169,7 @@ code.inline-code.copied { box-shadow: 0 0 0 1px var(--green); background: color-
 .suggest { position: absolute; bottom: 100%; left: 16px; right: 16px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); max-height: 260px; overflow: auto; z-index: 10; }
 .suggest button { display: flex; justify-content: space-between; width: 100%; border: none; border-radius: 0; background: transparent; padding: 6px 12px; }
 .suggest button.sel, .suggest button:hover { background: var(--bg3); }
-.thread { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+.thread { position: relative; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
 .thread-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .thread-sep { color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); margin: 4px 10px 8px; padding-bottom: 4px; }
 
@@ -884,7 +884,7 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .it-list:has(.it-item + .it-item)::before { content: ""; position: absolute; left: 27px; top: 20px; bottom: 26px; width: 2px; border-radius: 2px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 40%, transparent), color-mix(in srgb, var(--blue) 8%, transparent)); }
 .it-item { position: relative; }
-.inline-thread .msg { grid-template-columns: 24px 1fr; gap: 8px; padding: 6px 10px; animation: none; }
+.inline-thread .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 10px; animation: none; }
 .inline-thread .avatar { width: 24px; height: 24px; font-size: 12px; position: relative; z-index: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg2) 90%, transparent); border-radius: 50%; }
 .inline-thread .msg-head { font-size: 12.5px; }
 .inline-thread .msg-footer { min-height: 0; }
@@ -907,7 +907,7 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .thread-title strong { display: inline-flex; align-items: center; gap: 6px; }
 .thread-title strong svg { color: var(--blue); }
 .thread-title .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-side .msg { grid-template-columns: 24px 1fr; gap: 8px; padding: 6px 10px; }
+.thread-side .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 10px; }
 .thread-side .avatar { width: 24px; height: 24px; font-size: 12px; }
 .thread-window { height: 100vh; display: grid; background: var(--bg); }
 .thread-standalone { border-left: none; animation: none; }
@@ -944,7 +944,7 @@ html[data-focused="false"] .titlebar-icon { opacity: .6; }
 html[data-focused="false"] .win-btn:not(:hover) { color: var(--muted); }
 
 /* ---------- window layout: floating glass panels ---------- */
-.app { flex: 1; min-height: 0; height: auto; grid-template-columns: 252px 1fr; gap: 10px; padding: 0 10px 10px; }
+.app { flex: 1; min-height: 0; height: auto; grid-template-columns: min(var(--sidebar-w, 252px), max(200px, 34vw)) minmax(0, 1fr); gap: 10px; padding: 0 10px 10px; }
 .sidebar, .main { border-radius: 18px; border: 1px solid var(--rim); box-shadow: var(--hi), var(--shadow); backdrop-filter: var(--blur); }
 .sidebar { background: var(--glass-side); padding: 10px 8px; }
 .main { background: var(--glass); }
@@ -1238,7 +1238,7 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 
 /* ---------- integrated terminal: a glass panel that drops from the title bar, or fills the window when expanded ---------- */
 .titlebar .term-toggle.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.term-panel { position: fixed; top: 40px; right: 10px; width: min(860px, calc(100vw - 20px)); height: min(420px, calc(100vh - 60px)); z-index: 30;
+.term-panel { position: fixed; top: 40px; right: 10px; width: min(var(--term-w, 860px), calc(100vw - 20px)); height: min(var(--term-h, 420px), calc(100vh - 60px)); z-index: 30;
   display: flex; flex-direction: column; border-radius: 16px; border: 1px solid var(--rim); background: var(--glass-strong);
   backdrop-filter: blur(40px) saturate(180%); box-shadow: var(--hi), var(--shadow); overflow: hidden;
   opacity: 0; visibility: hidden; transform: translateY(-8px) scale(.985); transform-origin: top right;
@@ -1347,7 +1347,7 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
    whole panel folds to a slim rail. Same frosted surface as the other side panels. */
 .threads-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line);
   background: color-mix(in srgb, var(--fg) 3%, transparent); }
-.tpl-full { width: 340px; animation: side-in .34s var(--it-ease); }
+.tpl-full { position: relative; width: min(var(--threads-w, 340px), max(260px, 45vw)); animation: side-in .34s var(--it-ease); }
 .tpl-rail { width: 46px; align-items: center; padding-top: 10px; }
 .tpl-rail-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 34px; padding: 8px 0; border-radius: 12px;
   background: transparent; border: 1px solid transparent; color: var(--muted); }
@@ -1437,3 +1437,25 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .crash-title { font-size: 15px; font-weight: 600; }
 .crash-detail { color: var(--muted); font-size: 12px; font-family: var(--mono, ui-monospace, monospace); word-break: break-word; }
 .crash-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+/* ===================== drag-to-resize panel edges ===================== */
+/* A thin invisible strip on the panel's edge; on hover (after a beat) or while dragging, a soft accent line appears.
+   Sizes are CSS variables on <html> (see panelSize.ts), so dragging re-renders nothing. */
+.resize-handle { position: absolute; z-index: 5; touch-action: none; outline: none; }
+.rh-right, .rh-left { top: 0; bottom: 0; width: 9px; cursor: col-resize; }
+.rh-right { right: -5px; }
+.app > .sidebar > .rh-right { right: -10px; } /* centred in the 10px gap beside the floating sidebar */
+.rh-left { left: -5px; }
+.rh-bottom { left: 0; right: 0; bottom: -4px; height: 9px; cursor: row-resize; }
+.resize-handle::after { content: ""; position: absolute; border-radius: 2px; background: color-mix(in srgb, var(--accent) 80%, transparent); opacity: 0; transition: opacity .15s ease-out; }
+.rh-right::after, .rh-left::after { top: 0; bottom: 0; left: 4px; width: 2px; }
+.rh-bottom::after { left: 0; right: 0; top: 4px; height: 2px; }
+.term-panel .rh-left { left: 0; } .term-panel .rh-bottom { bottom: 0; }
+.term-panel .rh-left::after { left: 2px; top: 16px; bottom: 16px; } .term-panel .rh-bottom::after { top: 5px; left: 16px; right: 16px; }
+.resize-handle:hover::after { opacity: .55; transition-delay: .25s; }
+.resize-handle:focus-visible::after, html.resizing .resize-handle:active::after { opacity: .9; transition-delay: 0s; }
+html.resizing, html.resizing * { user-select: none !important; }
+html.resizing-h, html.resizing-h * { cursor: col-resize !important; }
+html.resizing-v, html.resizing-v * { cursor: row-resize !important; }
+/* Follow the pointer exactly while dragging. */
+html.resizing .term-panel { transition: none !important; }
