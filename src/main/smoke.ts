@@ -36,6 +36,10 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await send("Analyse the brake light feature: which SWCs and CAN signals are involved, and what should we test?");
       await sleep(900);
       await shot(join(demo, "1-streaming.png"));
+      await js(`document.querySelector('.agents-float .spec-pill')?.click()`);
+      await sleep(300);
+      await shot(join(demo, "1b-agents-pill.png"));
+      await js(`document.querySelector('.agents-float .spec-pill')?.click()`);
       await sleep(4500);
       await js(`[...document.querySelectorAll('.msg-agent .msg-actions button')].find(b=>b.title==='Reply in thread')?.click()`);
       await sleep(500);

@@ -96,7 +96,6 @@ a { color: var(--blue); }
 .chat-controls .model-input-wrap button { height: 30px; }
 .model-input { width: 120px; }
 .toggle.on { background: color-mix(in srgb, var(--accent) 25%, var(--bg3)); border-color: var(--accent); }
-.agent-strip { display: flex; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--bg2); }
 /* Running-agent chip: one flex row, fixed height, so the icon, label and round buttons share a centre line on every platform font. */
 .agent-chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; box-sizing: border-box; font-size: 12px; line-height: 1; background: var(--bg3); border: 1px solid var(--line); border-radius: 999px; padding: 0 2px 0 9px; }
 .agent-chip .chip-main { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 4px 0 0; font-size: 11px; line-height: 1; white-space: nowrap; }
@@ -996,7 +995,7 @@ input:focus, select:focus, textarea:focus { border-color: color-mix(in srgb, var
 .badge { background: var(--green); color: #fff; box-shadow: 0 2px 6px -2px var(--green); }
 
 /* ---------- surfaces inside the main panel ---------- */
-.chat-header, .agent-strip, .composer-wrap, .composer-legacy, .viewer-head { background: transparent; border-color: var(--line); }
+.chat-header, .composer-wrap, .composer-legacy, .viewer-head { background: transparent; border-color: var(--line); }
 .thread { background: color-mix(in srgb, var(--fg) 3%, transparent); border-left-color: var(--line); }
 .card, .panel, .column, .mp-card, .art-item, .doc-card, .use-item, .faq, .docs-status, .node-box {
   background: var(--bg2); border-color: var(--line); box-shadow: var(--hi); }
@@ -1215,7 +1214,12 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 /* ---------- Specialists: floating glass pill on the right of the chat (out of the sidebar, so Projects gets room) ---------- */
 .messages-area { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .messages-area > .messages { flex: 1; min-height: 0; padding-top: 48px; } /* room for the pill above the first message */
-.spec-float { position: absolute; top: 10px; right: 18px; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+/* Specialists and Agents pills, stacked at the top right of the chat; each opens its list as an overlay below it. */
+.pill-stack { position: absolute; top: 10px; right: 18px; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+.pill-stack > * { pointer-events: auto; }
+.spec-float { position: relative; display: flex; flex-direction: column; align-items: flex-end; }
+.spec-float.open { z-index: 2; }
+.spec-float > .spec-overlay { position: absolute; top: calc(100% + 8px); right: 0; }
 .spec-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 12px; border-radius: 999px; font-size: 12.5px;
   background: var(--glass-strong); border: 1px solid var(--rim); backdrop-filter: blur(30px) saturate(180%); box-shadow: var(--hi), var(--shadow);
   transition: transform .18s cubic-bezier(.2, .8, .3, 1), background .2s; }
@@ -1229,6 +1233,15 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
   transform-origin: top right; animation: spec-in .2s cubic-bezier(.2, .8, .3, 1); }
 .spec-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 6px 8px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .spec-list { overflow: auto; min-height: 0; }
+.agents-count { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.agents-overlay { width: 300px; }
+.agents-overlay .spec-list { display: flex; flex-direction: column; gap: 4px; }
+.agent-chip.agent-row { display: flex; height: 40px; border-radius: 12px; padding: 0 6px 0 10px; background: transparent; border-color: transparent; }
+.agent-chip.agent-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.agent-chip.agent-row.st-running { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.agent-row .chip-main { flex: 1; min-width: 0; gap: 8px; text-align: left; }
+.agent-row .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.agent-row .chip-label small { display: block; line-height: 14px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 @keyframes spec-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
 
 /* Long project names stay on one line with an ellipsis (full path in the tooltip) instead of wrapping or scrolling sideways. */
