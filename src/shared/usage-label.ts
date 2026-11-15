@@ -3,15 +3,13 @@ import type { CopilotBilling, CopilotUsage } from "./types";
 
 const fmt = (v: number) => (Math.round(v * 100) / 100).toLocaleString();
 export const unitName = (b: CopilotBilling) => (b.unit === "requests" ? "premium requests" : "credits");
-const usd = (v: number) => `$${v.toFixed(2)}`;
 
 export function usageLabel(u: CopilotUsage): string {
   const b = u.billing;
   if (b) {
     const parts = b.available !== null && b.availableTotal !== null
       ? [`${fmt(b.available)} of ${fmt(b.availableTotal)} ${unitName(b)} available`, `${fmt(b.usedOfAvailable)} used (${b.percent}%)`]
-      : [`${fmt(b.used)} ${unitName(b)} used`];
-    if (b.netAmount > 0) parts.push(`${usd(b.netAmount)} billed`);
+      : [`${fmt(b.used)} ${unitName(b)} used this month`];
     if (b.models[0]) parts.push(`top: ${b.models[0].model} ${b.models[0].share}%`);
     return `Copilot · ${parts.join(" · ")}`;
   }

@@ -474,26 +474,26 @@ function MarketplaceSettings(f: F) {
 function BillingDetail({ b }: { b: CopilotBilling }) {
   const unit = unitName(b);
   const fmt = (v: number) => (Math.round(v * 100) / 100).toLocaleString();
-  const usd = (v: number) => `$${v.toFixed(2)}`;
   const pct = b.percent;
-  const sources = [b.allowance !== null ? `${fmt(b.allowance)} in your plan` : "", b.budgetCredits !== null ? `${fmt(b.budgetCredits)} from your ${usd(b.budget!)} budget` : ""].filter(Boolean).join(" + ");
   const top = b.models[0]?.quantity || 1;
+  const month = `${b.period.year}-${String(b.period.month).padStart(2, "0")}`;
   return <>
     <div className="usage-stats">
       <div className="usage-stat"><span className="muted small">Available credits</span><strong>{b.available !== null ? fmt(b.available) : "—"}</strong>
-        <span className="muted small">{b.availableTotal !== null ? `of ${fmt(b.availableTotal)} ${unit} (${sources})` : "set the credits you have per month below"}</span></div>
+        <span className="muted small">{b.unlimited ? "unlimited plan" : b.availableTotal !== null ? `of ${fmt(b.availableTotal)} ${unit} this month${b.availableFrom === "copilot" ? ", from Copilot" : ", as you entered"}` : "sign in to Copilot, or enter your credits below"}</span></div>
       <div className="usage-stat"><span className="muted small">Used</span><strong>{fmt(b.usedOfAvailable)}{pct !== null ? <span className="muted small"> · {pct}%</span> : null}</strong>
-        <span className="muted small">{b.availableTotal !== null ? `of available ${unit}${b.availableFrom === "copilot" ? ", as Copilot counts them" : ""}` : `${unit} this month`}{b.grossAmount > 0 ? ` · ${usd(b.grossAmount)}` : ""}</span></div>
-      <div className="usage-stat"><span className="muted small">Billed beyond plan</span><strong>{usd(b.netAmount)}</strong>
-        <span className="muted small">{fmt(b.billed)} {unit}{b.budgetRemaining !== null ? ` · ${usd(b.budgetRemaining)} of ${usd(b.budget!)} budget left` : ""}</span></div>
+        <span className="muted small">{b.availableTotal !== null ? `of available ${unit}` : `${unit} in ${month}`}{b.overage > 0 ? ` · ${fmt(b.overage)} beyond the plan` : ""}</span></div>
+      <div className="usage-stat"><span className="muted small">Copilot sessions</span><strong>{b.sessions}</strong>
+        <span className="muted small">{b.appSessions} in this app · {b.sessions - b.appSessions} finished elsewhere</span></div>
     </div>
+    {b.signIn && <div className="muted small">Asked Copilot with {b.signIn}{b.plan ? ` · plan: ${b.plan}` : ""}.</div>}
     {pct !== null && <div className="usage-bar big" title={`${pct}% of your available credits used`}><div className={`usage-fill ${pct >= 90 ? "crit" : pct >= 75 ? "warn" : "ok"}`} style={{ width: `${pct}%` }} /></div>}
     <h5>Models using the most</h5>
-    {b.models.length === 0 ? <div className="muted small">No Copilot usage billed to @{b.user} in {b.period.year}-{String(b.period.month).padStart(2, "0")} yet.</div>
+    {b.models.length === 0 ? <div className="muted small">No Copilot usage recorded in {month} yet.</div>
       : <table className="kv usage-models"><tbody>{b.models.map((m) => <tr key={m.model}>
         <td>{m.model}</td>
         <td className="usage-model-bar"><div className="usage-bar"><div className="usage-fill ok" style={{ width: `${(m.quantity / top) * 100}%` }} /></div></td>
-        <td>{fmt(m.quantity)} {unit}</td><td className="muted">{m.share}%</td><td className="muted">{m.amount > 0 ? usd(m.amount) : ""}</td>
+        <td>{fmt(m.quantity)} {unit}</td><td className="muted">{m.share}%</td>
       </tr>)}</tbody></table>}
   </>;
 }
@@ -501,61 +501,26 @@ function BillingDetail({ b }: { b: CopilotBilling }) {
 function UsageSettings(f: F) {
   const st = useStore();
   const u = st.copilotUsage;
-  const p = u?.premium;
-  const pct = p?.percent ?? null;
-  const github = f.s.usage.source !== "cli";
-  const [token, setToken] = useState("");
-  const [saving, setSaving] = useState(false);
-  const saveToken = async (t: string) => {
-    setSaving(true);
-    try { await api().setBillingToken(t); setToken(""); st.setSettings((await api().getSettings()).settings); } finally { setSaving(false); }
-  };
   return <>
     <h4>GitHub Copilot usage</h4>
-    <p className="muted">{github
-      ? <>This month’s usage of your account from GitHub’s billing API: credits (or premium requests) used, what is left, what is billed beyond your plan, and which models use the most. Reading it never spends credits.</>
-      : <>Read from Copilot CLI’s own <code>/usage</code> command in a short background session. It only describes that session, not your account’s monthly total.</>}</p>
+    <p className="muted">Your available credits come from Copilot, using the sign-in Copilot already has on this computer (nothing to paste). Which models use them comes from Copilot itself: its <code>/usage</code> runs silently after each Copilot turn in this app, and Copilot’s session log adds the sessions that finished elsewhere.</p>
     <div className="panel usage-detail">
-      {!u && <div className="muted">Not fetched yet.</div>}
+      {!u && <div className="muted">Not read yet.</div>}
       {u && <>
         <div className="row between">
-          <strong>{u.billing ? `@${u.billing.user} · ${u.billing.period.year}-${String(u.billing.period.month).padStart(2, "0")}`
-            : p?.unlimited ? "Unlimited" : p?.used !== null && p?.limit !== null ? `${p!.used} of ${p!.limit} used` : p?.used !== null ? `${p!.used} used` : "—"}</strong>
+          <strong>{u.billing ? `This month · ${u.billing.period.year}-${String(u.billing.period.month).padStart(2, "0")}` : "—"}</strong>
           <span className="muted small">{u.loading ? "refreshing…" : u.fetchedAt ? `updated ${new Date(u.fetchedAt).toLocaleString()}` : ""}</span>
         </div>
-        {u.billing && u.ok && <BillingDetail b={u.billing} />}
-        {!u.billing && pct !== null && <div className="usage-bar big"><div className={`usage-fill ${pct >= 90 ? "crit" : pct >= 75 ? "warn" : "ok"}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>}
-        {!u.billing && <div className="row gap wrap small">
-          {pct !== null && <span className="chip">{pct}% used</span>}
-          {p?.limit !== null && p?.used !== null && p?.limit !== undefined && <span className="chip">{Math.max(0, p.limit - (p.used ?? 0))} left</span>}
-          {u.resetAt && <span className="chip">resets {u.resetAt}</span>}
-        </div>}
-        {u.billing && u.resetAt && <div className="muted small">Included allowance renews {u.resetAt}.</div>}
+        {u.billing && <BillingDetail b={u.billing} />}
+        {u.billing && u.resetAt && <div className="muted small">Counting starts again on {u.resetAt}.</div>}
         {u.error && <div className="warn-note">{u.error}</div>}
-        {!u.billing && u.entries.length > 0 && <table className="kv">
-          <tbody>{u.entries.map((e, i) => <tr key={i}><td className="muted">{e.label}</td><td>{e.value}</td></tr>)}</tbody>
-        </table>}
-        {u.raw && <details><summary>Raw /usage output</summary><pre className="pre small">{u.raw}</pre></details>}
       </>}
       <div><button className="primary" disabled={u?.loading} onClick={() => api().copilotUsage(true)}><RefreshCw size={14} className={u?.loading ? "spin" : ""} /> {u?.loading ? "Refreshing…" : "Refresh now"}</button></div>
     </div>
     <h4>Options</h4>
-    <Row label="Source" hint="GitHub billing shows your account’s monthly usage per model (needs a token that may read your plan). Copilot /usage only shows one session."><Choice f={f} path="usage.source" options={[["github", "GitHub billing (account, per model)"], ["cli", "Copilot CLI /usage (session only)"]]} /></Row>
-    {github && <>
-      <Row label="GitHub token for billing" hint={f.s.usage.hasBillingToken
-        ? "A token is stored (encrypted). Paste a new one to replace it, or remove it."
-        : "Fine-grained token with Account permissions → Plan → Read-only. Without one, Copilot’s sign-in token, GH_TOKEN or GitHub CLI’s login is tried."}>
-        <div className="row gap"><input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={f.s.usage.hasBillingToken ? "••••••" : "github_pat_…"} />
-          <button disabled={saving || !token.trim()} onClick={() => void saveToken(token)}>Save</button>
-          {f.s.usage.hasBillingToken && <button className="ghost danger" disabled={saving} onClick={() => void saveToken("")}>Remove</button>}
-          <a className="link small" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">Create token <ArrowUpRight size={12} /></a></div>
-      </Row>
-      <Row label="Credits in your plan (per month)" hint="Credits (or premium requests) your plan includes; with the budget this makes your available credits. 0 = read it from Copilot when it says."><Num f={f} path="usage.includedCredits" /></Row>
-      <Row label="Monthly budget (USD)" hint="What you allow for usage beyond the plan. It adds the credits it buys to your available credits. 0 = no budget."><Num f={f} path="usage.monthlyBudget" /></Row>
-    </>}
+    <Row label="Credits per month (if Copilot can’t be asked)" hint="Only used when Copilot’s sign-in isn’t available: available = this minus what Copilot reports as used. 0 = not set."><Num f={f} path="usage.includedCredits" /></Row>
     <Row label="Show usage bar under the chat box"><Bool f={f} path="usage.copilotMeter" /></Row>
-    <Row label="Refresh every (minutes)" hint="0 = only when you press refresh. Minimum 5."><Num f={f} path="usage.refreshMinutes" /></Row>
-    {!github && <Row label="Only if Copilot lists /usage" hint="Turn off only if your Copilot CLI handles /usage locally but does not list it — otherwise the text may go to a model and use a premium request."><Bool f={f} path="usage.onlyIfAdvertised" /></Row>}
+    <Row label="Re-read every (minutes)" hint="Picks up Copilot sessions that finished outside the app. 0 = only after Copilot turns here and when you press refresh."><Num f={f} path="usage.refreshMinutes" /></Row>
     <p className="muted small">Token usage of TheFlashMaster’s own agents (all harnesses) is on the Dashboard.</p>
   </>;
 }
