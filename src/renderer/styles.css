@@ -1114,7 +1114,8 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
   background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, .9), rgba(255, 255, 255, 0) 52%), var(--dot);
   box-shadow: 0 0 calc(var(--d) * 1.2) -1px color-mix(in srgb, var(--dot) 70%, transparent); }
 [data-theme="light"] .dots i { --dot: hsl(calc(40deg - var(--i) * 13deg) 95% 50%); }
-.dots b { font-size: 10px; margin-left: 3px; color: var(--accent); }
+.dots-group { display: inline-flex; align-items: center; gap: 3px; flex: none; vertical-align: middle; }
+.dots-count { font-size: 10px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
 /* hop: three dots take turns jumping */
 .dots-hop i { animation: dot-hop 1.1s cubic-bezier(.3, .6, .4, 1) infinite; animation-delay: calc(var(--i) * .14s); }
 @keyframes dot-hop { 0%, 55%, 100% { transform: translateY(0) scale(1, 1); } 22% { transform: translateY(calc(var(--d) * -1.1)) scale(.9, 1.1); } 42% { transform: translateY(0) scale(1.25, .75); } }

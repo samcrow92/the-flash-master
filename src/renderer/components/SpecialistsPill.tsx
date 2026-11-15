@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, useStore } from "../store";
+import { useStore } from "../store";
 import { specialistRows } from "../specialists";
 import { AgentImportDialog } from "./AgentImport";
 import { Dots } from "./Dots";
@@ -25,15 +25,6 @@ export function SpecialistsPill() {
     return () => { removeEventListener("mousedown", onDown); removeEventListener("keydown", onKey); };
   }, [open]);
 
-  const start = async (role: string) => {
-    // No project selected (master chat, "No project" chat): the new chat goes to "No project", never the first project.
-    const pid = st.currentProjectId;
-    const r = st.roles.find((x) => x.name === role);
-    const c = await api().createChat({ projectId: pid, agentRole: role, title: r?.title ?? role });
-    st.upsertChat(c);
-    await st.openChat(c.id);
-  };
-
   return (
     <div className={`spec-float ${open ? "open" : ""}`} ref={ref}>
       <button className={`spec-pill ${working ? "is-working" : paused ? "is-paused" : ""}`} aria-expanded={open}
@@ -41,7 +32,7 @@ export function SpecialistsPill() {
         onClick={() => setOpen((o) => !o)}>
         <Users size={15} />
         <span>Specialists</span>
-        {working > 0 && <Dots size={4} count={Math.min(working, 5)} title={`${working} working`} />}
+        {working > 0 && <Dots size={4} count={working} title={`${working} working`} />}
         {!working && paused > 0 && <span className="paused-tag" title={`${paused} paused`}><Pause size={11} /></span>}
         <ChevronDown size={13} className={`spec-chev ${open ? "open" : ""}`} />
       </button>
@@ -52,13 +43,13 @@ export function SpecialistsPill() {
             <button className="icon-btn" title="Add your own agent (template / import)" onClick={() => setImporting(true)}><Plus size={15} /></button>
           </div>
           <div className="spec-list">
-            {rows.map(({ role: r, working: w, paused: p, busyAgent, busyAgents }) => (
+            {rows.map(({ role: r, working: w, paused: p, busyAgents }) => (
               <button key={r.name} className={`palette-item ${w ? "is-working" : p ? "is-paused" : ""}`}
-                title={`${r.description}\n\n${w ? "Working now — click to watch its progress." : `Click: new chat with ${r.title} in the current project.`}\nTip: type @${r.name} in any chat.`}
-                onClick={async () => {
+                title={`${r.description}\n\n${w ? "Working now — click to open its chat." : `Click: open your chat with ${r.title}.`}\nTip: type @${r.name} in any chat.`}
+                onClick={() => {
                   setOpen(false);
-                  // A working specialist opens its chat with the progress flow; an idle one starts a new chat.
-                  if (busyAgent?.chatId) { await st.openChat(busyAgent.chatId); st.openFlow(busyAgent.chatId, busyAgent.id); } else await start(r.name);
+                  // Opens the specialist's chat: where it is working now, else its latest chat, else a new one.
+                  void st.chatWithAgent(r.name, { showFlow: false });
                 }}>
                 <span className="palette-icon"><RoleIcon role={r.name} size={24} state={w ? "working" : p ? "paused" : undefined} /></span>
                 <span className="palette-title">{r.title}</span>
