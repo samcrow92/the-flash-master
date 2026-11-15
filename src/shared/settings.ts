@@ -52,6 +52,8 @@ export interface Settings {
     houseRules: string; // extra rules sent to every agent (your workflow/setup)
     /** Warn when a working agent has produced no output for this many minutes (0 = off). */
     stuckAfterMinutes: number;
+    /** Close delegated specialists that finished and sat idle this long (0 = never); work waiting for review is kept. */
+    closeIdleAfterMinutes: number;
     /** Code-writing specialists (roles with `isolate: true`) work in their own git worktree and branch when delegated. */
     isolateWriters: boolean;
   };
@@ -180,7 +182,7 @@ export const DEFAULT_SETTINGS: Settings = {
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, isolateWriters: true },
+  agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, closeIdleAfterMinutes: 30, isolateWriters: true },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },
   tokens: {

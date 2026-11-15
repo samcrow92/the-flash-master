@@ -197,6 +197,7 @@ function Agents(f: F) {
     <Row label="Delegation depth" hint="How many levels of specialists may delegate further (1 = only the coordinator delegates)."><Num f={f} path="agents.delegationDepth" min={0} /></Row>
     <Row label="Separate copy for code-writing specialists" hint="In a git project, specialists that change code (Software Expert, Test Engineer, agents with isolate: true) each work in their own worktree and branch, so parallel agents don't overwrite each other. You review, merge or discard each branch on the Review page."><Bool f={f} path="agents.isolateWriters" /></Row>
     <Row label="Warn when an agent is silent for (minutes)" hint="A working agent that sends nothing for this long gets a warning in its chat. It keeps running. 0 = off."><Num f={f} path="agents.stuckAfterMinutes" min={0} /></Row>
+    <Row label="Close finished specialists after (minutes idle)" hint="A delegated specialist that finished its task and sat idle this long is closed and leaves the agent chips. Specialists with uncommitted or unmerged work in their worktree are kept for review. 0 = never."><Num f={f} path="agents.closeIdleAfterMinutes" min={0} /></Row>
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
     <InstructionSettings f={f} />
     <div className="row between">

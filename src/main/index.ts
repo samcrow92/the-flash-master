@@ -158,6 +158,8 @@ const orch = new Orchestrator({
 orch.announceInterrupted(interruptedAtStart);
 // Stuck-agent watchdog: warns (once per silence) about working agents that have sent nothing for a while.
 setInterval(() => orch.checkStuck(), 30_000).unref();
+// Closes delegated specialists that finished and stayed idle (Settings → Agents); work waiting for review is kept.
+setInterval(() => { void orch.closeIdle(); }, 60_000).unref();
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {
