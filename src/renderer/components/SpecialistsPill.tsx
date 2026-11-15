@@ -60,7 +60,7 @@ export function SpecialistsPill() {
                   // A working specialist opens its chat with the progress flow; an idle one starts a new chat.
                   if (busyAgent?.chatId) { await st.openChat(busyAgent.chatId); st.openFlow(busyAgent.chatId, busyAgent.id); } else await start(r.name);
                 }}>
-                <span className="palette-icon"><RoleIcon role={r.name} emoji={r.icon} size={24} className="icon-glyph" />{(w > 0 || p > 0) && <span className="activity-ring" />}</span>
+                <span className="palette-icon"><RoleIcon role={r.name} size={24} state={w ? "working" : p ? "paused" : undefined} /></span>
                 <span className="palette-title">{r.title}</span>
                 {w > 0 && <Dots size={5} count={w} title={`${w} working${busyAgent?.lastActivity ? ` — ${busyAgent.lastActivity}` : ""}`} />}
                 {!w && p > 0 && <span className="paused-tag" title={`${p} paused`}><Pause size={12} /></span>}

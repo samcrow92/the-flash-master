@@ -119,7 +119,7 @@ export function ChatView({ chatId }: { chatId: string }) {
             {chatAgents.map((a) => (
               <span key={a.id} className={`agent-chip st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
                 <button className="chip-main" onClick={() => st.openFlow(chatId, a.id)}>
-                  <RoleIcon role={a.role} emoji={roleOf(a.role)?.icon} size={16} /> {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
+                  <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /> {roleOf(a.role)?.title ?? a.role} · {a.harness} · {a.status}
                   {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}
                 </button>
                 {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
@@ -203,7 +203,7 @@ export function MessageItem({ m, inThread }: { m: Message; inThread?: boolean })
   const sz = inThread ? 24 : 32;
   const avatar = m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={sz} /></button>
     : m.author === "system" ? <span className="role-badge sys"><Info size={inThread ? 12 : 15} /></span>
-    : <RoleIcon role={m.role} emoji={role?.icon} size={sz} />;
+    : <RoleIcon role={m.role} size={sz} framed state={m.status === "streaming" ? "working" : undefined} />;
 
   return (
     <div className={`msg msg-${m.author} ${m.status === "error" ? "msg-error" : ""}`}>
@@ -264,7 +264,7 @@ function ThreadPill({ root, open, onClick }: { root: Message; open: boolean; onC
     <button className={`thread-pill ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open} title={open ? "Collapse thread" : "Expand thread"}>
       <span className="tp-faces">
         {faces.length ? faces.slice(0, 3).map((f) => (
-          <span key={f.id} className="tp-face">{f.author === "user" ? <UserAvatar size={18} /> : f.author === "system" ? <span className="role-badge sys"><Info size={10} /></span> : <RoleIcon role={f.role} emoji={roleOf(f.role)?.icon} size={18} />}</span>
+          <span key={f.id} className="tp-face">{f.author === "user" ? <UserAvatar size={18} /> : f.author === "system" ? <span className="role-badge sys"><Info size={10} /></span> : <RoleIcon role={f.role} size={18} framed />}</span>
         )) : <MessageCircle size={13} />}
       </span>
       <span className="tp-count">{plural(root.replyCount)}</span>

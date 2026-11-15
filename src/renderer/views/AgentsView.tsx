@@ -50,7 +50,7 @@ export function AgentsView() {
             {list.map((a) => (
               <tr key={a.id} onDoubleClick={() => (a.chatId ? st.openChat(a.chatId) : st.chatWithAgent(a.role))}>
                 <td>
-                  <div className="row gap-s"><span className={`avatar small ${a.status === "running" ? "avatar-working" : ""}`}><RoleIcon role={a.role} size={24} /></span> <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
+                  <div className="row gap-s"><span className="avatar small"><RoleIcon role={a.role} size={24} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /></span> <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
                   {a.parentAgentId && <div className="muted small row gap-s"><CornerDownRight size={12} /> delegated by {roleOf(st.agents[a.parentAgentId]?.role)?.title ?? "agent"}</div>}
                 </td>
                 <td>{pname(a.projectId)}</td>
@@ -92,7 +92,7 @@ export function AgentChatStrip() {
         return (
           <button key={r.name} className={`agent-chat-card ${working ? "is-working" : ""}`} onClick={() => st.chatWithAgent(r.name)}
             title={`${r.description}\n\n${working ? "Working now — opens its chat and progress." : `Opens your chat with ${r.title}.`}`}>
-            <RoleIcon role={r.name} emoji={r.icon} size={26} className="icon-glyph" />
+            <RoleIcon role={r.name} size={26} state={working ? "working" : undefined} />
             <span className="agent-chat-title">{r.title}</span>
             <MessageCircle size={13} className="agent-chat-go" />
           </button>

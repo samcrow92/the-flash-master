@@ -1,9 +1,8 @@
 /**
- * App icon set: thin Lucide line icons (SF Symbols-like, 1.6 stroke via LucideProvider) on iOS-style glass tiles.
- * No emoji anywhere: custom roles get a bot glyph tinted by a hue derived from their name, and reaction emoji
+ * App icon set: thin monochrome Lucide line icons (SF Symbols-like, 1.6 stroke via LucideProvider).
+ * No emoji anywhere: custom roles get a bot glyph, and reaction emoji
  * (stored as text, e.g. ✅ / ❌ approvals) are drawn as animated line icons.
  */
-import type { CSSProperties } from "react";
 import {
   Check, Eye, Heart, PartyPopper, Rocket, ThumbsDown, ThumbsUp, X, CircleCheck, CircleX, CircleAlert,
   Bot, Building2, Car, ClipboardList, ClipboardCheck, CodeXml, FlaskConical, Fish, ListChecks, Presentation, ScanSearch, Swords, Bug, Zap,
@@ -12,32 +11,41 @@ import {
 
 export * from "lucide-react";
 
-const ROLE_ICONS: Record<string, { icon: LucideIcon; hue: number }> = {
-  flashmaster: { icon: Zap, hue: 45 },
-  "autosar-vector": { icon: Car, hue: 210 },
-  challenger: { icon: Swords, hue: 355 },
-  reviewer: { icon: ScanSearch, hue: 175 },
-  "jazz-analyst": { icon: ClipboardList, hue: 235 },
-  "rca-analyst": { icon: Fish, hue: 25 },
-  "presentation-expert": { icon: Presentation, hue: 320 },
-  analyst: { icon: ListChecks, hue: 190 },
-  architect: { icon: Building2, hue: 265 },
-  "software-expert": { icon: CodeXml, hue: 145 },
-  tester: { icon: FlaskConical, hue: 90 },
-  "winidea-debugger": { icon: Bug, hue: 38 },
-  "exam-test-agent": { icon: ClipboardCheck, hue: 120 },
+const ROLE_ICONS: Record<string, LucideIcon> = {
+  flashmaster: Zap,
+  "autosar-vector": Car,
+  challenger: Swords,
+  reviewer: ScanSearch,
+  "jazz-analyst": ClipboardList,
+  "rca-analyst": Fish,
+  "presentation-expert": Presentation,
+  analyst: ListChecks,
+  architect: Building2,
+  "software-expert": CodeXml,
+  tester: FlaskConical,
+  "winidea-debugger": Bug,
+  "exam-test-agent": ClipboardCheck,
 };
 
-/** Stable hue for a custom role, so each one keeps its own tint. */
-const hueOf = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+export type RoleIconState = "working" | "paused";
 
-/** Role avatar: an iOS-style glass squircle tinted per role, with a thin line icon. Custom roles get a bot glyph. */
-export function RoleIcon({ role, size = 22, className = "" }: { role: string | null | undefined; emoji?: string; size?: number; className?: string }) {
-  const def = role ? ROLE_ICONS[role] : undefined;
-  const hue = def?.hue ?? (role ? hueOf(role) : 220);
-  const style = { width: size, height: size, "--hue": hue } as CSSProperties;
-  const I = def?.icon ?? Bot;
-  return <span className={`role-badge ${def ? "" : "custom"} ${className}`} style={style}><I size={Math.round(size * 0.56)} strokeWidth={1.8} /></span>;
+/**
+ * Role icon: a monochrome line glyph in the current text colour, like the sidebar and title bar icons.
+ * `framed` puts it on a neutral hairline tile (message avatars, docs cards). Activity follows the glyph's own shape:
+ * while working, an echo of the same glyph swells out of it and fades; while paused, the glyph rests in amber.
+ */
+export function RoleIcon({ role, size = 22, className = "", framed = false, state }: {
+  role: string | null | undefined; emoji?: string; size?: number; className?: string; framed?: boolean; state?: RoleIconState;
+}) {
+  const I = (role && ROLE_ICONS[role]) || Bot;
+  const g = Math.round(size * (framed ? 0.56 : 0.74));
+  const cls = ["role-badge", framed && "framed", state && `is-${state}`, className].filter(Boolean).join(" ");
+  return (
+    <span className={cls} style={{ width: size, height: size }}>
+      <I size={g} className="role-glyph" />
+      {state === "working" && <I size={g} className="role-echo" aria-hidden />}
+    </span>
+  );
 }
 
 /** Reaction emoji → line icon + tint + its own little animation (see .rx-* in styles.css). Unknown emoji fall back to text. */
