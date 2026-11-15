@@ -56,10 +56,19 @@ export class HarnessRegistry {
       (this.status.get(id)?.available ?? id === "mock");
     if (ok(requested)) return requested;
     if (ok(settings.general.defaultHarness)) return settings.general.defaultHarness;
-    for (const id of ["copilot", "opencode", "cursor", "claude", "pi", "duo"] as HarnessId[]) if (ok(id)) return id;
+    for (const id of REAL_HARNESSES) if (ok(id)) return id;
     return "mock";
   }
+
+  /** Another usable real harness to offer when `current` keeps crashing: the default setting first, then the usual order. */
+  alternative(current: HarnessId, settings: Settings): HarnessId | null {
+    const ok = (id: HarnessId | null | undefined): id is HarnessId => !!id && id !== current && id !== "mock" &&
+      settings.harnesses[id]?.enabled !== false && !!this.status.get(id)?.available;
+    return [settings.general.defaultHarness, ...REAL_HARNESSES].find(ok) ?? null;
+  }
 }
+
+const REAL_HARNESSES: HarnessId[] = ["copilot", "opencode", "cursor", "claude", "pi", "duo"];
 
 /** Where people usually unzip the official copilot-win32-*.zip download (checked after PATH). */
 function copilotZipLocations(): string[] {

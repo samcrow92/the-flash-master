@@ -61,6 +61,8 @@ export interface SessionOptions {
 
 export interface HarnessSession {
   readonly sessionId: string | null;
+  /** True when the harness continued `resumeSessionId` (the agent still has the conversation), not a new session. */
+  readonly resumed?: boolean;
   /** Models reported while the session started (ACP), so the cache refreshes for free. */
   readonly models?: ModelInfo[];
   prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult>;
