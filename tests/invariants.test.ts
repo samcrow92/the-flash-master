@@ -109,3 +109,18 @@ describe("window chrome", () => {
     expect(readFileSync(join(root, "src/renderer/assets/app-icon.png")).length).toBeGreaterThan(100);
   });
 });
+
+describe("role icons", () => {
+  // Specialist icons are monochrome line glyphs like the rest of the UI, and their activity follows the glyph's shape.
+  it("are monochrome: no per-role hues or gradient tiles", () => {
+    expect(read("src/renderer/components/icons.tsx")).not.toMatch(/hue/i);
+    const css = read("src/renderer/styles.css");
+    const badgeRules = [...css.matchAll(/^[^{}\n]*\.role-badge[^{]*\{[^}]*\}/gm)].map((m) => m[0]);
+    expect(badgeRules.length).toBeGreaterThan(3);
+    expect(badgeRules.filter((r) => /--hue|gradient/.test(r)), "role-badge rule with a tint").toEqual([]);
+  });
+  it("show activity through the glyph itself, not a circular ring", () => {
+    expect(read("src/renderer/components/icons.tsx")).toMatch(/className="role-echo"/);
+    for (const f of ["src/renderer/components/SpecialistsPill.tsx", "src/renderer/styles.css"]) expect(read(f)).not.toContain("activity-ring");
+  });
+});

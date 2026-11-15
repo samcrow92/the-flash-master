@@ -387,7 +387,7 @@ function Agents() {
       <p className="muted small">Agents you imported, installed from the Marketplace, or that TheFlashMaster created for you.</p>
       <div className="use-grid">
         {custom.map((r) => (
-          <UseItem key={r.name} icon={<RoleIcon role={r.name} emoji={r.icon} size={22} />} title={`${r.title} (@${r.name})`}>{r.description}</UseItem>
+          <UseItem key={r.name} icon={<RoleIcon role={r.name} size={22} />} title={`${r.title} (@${r.name})`}>{r.description}</UseItem>
         ))}
       </div>
     </>}
@@ -407,7 +407,7 @@ function PageCard({ doc: a, customised }: { doc: AgentDoc; customised: boolean }
   const go = useContext(DocsNav);
   return (
     <button className="agent-card" onClick={() => go(`agent:${a.name}`)}>
-      <RoleIcon role={a.name} size={30} />
+      <RoleIcon role={a.name} size={30} framed />
       <div>
         <b>{a.title}</b>{customised && <span className="pill">customised</span>}
         <code>@{a.name}</code>
@@ -434,7 +434,7 @@ function AgentPage({ doc: a }: { doc: AgentDoc }) {
   return <>
     <p className="small"><PageLink to="agents">Agents</PageLink> <span className="muted">/ {a.title}</span></p>
     <header className="agent-hero">
-      <RoleIcon role={a.name} size={46} />
+      <RoleIcon role={a.name} size={46} framed />
       <div>
         <h3>{a.title}</h3>
         <div className="row gap wrap"><code>@{a.name}</code>{role?.source === "user" && <span className="pill amber">customised in your setup</span>}</div>

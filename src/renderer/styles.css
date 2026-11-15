@@ -328,11 +328,7 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 .palette-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-icon { position: relative; display: inline-grid; place-content: center; width: 24px; height: 24px; }
 .icon-glyph { display: inline-block; }
-.activity-ring { position: absolute; inset: -2px; border-radius: 50%; pointer-events: none;
-  animation: ripple 1.6s ease-out infinite; }
 .palette-item.is-working { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-.palette-item.is-working .icon-glyph { animation: breathe 1.6s ease-in-out infinite; }
-.palette-item.is-paused .activity-ring { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 70%, transparent); }
 /* Soft pulse: a halo that grows and fades, plus a gentle breathing scale on the icon. */
 @keyframes ripple {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
@@ -351,10 +347,10 @@ button.link { background: none; border: none; color: var(--blue); padding: 0; te
 
 .avatar { position: relative; }
 .avatar.small { width: 24px; height: 24px; font-size: 13px; border-radius: 50%; display: inline-grid; place-content: center; background: var(--bg3); }
-.avatar-working::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+.avatar-working:not(:has(.role-badge))::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   animation: ripple 1.6s ease-out infinite; }
-.avatar-working > span { animation: breathe 1.6s ease-in-out infinite; }
-.avatar-working > span:not(.role-badge) { display: inline-block; } /* role badges keep their centred grid */
+.avatar-working > span:not(.role-badge) { animation: breathe 1.6s ease-in-out infinite; }
+.avatar-working > span:not(.role-badge) { display: inline-block; } /* role badges animate their own glyph */
 .shimmer { background: linear-gradient(90deg, var(--muted) 0%, var(--fg) 50%, var(--muted) 100%); background-size: 200% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
@@ -464,22 +460,6 @@ button.icon-only { display: inline-grid; place-content: center; padding: 4px 6px
 .theme-icon { display: inline-grid; animation: theme-spin .45s cubic-bezier(.2,.9,.3,1.2); }
 @keyframes theme-spin { from { transform: rotate(-120deg) scale(.4); opacity: 0; } }
 
-/* role badges: gradient circle with a line icon */
-.role-badge { --hue: 220; display: inline-grid; place-content: center; border-radius: 50%; flex: none; color: hsl(var(--hue) 85% 92%);
-  background: linear-gradient(140deg, hsl(var(--hue) 70% 55%), hsl(calc(var(--hue) + 28) 65% 38%));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 2px 8px -3px hsl(var(--hue) 70% 40% / .7); }
-.role-badge.emoji { background: var(--bg3); box-shadow: inset 0 0 0 1px var(--line); }
-.role-badge.user { width: 32px; height: 32px; background: linear-gradient(140deg, #5b6474, #3a4150); color: #e8ecf3; }
-.role-badge.sys { width: 32px; height: 32px; background: color-mix(in srgb, var(--amber) 22%, var(--bg3)); color: var(--amber); box-shadow: none; }
-[data-theme="light"] .role-badge:not(.emoji) { color: #fff; }
-.avatar:has(.role-badge) { background: transparent; }
-.palette-item:hover .role-badge { transform: scale(1.08) rotate(-4deg); }
-.role-badge { transition: transform .2s cubic-bezier(.2,.9,.3,1.4); }
-.agent-chip .role-badge { vertical-align: -4px; }
-/* Icons centred in their badge: block SVG (no text-baseline gap), emoji with line-height 1 */
-.role-badge { display: inline-grid; place-items: center; line-height: 1; }
-.role-badge > svg { display: block; }
-.role-badge.emoji > span { display: block; line-height: 1; }
 .avatar > .role-badge, .avatar > .avatar-btn { margin: auto; }
 
 /* ===================== sidebar chats ===================== */
@@ -1027,20 +1007,26 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .toast-warn::before { background: var(--amber); box-shadow: 0 0 8px var(--amber); } .toast-error::before { background: var(--red); box-shadow: 0 0 8px var(--red); }
 .drop-hint { background: color-mix(in srgb, var(--glass-strong) 70%, transparent); backdrop-filter: blur(16px); border-radius: 22px; }
 
-/* ---------- icons: thin glyphs on iOS-style glass squircles ---------- */
-.role-badge { border-radius: 30%; position: relative; overflow: hidden; color: #fff;
-  background: linear-gradient(160deg, hsl(var(--hue) 80% 64% / .92), hsl(calc(var(--hue) + 24) 72% 42% / .92));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 1px rgba(0, 0, 0, .18), 0 4px 12px -5px hsl(var(--hue) 70% 40% / .75); }
-.role-badge::before { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
-  background: linear-gradient(170deg, rgba(255, 255, 255, .42) 0%, rgba(255, 255, 255, .08) 46%, transparent 52%); }
-.role-badge::after { content: ""; position: absolute; top: -60%; left: -80%; width: 50%; height: 220%; transform: rotate(25deg); pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent); opacity: 0; }
-.role-badge > svg { position: relative; z-index: 1; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .25)); }
-.role-badge.sys { border-radius: 30%; }
-.role-badge.custom { background: linear-gradient(160deg, hsl(var(--hue) 45% 60% / .9), hsl(calc(var(--hue) + 24) 40% 38% / .9)); }
-.palette-item:hover .role-badge, .msg:hover .avatar .role-badge, .agent-chip:hover .role-badge { transform: translateY(-1px) scale(1.06); }
-.palette-item:hover .role-badge::after, .msg:hover .avatar .role-badge::after { animation: shine .9s ease-out; }
-@keyframes shine { 0% { left: -80%; opacity: 1; } 100% { left: 140%; opacity: 0; } }
+/* ---------- role icons: monochrome line glyphs (same weight as the nav icons) ---------- */
+.role-badge { position: relative; display: inline-grid; place-items: center; flex: none; line-height: 1; color: var(--fg);
+  border-radius: 30%; transition: transform .2s cubic-bezier(.2, .9, .3, 1.4), color .2s ease; }
+.role-badge > svg { display: block; grid-area: 1 / 1; }
+.role-badge.framed, .role-badge.sys { background: color-mix(in srgb, var(--fg) 6%, transparent); box-shadow: inset 0 0 0 1px var(--line); }
+.role-badge.sys { width: 32px; height: 32px; color: var(--amber); }
+.avatar:has(.role-badge) { background: transparent; }
+.agent-chip .role-badge { vertical-align: -4px; }
+.palette-item:hover .role-badge, .msg:hover .avatar .role-badge, .agent-chip:hover .role-badge, .agent-chat-card:hover .role-badge { transform: translateY(-1px) scale(1.06); }
+/* Activity takes the icon's own shape: working = the glyph in accent, breathing, with an echo of itself swelling out and fading;
+   paused = the glyph resting in amber. The tile (when framed) only picks up a tinted hairline. */
+.role-badge.is-working { color: var(--accent); }
+.role-badge.is-working > .role-glyph { animation: breathe 1.6s ease-in-out infinite; }
+.role-badge > .role-echo { pointer-events: none; animation: glyph-echo 1.6s ease-out infinite; }
+.role-badge.is-paused { color: var(--amber); }
+.role-badge.is-paused > .role-glyph { opacity: .85; }
+.role-badge.framed.is-working { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.role-badge.framed.is-paused { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 55%, var(--line)); }
+@keyframes glyph-echo { 0% { transform: scale(1); opacity: .55; } 75%, 100% { transform: scale(1.75); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .role-badge > .role-echo { display: none; } .role-badge.is-working > .role-glyph { animation: none; } }
 .msg-user .avatar .user-avatar, .user-avatar { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), 0 4px 12px -5px rgba(0, 0, 0, .5); }
 
 /* micro-animations: icons spring when you point at them */
@@ -1192,7 +1178,6 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
 .agent-chat-card:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--accent) 10%, var(--glass-strong)); box-shadow: var(--hi), var(--shadow); }
 .agent-chat-card.is-working { background: color-mix(in srgb, var(--accent) 9%, var(--glass-strong)); }
-.agent-chat-card.is-working .icon-glyph { animation: breathe 1.6s ease-in-out infinite; }
 .agent-chat-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .agent-chat-go { opacity: .45; transition: opacity .15s ease; } .agent-chat-card:hover .agent-chat-go { opacity: 1; }
 .table td.actions button.chat-btn { display: inline-flex; align-items: center; gap: 4px; }
