@@ -185,7 +185,7 @@ describe("running-agent chip", () => {
     expect(rule(".agent-chip .chip-main")).toMatch(/display: inline-flex;.*align-items: center/);
     expect(rule(".agent-chip .chip-act")).toMatch(/place-items: center;.*width: (\d+)px; height: \1px;.*border-radius: 50%/);
     expect(css).not.toMatch(/\.agent-chip \.role-badge \{[^}]*vertical-align/);
-    const tsx = read("src/renderer/views/ChatView.tsx");
+    const tsx = read("src/renderer/components/AgentsPill.tsx");
     expect(tsx).toContain('<span className="chip-label">');
     expect(tsx.match(/className="chip-act"/g)?.length).toBe(4);
   });

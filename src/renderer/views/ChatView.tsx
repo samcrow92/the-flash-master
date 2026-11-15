@@ -14,9 +14,10 @@ import { Composer } from "../components/Composer";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, RefreshCw, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
+import { AppWindow, Archive, ChevronDown, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
 import { Dots } from "../components/Dots";
 import { SpecialistsPill } from "../components/SpecialistsPill";
+import { AgentsPill } from "../components/AgentsPill";
 import { ThreadsPanel } from "./ThreadsPanel";
 import { messageSide } from "../threadList";
 
@@ -143,24 +144,6 @@ export function ChatView({ chatId }: { chatId: string }) {
           </div>
         </header>
 
-        {chatAgents.length > 0 && (
-          <div className="agent-strip">
-            {chatAgents.map((a) => (
-              <span key={a.id} className={`agent-chip st-${a.status}`} title={`${a.lastActivity ?? ""}\nClick to see the progress flow`}>
-                <button className="chip-main" onClick={() => st.openFlow(chatId, a.id)}>
-                  <RoleIcon role={a.role} size={16} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} />
-                  <span className="chip-label">{agentTitle(a)} · {a.harness} · {a.status}
-                    {a.plan.length > 0 && ` · ${a.plan.filter((p) => p.status === "completed").length}/${a.plan.length}`}</span>
-                </button>
-                {a.status === "running" && <button className="chip-act" onClick={() => api().pauseAgent(a.id)} title="Pause"><Pause size={12} /></button>}
-                {a.status === "paused" && <button className="chip-act" onClick={() => api().resumeAgent(a.id)} title="Resume"><Play size={12} /></button>}
-                {a.status === "interrupted" && <button className="chip-act" onClick={() => void api().resumeInterrupted(a.id).catch((e) => st.toast("error", String(e?.message ?? e)))} title="Resume (the app closed while it was working)"><Play size={12} /></button>}
-                <button className="chip-act" onClick={() => api().stopAgent(a.id)} title="Stop"><Square size={10} fill="currentColor" /></button>
-              </span>
-            ))}
-          </div>
-        )}
-
         <div className="messages-area">
           <div className="messages" ref={listRef}>
             <div className="messages-inner virtual">
@@ -174,7 +157,10 @@ export function ChatView({ chatId }: { chatId: string }) {
               <div className="vl-pad" style={{ height: vl.padBottom }} />
             </div>
           </div>
-          <SpecialistsPill />
+          <div className="pill-stack">
+            <SpecialistsPill />
+            <AgentsPill chatId={chatId} />
+          </div>
         </div>
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
         <UsageMeter />
