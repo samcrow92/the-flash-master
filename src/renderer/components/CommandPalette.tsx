@@ -31,8 +31,8 @@ async function stopChat(chatId: string): Promise<boolean> {
 
 async function newChat(): Promise<void> {
   const st = useStore.getState();
-  const projectId = st.currentProjectId ?? st.projects[0]?.id;
-  if (!projectId) { st.toast("warn", "Add a project folder first, then start a chat in it."); return; }
+  // No project selected: the chat goes to "No project", never into the first project in the list.
+  const projectId = st.currentProjectId;
   const c = await api().createChat({ projectId, agentRole: "flashmaster", title: "New chat" });
   st.upsertChat(c);
   await st.openChat(c.id);

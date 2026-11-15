@@ -160,3 +160,16 @@ describe("running-agent chip", () => {
     expect(tsx.match(/className="chip-act"/g)?.length).toBe(4);
   });
 });
+
+describe("agents without a project", () => {
+  // Starting an agent or chat with no project selected must not fall back to the first project in the list.
+  it("no renderer code that starts chats picks projects[0]", () => {
+    for (const f of ["src/renderer/agentChat.ts", "src/renderer/components/SpecialistsPill.tsx", "src/renderer/components/CommandPalette.tsx", "src/renderer/store.ts"]) {
+      expect(read(f), f).not.toMatch(/projects\[0\]|projectIds\[0\]/);
+    }
+  });
+  it("the sidebar shows a No project section and the store loads its chats", () => {
+    expect(read("src/renderer/components/Sidebar.tsx")).toContain("<NoProjectSection");
+    expect(read("src/renderer/store.ts")).toMatch(/refreshChats\(null\)/);
+  });
+});

@@ -1289,3 +1289,5 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .edit-box textarea { width: 100%; resize: none; padding: 8px 10px; border-radius: 10px; font: inherit; line-height: 1.45; }
 .edit-actions { display: flex; align-items: center; gap: 6px; }
 .edit-actions .muted { margin-right: auto; }
+/* "No project" section: agents and chats whose project couldn't be determined. */
+.no-project .project-label { color: var(--muted); font-style: italic; }
