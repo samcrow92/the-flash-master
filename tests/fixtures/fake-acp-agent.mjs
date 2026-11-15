@@ -71,7 +71,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         return reply({ stopReason: "end_turn" });
       }
       if (text === "/usage") {
-        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Usage\n  Premium requests: 123 / 300 (41%)\n  Resets: Dec 1, 2026\n" } });
+        upd({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Usage:\n  Total usage est:        7 Premium requests\n  API time spent:         3s\n  claude-sonnet-4.5       453.0k in, 13.1k out, 405.7k cached (Est. 5 Premium requests)\n  gpt-5                   1.2k in, 300 out (Est. 2 Premium requests)\n" } });
         return reply({ stopReason: "end_turn" });
       }
       upd({ sessionUpdate: "tool_call", toolCallId: "t1", title: "Read file", kind: "read", status: "pending" });

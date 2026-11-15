@@ -1,6 +1,7 @@
 import { fixPath } from "./shell-path";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, Notification } from "electron";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,13 +16,12 @@ import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
 import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
-import { parseCopilotUsage } from "./copilot-usage";
-import { fetchCopilotBilling } from "./github-billing";
+import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
+import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
 import { Requirements, parseRmLink } from "./requirements";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
 import { parseProxy, fallbacks, isProxySetupError, describe, explainProxyError, type ProxyCfg, type ParsedProxy } from "./proxy";
-import type { AcpAdapter } from "./harness/acp";
 import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, roleMarkdown, slugRole, validateRole, type AgentSpec } from "./roles";
 import type { AgentImportResult, Attachment, HarnessId, HarnessModels } from "@shared/types";
@@ -132,6 +132,7 @@ const orch = new Orchestrator({
   listTools: (set) => bridge.list(set),
   callTool: (name, args, agentId, set) => bridge.call(name, args, agentId, set),
   attachmentRoots: () => attachmentRoots(),
+  onCopilotUsage: (r) => recordCopilotUsage(r),
   onModels: (h, models) => {
     const m = { harness: h, models, fetchedAt: Date.now(), error: null, loading: false };
     modelCache.set(h, m);
@@ -355,61 +356,51 @@ function refreshModels(h: HarnessId): Promise<HarnessModels> {
   return p;
 }
 
-// ---------------- Copilot usage meter (GitHub billing API, or Copilot CLI's /usage) ----------------
+// ---------------- Copilot usage meter (credits via Copilot's own sign-in; per model from /usage + its session log) ----------------
 const usageFile = join(dataDir, "copilot-usage.json");
 let copilotUsage: CopilotUsage | null = (() => { try { return JSON.parse(readFileSync(usageFile, "utf8")); } catch { return null; } })();
+const setUsage = (u: CopilotUsage) => {
+  copilotUsage = u;
+  emit({ type: "copilotUsage.updated", usage: u });
+  try { writeFileSync(usageFile, JSON.stringify({ ...u, loading: false })); } catch { /* best effort */ }
+  return u;
+};
+const liveFile = join(dataDir, "copilot-usage-live.json");
+const liveLedger = new LiveLedger(() => { try { return readFileSync(liveFile, "utf8"); } catch { return null; } }, (json) => writeFileSync(liveFile, json));
+let usageAdvertised: { advertised: boolean; commands: string[] } | null = null;
 let usageInflight: Promise<CopilotUsage | null> | null = null;
-const setUsage = (u: CopilotUsage) => { copilotUsage = u; emit({ type: "copilotUsage.updated", usage: u }); return u; };
-const billingSecret = join(dataDir, "github-billing.secret");
-const billingFetch = withProxyFallback(() => session.defaultSession, (url, init) => session.defaultSession.fetch(url, init as any) as any);
-/** Token for the billing API: the one saved for it, else Copilot's sign-in token, the environment, or GitHub CLI's login. */
-async function billingToken(): Promise<string> {
-  const saved = secrets.get(billingSecret) || readCopilotToken() || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "";
-  if (saved) return saved;
-  const { execFile } = await import("node:child_process");
-  return new Promise((resolve) => execFile("gh", ["auth", "token"], { timeout: 5000, windowsHide: true, encoding: "utf8" }, (err, out) => resolve(err ? "" : String(out).trim())));
+/** Silent /usage at the end of each Copilot turn (from the orchestrator). */
+function recordCopilotUsage(r: { sessionId: string; text: string | null; commands: string[] }): void {
+  usageAdvertised = { advertised: r.text !== null, commands: r.commands };
+  const seg = r.text ? parseSessionUsage(r.text) : null;
+  if (seg && r.sessionId) liveLedger.record(r.sessionId, seg);
+  if (settings.get().usage.copilotMeter) void refreshCopilotUsage();
 }
-function runBilling(): Promise<CopilotUsage | null> {
-  const u = settings.get().usage;
-  setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), loading: true, error: null });
-  return billingToken()
-    .then((token) => fetchCopilotBilling(billingFetch as any, token, { allowance: u.includedCredits, budget: u.monthlyBudget, api: process.env.FLASH_GITHUB_API }))
-    .then((r) => setUsage(r))
-    .catch((e) => setUsage({ ...parseCopilotUsage("", copilotUsage?.fetchedAt ?? 0), source: "github", ok: false, loading: false, error: String(e?.message ?? e) }))
-    .finally(() => { try { writeFileSync(usageFile, JSON.stringify({ ...copilotUsage, loading: false })); } catch { /* best effort */ } });
+const quotaFetch = withProxyFallback(() => session.defaultSession, (url, init) => session.defaultSession.fetch(url, init as any) as any);
+const runText: Exec = async (cmd, args) => {
+  const { execFile } = await import("node:child_process");
+  return new Promise((resolve, reject) => execFile(cmd, args, { timeout: 15000, windowsHide: true, encoding: "utf8" }, (err, out) => (err ? reject(err) : resolve(String(out)))));
+};
+/** Available credits from Copilot, using the sign-in Copilot already has. */
+async function readCopilotQuota(dir: string): Promise<{ quota: Quota | null; from: string | null; error: string | null }> {
+  const t = await findCopilotToken({ env: process.env, appToken: readCopilotToken(), copilotDir: dir, exec: runText, readText: (f) => readFile(f, "utf8") });
+  if (!t) return { quota: null, from: null, error: "Couldn't find Copilot's sign-in on this computer. Sign in to Copilot (run copilot, then /login) to see your available credits." };
+  try { return { quota: await fetchQuota(quotaFetch as any, t.token, process.env.FLASH_GITHUB_API), from: t.from, error: null }; }
+  catch (e: any) { return { quota: null, from: t.from, error: String(e?.message ?? e) }; }
 }
 function refreshCopilotUsage(): Promise<CopilotUsage | null> {
   if (usageInflight) return usageInflight;
-  const s = settings.get();
-  if (s.usage.source !== "cli") {
-    usageInflight = runBilling().finally(() => { usageInflight = null; });
-    return usageInflight;
-  }
-  usageInflight = (async () => {
-    const st = harnesses.cached("copilot")?.available ? harnesses.cached("copilot") : (await harnesses.detectAll(s)).find((h) => h.id === "copilot");
-    return st;
-  })().then((st) => runUsage(s, st)).finally(() => { usageInflight = null; });
+  const now = new Date();
+  const period = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
+  const dir = copilotHome(homedir());
+  if (copilotUsage) setUsage({ ...copilotUsage, loading: true });
+  usageInflight = Promise.all([scanSessionLogs(dir, Date.UTC(period.year, period.month - 1, 1)), readCopilotQuota(dir)])
+    .then(([logs, q]) => setUsage(toUsage(
+      summarizeLocal(logs, liveLedger.all(), period, { allowance: settings.get().usage.includedCredits, quota: q.quota, signIn: q.from }),
+      { advertised: usageAdvertised?.advertised ?? null, commands: usageAdvertised?.commands, quotaError: q.error, resetAt: q.quota?.resetAt })))
+    .catch((e) => setUsage({ ...(copilotUsage ?? toUsage(summarizeLocal(new Map(), [], period))), ok: false, loading: false, error: String(e?.message ?? e) }))
+    .finally(() => { usageInflight = null; });
   return usageInflight;
-}
-function runUsage(s: ReturnType<typeof settings.get>, st: ReturnType<typeof harnesses.cached>): Promise<CopilotUsage | null> {
-  if (!st?.available) {
-    return Promise.resolve(setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: "Copilot CLI not found" }));
-  }
-  setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), loading: true, error: copilotUsage?.ok ? copilotUsage.error : null });
-  const adapter = harnesses.get("copilot") as AcpAdapter;
-  return adapter.runCommand({ executable: st.path ?? (s.harnesses.copilot.path || null), cwd: homedir(), env: { ...networkEnv(s), ...harnessEnv("copilot") }, extraArgs: s.harnesses.copilot.args ?? "" },
-    "usage", s.usage.onlyIfAdvertised)
-    .then((r) => {
-      if (!r.advertised && s.usage.onlyIfAdvertised) {
-        return setUsage({ ...parseCopilotUsage(""), ok: false, advertised: false,
-          error: `This Copilot CLI does not offer /usage to apps (commands: ${r.commands.slice(0, 12).join(", ") || "none"}). Update Copilot CLI, or turn off “only if advertised” (may use a premium request).` });
-      }
-      return setUsage({ ...parseCopilotUsage(r.text), source: "cli", advertised: r.advertised });
-    })
-    .catch((e) => setUsage({ ...(copilotUsage ?? parseCopilotUsage("", 0)), ok: false, loading: false, error: String(e?.message ?? e) }))
-    .finally(() => {
-      try { writeFileSync(usageFile, JSON.stringify({ ...copilotUsage, loading: false })); } catch { /* best effort */ }
-    });
 }
 let usageTimer: ReturnType<typeof setInterval> | null = null;
 const scheduleUsage = () => {
@@ -679,11 +670,6 @@ const api: FlashApi = {
   },
   usageSummary: async (days) => db.usageSummary(days, settings.get().tokens.dailyBudget),
   copilotUsage: async (refresh) => (refresh ? refreshCopilotUsage() : copilotUsage),
-  setBillingToken: async (token) => {
-    await secrets.set(billingSecret, token.trim());
-    settings.update({ usage: { hasBillingToken: !!token.trim() } });
-    return refreshCopilotUsage();
-  },
   detectHarnesses: async () => harnesses.detectAll(settings.get()),
   pickHarnessExecutable: async (h) => {
     const r = await dialog.showOpenDialog(win!, {
@@ -966,7 +952,7 @@ async function proxyTest(url: string): Promise<{ ok: boolean; detail: string; co
 settings.onChange(() => void applyProxy());
 
 app.whenReady().then(async () => {
-  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret), secrets.load(billingSecret)]);
+  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret)]);
   await applyProxy();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
@@ -976,8 +962,7 @@ app.whenReady().then(async () => {
   void harnesses.detectAll(settings.get()).then((list) => {
     for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
     const u = settings.get().usage;
-    if (u.copilotMeter && (u.source !== "cli" || list.some((h) => h.id === "copilot" && h.available))
-      && Date.now() - (copilotUsage?.fetchedAt ?? 0) > Math.max(5, u.refreshMinutes || 30) * 60000) void refreshCopilotUsage();
+    if (u.copilotMeter) void refreshCopilotUsage(); // local files only: cheap, so always fresh at start
     scheduleUsage();
   });
   void mcp.ensure().then((servers) => { emit({ type: "mcp.status", servers }); if (settings.get().exam.autoSetup) void runExamSetup(true, true); });

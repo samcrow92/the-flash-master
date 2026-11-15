@@ -52,6 +52,11 @@ export interface SessionOptions {
   onEvent: (e: HarnessEvent) => void;
   /** Ask the user (returns true = allow). Only called when policy says "ask". */
   askPermission: (r: PermissionRequest) => Promise<boolean>;
+  /**
+   * After each finished turn, run the agent's built-in `/usage` silently (never shown in the chat) and report its text.
+   * Only sent when the agent lists /usage as a command, so it never reaches a model; text is null when it does not.
+   */
+  onUsage?: (r: { sessionId: string; text: string | null; commands: string[] }) => void;
 }
 
 export interface HarnessSession {
