@@ -1,4 +1,5 @@
-import { existsSync, statSync } from "node:fs";
+import { chmodSync, existsSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { AppEvent } from "@shared/types";
@@ -108,8 +109,23 @@ const clamp = (n: number) => Math.max(2, Math.min(1000, Math.floor(Number(n) || 
 const isDir = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
 
 async function loadNodePty(): Promise<Spawn> {
+  if (process.platform === "darwin") ensureSpawnHelper();
   const mod = (await import("node-pty")) as unknown as { spawn?: Spawn; default?: { spawn: Spawn } };
   const spawn = mod.spawn ?? mod.default?.spawn;
   if (!spawn) throw new Error("node-pty did not load");
   return spawn;
+}
+
+/**
+ * node-pty 1.1.0 ships its macOS spawn-helper without the executable bit ("posix_spawnp failed" on every spawn).
+ * scripts/fix-node-pty.mjs fixes it at install time; this repeats it at runtime in case an install skipped scripts.
+ */
+function ensureSpawnHelper(): void {
+  try {
+    const dir = join(createRequire(import.meta.url).resolve("node-pty/package.json"), "..").replace("app.asar", "app.asar.unpacked");
+    for (const sub of [join("build", "Release"), join("prebuilds", `darwin-${process.arch}`)]) {
+      const helper = join(dir, sub, "spawn-helper");
+      if (existsSync(helper)) chmodSync(helper, 0o755);
+    }
+  } catch { /* read-only install: the install-time fix applies */ }
 }

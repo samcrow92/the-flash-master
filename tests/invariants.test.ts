@@ -156,6 +156,10 @@ describe("native modules", () => {
     expect(deps).toEqual(["node-pty"]);
     for (const d of deps) expect(builder, `${d} must be in asarUnpack`).toContain(`node_modules/${d}/**`);
   });
+  it("node-pty's macOS spawn-helper is made executable after install", () => {
+    const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
+    expect(pkg.scripts.postinstall).toContain("scripts/fix-node-pty.mjs");
+  });
   it("the smoke test fails when the integrated terminal can't run a command", () => {
     const smoke = read("src/main/smoke.ts");
     expect(smoke).toMatch(/const termOk = term === "ok"/);

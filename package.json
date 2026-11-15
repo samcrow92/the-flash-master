@@ -23,7 +23,8 @@
     "prebuild": "node scripts/ensure-electron.mjs",
     "predist:win": "node scripts/ensure-electron.mjs",
     "predist:mac": "node scripts/ensure-electron.mjs",
-    "release:manifest": "node scripts/release-manifest.mjs"
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "postinstall": "node scripts/fix-node-pty.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
