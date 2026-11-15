@@ -5,6 +5,10 @@
   - Starts in the current project's folder; several tabs, an expand button to fill the window, and hiding keeps the shells running.
   - Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V pastes. The smoke test on every CI platform opens it and runs a command.
 - **Fix: taskbar icon on Windows.** The `.ico` stored every size as PNG, which some Windows icon paths (the taskbar among them) don't draw; small sizes are now classic bitmaps, with 20, 24 and 40 px added for scaled displays. The icon is found whether the app runs packaged, from `npm run dev` or straight from `out/main`, is logged at startup, and the smoke test on Windows CI fails if it doesn't load.
+- **Review page for agent changes.** Every code-writing specialist that worked on its own branch shows up under **Review** in the sidebar (the badge counts branches waiting for you).
+  - **All changed files with diffs:** committed, uncommitted and new files since the branch started, each with +/− counts. Files the agent hasn't committed yet are marked.
+  - **Line comments:** click a line number to comment on that line. **Ask to fix** sends all comments, plus an optional general note, to the agent in its chat; it fixes them on the same branch, even after it finished or the app restarted. Unsent comments survive switching pages.
+  - **Merge / Discard** from the same screen, with the same safety checks as before. The Agents page has a **Review** button next to each branch.
 - **Windows-style window controls, no title bar.** Minimise, maximise and close now sit at the top right like any Windows app, next to the light/dark toggle, with nothing drawn behind them. The lightning-bolt app icon is back at the top left of the window. macOS keeps its own traffic lights.
 - **Runs on macOS.** The app now works on Apple silicon and Intel Macs, with the system's own traffic lights and vibrancy.
   - **Agent CLIs are found from the Dock:** on start the app reads your login shell's PATH, so CLIs in `~/.local/bin`, Homebrew or npm's global folder are detected even when it's not launched from Terminal.

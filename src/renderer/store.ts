@@ -9,6 +9,7 @@ export const api = () => window.flash.api;
 export type View =
   | { kind: "chat"; chatId: string }
   | { kind: "agents" }
+  | { kind: "review"; agentId?: string }
   | { kind: "dashboard" }
   | { kind: "tasks" }
   | { kind: "jazz" }

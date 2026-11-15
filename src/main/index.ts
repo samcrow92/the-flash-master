@@ -600,6 +600,9 @@ const api: FlashApi = {
   agentWorkState: async (id) => orch.workState(id),
   mergeAgentWork: async (id) => orch.mergeWork(id),
   discardAgentWork: async (id, force) => orch.discardWork(id, !!force),
+  agentWorkChanges: async (id) => orch.workChanges(id),
+  agentWorkFileDiff: async (id, path) => orch.workFileDiff(id, String(path)),
+  requestAgentFixes: async (id, comments, note) => orch.requestWorkFixes(id, Array.isArray(comments) ? comments : [], typeof note === "string" ? note : ""),
   stopAgent: async (id) => orch.stop(id),
   stopAll: async () => orch.stopAll(),
   getAgentFlow: async (agentId) => {

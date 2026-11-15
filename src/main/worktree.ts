@@ -3,8 +3,8 @@
  * running in parallel on one project never overwrite each other. Nothing here deletes work that isn't merged:
  * removing a worktree with uncommitted changes or unmerged commits is refused unless the user forces it.
  */
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { runCapture } from "./harness/process";
 
 export type Git = (cwd: string, args: string[]) => Promise<{ code: number | null; out: string }>;
@@ -68,4 +68,78 @@ export async function removeWorktree(repo: string, dir: string, branch: string, 
   } else await git(repo, ["worktree", "prune"]);
   await git(repo, ["branch", force ? "-D" : "-d", branch]);
   return { ok: true, message: `Removed the agent's copy and branch ${branch}.` };
+}
+
+export type ChangeStatus = "added" | "modified" | "deleted";
+export interface WorkFile { path: string; status: ChangeStatus; added: number; removed: number; binary: boolean; committed: boolean }
+
+/** Where the agent's branch left the project's current branch: its changes are everything since this commit. */
+async function reviewBase(repo: string, branch: string, git: Git): Promise<string> {
+  const mb = await git(repo, ["merge-base", "HEAD", branch]);
+  return mb.code === 0 && mb.out.trim() ? mb.out.trim().split(/\s+/)[0]! : "HEAD";
+}
+
+const MAX_REVIEW_FILES = 500;
+
+/**
+ * Every file the agent changed in its copy: committed on its branch, uncommitted, and new untracked files, compared with
+ * where the branch started. This is what Merge brings in (once committed) and what Discard throws away.
+ */
+export async function worktreeChanges(repo: string, dir: string, branch: string, git: Git = defaultGit): Promise<{ base: string; files: WorkFile[] }> {
+  const base = await reviewBase(repo, branch, git);
+  if (!existsSync(dir)) return { base, files: [] };
+  const [names, nums, untracked, committed] = await Promise.all([
+    git(dir, ["diff", "--no-renames", "--name-status", base]),
+    git(dir, ["diff", "--no-renames", "--numstat", base]),
+    git(dir, ["ls-files", "--others", "--exclude-standard"]),
+    git(dir, ["diff", "--no-renames", "--name-only", base, "HEAD"]),
+  ]);
+  const lines = (s: string) => s.split(/\r?\n/).filter((l) => l.trim());
+  const inCommits = new Set(committed.code === 0 ? lines(committed.out) : []);
+  const stat = new Map<string, { added: number; removed: number; binary: boolean }>();
+  for (const l of nums.code === 0 ? lines(nums.out) : []) {
+    const [a, r, ...p] = l.split("\t");
+    stat.set(p.join("\t"), { added: Number(a) || 0, removed: Number(r) || 0, binary: a === "-" });
+  }
+  const files: WorkFile[] = [];
+  for (const l of names.code === 0 ? lines(names.out) : []) {
+    const [code, ...p] = l.split("\t");
+    const path = p.join("\t");
+    const s = stat.get(path) ?? { added: 0, removed: 0, binary: false };
+    files.push({ path, status: code?.startsWith("A") ? "added" : code?.startsWith("D") ? "deleted" : "modified", ...s, committed: inCommits.has(path) });
+  }
+  for (const path of untracked.code === 0 ? lines(untracked.out) : []) {
+    const r = readText(dir, path);
+    files.push({ path, status: "added", added: r.binary ? 0 : r.text ? r.text.split("\n").length - (r.text.endsWith("\n") ? 1 : 0) : 0, removed: 0, binary: r.binary, committed: false });
+  }
+  files.sort((x, y) => x.path.localeCompare(y.path));
+  return { base, files: files.slice(0, MAX_REVIEW_FILES) };
+}
+
+const MAX_REVIEW_BYTES = 1_500_000;
+
+/** Read a file inside `root`; refuses paths that leave it. Binary and very large files come back without text. */
+function readText(root: string, path: string): { text: string; binary: boolean; tooLarge?: boolean } {
+  const abs = resolve(root, path);
+  const rel = relative(resolve(root), abs);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("path outside the agent's copy");
+  if (!existsSync(abs)) return { text: "", binary: false };
+  const st = statSync(abs);
+  if (!st.isFile()) return { text: "", binary: false };
+  if (st.size > MAX_REVIEW_BYTES) return { text: "", binary: false, tooLarge: true };
+  const buf = readFileSync(abs);
+  if (buf.subarray(0, 8000).includes(0)) return { text: "", binary: true };
+  return { text: buf.toString("utf8"), binary: false };
+}
+
+/** One file of the agent's change: its text where the branch started, and its text in the agent's copy now. */
+export async function worktreeFileDiff(repo: string, dir: string, branch: string, path: string, git: Git = defaultGit):
+  Promise<{ oldText: string; newText: string; binary: boolean; tooLarge: boolean }> {
+  const now = readText(dir, path);
+  const base = await reviewBase(repo, branch, git);
+  const old = await git(dir, ["show", `${base}:${path.replace(/\\/g, "/")}`]);
+  const oldText = old.code === 0 ? old.out : "";
+  const binary = now.binary || oldText.slice(0, 8000).includes("\0");
+  const tooLarge = !!now.tooLarge || oldText.length > MAX_REVIEW_BYTES;
+  return binary || tooLarge ? { oldText: "", newText: "", binary, tooLarge } : { oldText, newText: now.text, binary, tooLarge };
 }

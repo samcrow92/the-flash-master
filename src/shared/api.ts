@@ -3,6 +3,20 @@ import type {
   Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
+import type { ReviewComment } from "./review";
+
+export interface AgentWorkChanges {
+  branch: string;
+  dir: string;
+  /** Commit the branch started from (on the project's current branch). */
+  base: string;
+  files: { path: string; status: "added" | "modified" | "deleted"; added: number; removed: number; binary: boolean; committed: boolean }[];
+  exists: boolean;
+  dirty: string[];
+  unmerged: number;
+  /** The agent is working right now (Merge/Discard wait until it stops). */
+  busy: boolean;
+}
 
 /**
  * The complete renderer → main contract. Every method maps 1:1 to an IPC channel
@@ -54,6 +68,12 @@ export interface FlashApi {
   mergeAgentWork(id: string): Promise<{ ok: boolean; message: string }>;
   /** Remove the agent's worktree and branch; refused while it holds unmerged work unless force. */
   discardAgentWork(id: string, force?: boolean): Promise<{ ok: boolean; message: string }>;
+  /** Review page: every file the agent changed in its copy since its branch started (committed, uncommitted, new). */
+  agentWorkChanges(id: string): Promise<AgentWorkChanges>;
+  /** One changed file: its text where the branch started and in the agent's copy now. */
+  agentWorkFileDiff(id: string, path: string): Promise<{ oldText: string; newText: string; binary: boolean; tooLarge: boolean }>;
+  /** Send review line comments to the agent; it fixes them in its own copy (queued while it works). */
+  requestAgentFixes(id: string, comments: ReviewComment[], note?: string): Promise<Message>;
   pauseAgent(id: string): Promise<void>;
   resumeAgent(id: string): Promise<void>;
   stopAgent(id: string): Promise<void>;
@@ -179,7 +199,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "toggleReaction", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "toggleReaction", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

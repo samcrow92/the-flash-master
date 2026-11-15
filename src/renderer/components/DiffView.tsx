@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { diffLines, wordDiff, type DiffOp } from "@shared/diff";
 
 type Row = { kind: "eq" | "add" | "del" | "mod"; a?: DiffOp; b?: DiffOp };
@@ -23,7 +23,14 @@ function pairOps(ops: DiffOp[]): Row[] {
 
 const Words = ({ parts, cls }: { parts: [string, boolean][]; cls: string }) => <>{parts.map(([t, c], i) => c ? <mark key={i} className={cls}>{t}</mark> : <Fragment key={i}>{t}</Fragment>)}</>;
 
-export function DiffView({ oldText, newText, mode = "split", wrap = false, full = false }: { oldText: string; newText: string; mode?: "split" | "unified"; wrap?: boolean; full?: boolean }) {
+export type DiffSide = "old" | "new";
+
+/**
+ * `onLine` + `after` (unified mode): line numbers become buttons to comment on a line, and `after` renders below a line
+ * (the Review page's line comments). A removed line is addressed on the "old" side, every other line on the "new" side.
+ */
+export function DiffView({ oldText, newText, mode = "split", wrap = false, full = false, onLine, after }: { oldText: string; newText: string; mode?: "split" | "unified"; wrap?: boolean; full?: boolean;
+  onLine?: (side: DiffSide, line: number, code: string) => void; after?: (side: DiffSide, line: number) => ReactNode }) {
   const d = useMemo(() => diffLines(oldText, newText, full ? 1e9 : 3), [oldText, newText, full]);
   if (d.identical) return <div className="diff-empty muted">No differences.</div>;
   const lastA = oldText.split("\n").length;
@@ -40,11 +47,21 @@ export function DiffView({ oldText, newText, mode = "split", wrap = false, full 
             {mode === "unified" ? (
               <table className="diff-table"><tbody>
                 {rows.flatMap((r, i) => {
-                  if (r.kind === "eq") return [<tr key={i} className="eq"><td className="ln">{r.a!.a}</td><td className="ln">{r.b!.b}</td><td className="sg" /><td className="code">{r.a!.text || " "}</td></tr>];
+                  // A line number that opens a comment box (Review page); plain text elsewhere.
+                  const num = (side: DiffSide, n: number | undefined, code: string) => n === undefined ? null
+                    : onLine ? <button className="ln-btn" title="Comment on this line" onClick={() => onLine(side, n, code)}>{n}</button> : n;
+                  const extra = (key: string, side: DiffSide, n: number | undefined) => {
+                    const node = after && n !== undefined ? after(side, n) : null;
+                    return node ? [<tr key={key} className="diff-note-row"><td colSpan={4}>{node}</td></tr>] : [];
+                  };
+                  if (r.kind === "eq") return [<tr key={i} className="eq"><td className="ln">{r.a!.a}</td><td className="ln">{num("new", r.b!.b, r.b!.text)}</td><td className="sg" /><td className="code">{r.a!.text || " "}</td></tr>,
+                    ...extra(`${i}n`, "new", r.b!.b)];
                   const w = r.kind === "mod" ? wordDiff(r.a!.text, r.b!.text) : null;
                   const out = [];
-                  if (r.a) out.push(<tr key={`${i}a`} className="del"><td className="ln">{r.a.a}</td><td className="ln" /><td className="sg">−</td><td className="code">{w ? <Words parts={w.a} cls="wd" /> : r.a.text || " "}</td></tr>);
-                  if (r.b) out.push(<tr key={`${i}b`} className="add"><td className="ln" /><td className="ln">{r.b.b}</td><td className="sg">+</td><td className="code">{w ? <Words parts={w.b} cls="wa" /> : r.b.text || " "}</td></tr>);
+                  if (r.a) out.push(<tr key={`${i}a`} className="del"><td className="ln">{num("old", r.a.a, r.a.text)}</td><td className="ln" /><td className="sg">−</td><td className="code">{w ? <Words parts={w.a} cls="wd" /> : r.a.text || " "}</td></tr>,
+                    ...extra(`${i}an`, "old", r.a.a));
+                  if (r.b) out.push(<tr key={`${i}b`} className="add"><td className="ln" /><td className="ln">{num("new", r.b.b, r.b.text)}</td><td className="sg">+</td><td className="code">{w ? <Words parts={w.b} cls="wa" /> : r.b.text || " "}</td></tr>,
+                    ...extra(`${i}bn`, "new", r.b.b));
                   return out;
                 })}
               </tbody></table>
