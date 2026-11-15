@@ -2,12 +2,14 @@ import { ResizeHandle } from "../components/ResizeHandle";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Message } from "@shared/types";
 import { ago, roleOf, useStore } from "../store";
-import { chatThreads, threadsPanelMode, type ThreadSummary } from "../threadList";
+import { chatThreads, splitArchived, threadsPanelMode, type ThreadSummary } from "../threadList";
+import { threadMenu } from "../threadActions";
+import { openMenu } from "../components/ContextMenu";
 import { MessageItem } from "./ChatView";
 import { Composer } from "../components/Composer";
 import { UserAvatar } from "../components/UserAvatar";
 import { Dots } from "../components/Dots";
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Info, LocateFixed, MessagesSquare, PanelRightClose, PanelRightOpen, RoleIcon } from "../components/icons";
+import { Archive, ChevronRight, ChevronsDownUp, ChevronsUpDown, Info, LocateFixed, MessagesSquare, MoreHorizontal, PanelRightClose, PanelRightOpen, RoleIcon } from "../components/icons";
 
 const plural = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`;
 /** Thread lists already requested for the panel's summaries (who replied, when), so each loads once. */
@@ -24,19 +26,21 @@ export function ThreadsPanel({ chatId, otherPanel }: { chatId: string; otherPane
   const open = useStore((s) => s.threadsPanelOpen);
   const focus = useStore((s) => s.panelFocus);
   const [openedEmpty, setOpenedEmpty] = useState(false);
-  const list = useMemo(() => chatThreads(roots ?? [], threads, panelThreads), [roots, threads, panelThreads]);
-  const mode = threadsPanelMode({ open, otherPanel, count: list.length, openedEmpty });
+  const [showArchived, setShowArchived] = useState(false);
+  const all = useMemo(() => chatThreads(roots ?? [], threads, panelThreads), [roots, threads, panelThreads]);
+  const { active: list, archived } = useMemo(() => splitArchived(all), [all]);
+  const mode = threadsPanelMode({ open, otherPanel, count: list.length + archived.length, openedEmpty });
   const listRef = useRef<HTMLDivElement>(null);
 
   // Load each thread once while the panel is shown, so rows can show who replied and when.
   useEffect(() => {
     if (mode !== "full") return;
-    for (const t of list) {
+    for (const t of showArchived ? all : list) {
       if (threads[t.rootId] || requested.has(t.rootId)) continue;
       requested.add(t.rootId);
       void useStore.getState().loadThread(chatId, t.rootId).catch(() => requested.delete(t.rootId));
     }
-  }, [mode, list, threads, chatId]);
+  }, [mode, list, all, showArchived, threads, chatId]);
 
   // "Show in Threads panel" from a thread: scroll its row into view and flash it.
   useEffect(() => {
@@ -90,8 +94,17 @@ export function ThreadsPanel({ chatId, otherPanel }: { chatId: string; otherPane
       </header>
       <div className="tpl-list" ref={listRef}>
         {list.length === 0
-          ? <div className="tpl-empty"><MessagesSquare size={22} /><span>No threads in this chat yet.</span><span className="muted small">Hover a message and click Reply to start one.</span></div>
+          ? <div className="tpl-empty"><MessagesSquare size={22} /><span>{archived.length ? "No open threads." : "No threads in this chat yet."}</span><span className="muted small">Hover a message and click Reply to start one.</span></div>
           : list.map((t) => <ThreadRow key={t.rootId} chatId={chatId} t={t} expanded={!!panelThreads[t.rootId]} />)}
+        {archived.length > 0 && (
+          <div className={`tpl-archived ${showArchived ? "open" : ""}`}>
+            <button className="tpl-archived-head" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}
+              title={showArchived ? "Hide archived threads" : "Show archived threads"}>
+              <ChevronRight size={13} className="tpl-chev" /><Archive size={13} /> Archived <span className="tpl-count">{archived.length}</span>
+            </button>
+            {showArchived && archived.map((t) => <ThreadRow key={t.rootId} chatId={chatId} t={t} expanded={!!panelThreads[t.rootId]} />)}
+          </div>
+        )}
       </div>
       <ResizeHandle panel="threads" edge="left" label="Resize Threads panel" />
     </aside>
@@ -131,6 +144,8 @@ function ThreadRow({ chatId, t, expanded }: { chatId: string; t: ThreadSummary; 
           </span>
         </button>
         <button className="it-collapse tpl-jump" title="Show in chat" onClick={jump}><LocateFixed size={14} /></button>
+        <button className="it-collapse tpl-jump" title="Thread actions" aria-label="Thread actions"
+          onClick={(e) => openMenu(e, threadMenu(r), true)}><MoreHorizontal size={14} /></button>
       </div>
       {expanded && <ThreadBody chatId={chatId} rootId={t.rootId} replies={replies} />}
     </section>

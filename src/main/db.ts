@@ -230,6 +230,8 @@ export class Db {
       ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}), ...(i.delivery ? { delivery: i.delivery } : {}) }) : null;
     this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now(), meta);
+    // A new reply brings an archived thread back.
+    if (i.parentId) this.setThreadArchived(i.parentId, false);
     return this.getMessage(id)!;
   }
   updateMessage(id: string, patch: { content?: string; status?: MessageStatus; tokensIn?: number; tokensOut?: number; estimated?: boolean }): Message {
@@ -271,6 +273,26 @@ export class Db {
     delete meta.delivery;
     this.run("UPDATE messages SET content=?, meta=? WHERE id=?", content, Object.keys(meta).length ? JSON.stringify(meta) : null, id);
     return this.getMessage(id)!;
+  }
+  /** Archive (hide) or restore a thread; the flag sits on its root message. Returns the root, or null if it is gone. */
+  setThreadArchived(rootId: string, archived: boolean): Message | null {
+    const r = this.get("SELECT meta FROM messages WHERE id=? AND parent_id IS NULL", rootId);
+    if (!r) return null;
+    let meta: Record<string, unknown> = {};
+    try { meta = r.meta ? JSON.parse(r.meta as string) : {}; } catch { /* ignore */ }
+    if (!!meta.threadArchived === archived) return this.getMessage(rootId);
+    if (archived) meta.threadArchived = true;
+    else delete meta.threadArchived;
+    this.run("UPDATE messages SET meta=? WHERE id=?", Object.keys(meta).length ? JSON.stringify(meta) : null, rootId);
+    return this.getMessage(rootId);
+  }
+  /** Ids of a thread's replies (the root message stays in the chat). */
+  threadReplyIds(rootId: string): string[] {
+    return this.all("SELECT id FROM messages WHERE parent_id=?", rootId).map((r) => String(r.id));
+  }
+  /** Ids of every message of a chat, main list and threads. */
+  chatMessageIds(chatId: string): string[] {
+    return this.all("SELECT id FROM messages WHERE chat_id=?", chatId).map((r) => String(r.id));
   }
   /** Delete messages and the threads under them; returns what was removed (id + thread root) so the UI can follow. */
   deleteMessages(ids: string[]): { id: string; parentId: string | null }[] {
@@ -321,13 +343,13 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
-    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[] } = {};
+    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[]; threadArchived?: boolean } = {};
     try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
       estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}), ...(meta.delivery ? { delivery: meta.delivery } : {}), ...(meta.tools?.length ? { tools: meta.tools } : {}),
-      reactions: this.reactions(r.id), replyCount,
+      reactions: this.reactions(r.id), replyCount, ...(meta.threadArchived && !r.parent_id ? { threadArchived: true } : {}),
     };
   }
 

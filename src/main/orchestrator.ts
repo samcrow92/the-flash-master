@@ -707,6 +707,66 @@ export class Orchestrator {
     return m;
   }
 
+  /** Close and forget the idle agent sessions in `pick`; refuses (throws `busyMsg`) while one of them is working. */
+  private closeSessions(pick: (l: Live) => boolean, busyMsg: string, why: string): void {
+    const lives = [...this.live.values()].filter(pick);
+    if (lives.some((l) => l.busy)) throw new Error(busyMsg);
+    for (const l of lives) {
+      l.session?.close();
+      this.live.delete(l.key);
+      this.byAgent.delete(l.agentId);
+      this.emitAgent(this.d.db.updateAgent(l.agentId, { status: "done", ended: true, sessionId: null, lastActivity: why }));
+    }
+  }
+
+  private removeStored(chatId: string, ids: string[]): void {
+    for (const id of ids) this.liveText.delete(id);
+    const removed = this.d.db.deleteMessages(ids);
+    if (removed.length) this.d.emit({ type: "messages.removed", chatId, removed });
+  }
+
+  /** Archive (hide) or restore a thread. */
+  archiveThread(rootId: string, archived: boolean): Message {
+    const m = this.d.db.setThreadArchived(rootId, archived);
+    if (!m) throw new Error("That message is gone, or it is a reply (only a thread's first message holds the thread).");
+    this.d.emit({ type: "message.updated", message: m });
+    return m;
+  }
+
+  /**
+   * Delete a thread's replies for good; the message it hangs off stays in the chat. The thread's idle agent sessions
+   * are closed so a new reply there starts fresh.
+   */
+  deleteThread(rootId: string): void {
+    const root = this.d.db.getMessage(rootId);
+    if (!root || root.parentId) throw new Error("That thread is gone.");
+    this.closeSessions((l) => l.chatId === root.chatId && l.threadRoot === rootId,
+      "An agent is still working in this thread — stop it first, then delete it.", "Thread deleted");
+    this.removeStored(root.chatId, this.d.db.threadReplyIds(rootId));
+    const m = this.d.db.setThreadArchived(rootId, false);
+    if (m) this.d.emit({ type: "message.updated", message: m });
+  }
+
+  /**
+   * Delete one message (and the thread under it) to clean up a chat. Agents keep what they already read in their
+   * session; Reset context or Clear chat makes them forget it too.
+   */
+  deleteMessage(messageId: string): void {
+    const m = this.d.db.getMessage(messageId);
+    if (!m) return;
+    if (m.status === "streaming") throw new Error("That reply is still being written — stop the agent first, then delete it.");
+    if (!m.parentId) this.closeSessions((l) => l.chatId === m.chatId && l.threadRoot === m.id,
+      "An agent is still working in this message's thread — stop it first, then delete it.", "Thread deleted");
+    this.removeStored(m.chatId, [m.id]);
+  }
+
+  /** Delete every message of a chat and start its agents fresh (sessions closed, rolling summary cleared). */
+  clearChat(chatId: string): void {
+    this.closeSessions((l) => l.chatId === chatId, "An agent is still working in this chat — stop it first, then clear it.", "Chat cleared");
+    this.d.db.setChatSummary(chatId, "", 0);
+    this.removeStored(chatId, this.d.db.chatMessageIds(chatId));
+  }
+
   /** Steering/queued messages reached the agent; `native` = the harness will confirm when the model sees them. */
   private markDelivered(l: Live, ids: string[], native: boolean): void {
     for (const id of ids) {

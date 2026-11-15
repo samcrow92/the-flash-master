@@ -61,6 +61,20 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`document.querySelector('.inline-thread.open button[title="Show in Threads panel"]')?.click()`);
       await sleep(900);
       await shot(join(demo, "2-threads-panel.png"));
+      // Thread cleanup: the row menu (archive / delete), then the archived thread in its own section and as a chip in the chat
+      await js(`document.querySelector('.threads-panel .tpl-item button[title="Thread actions"]')?.click()`);
+      await sleep(300);
+      await shot(join(demo, "2f-thread-menu.png"));
+      await click("Archive thread", ".ctx-item");
+      await sleep(500);
+      await js(`document.querySelector('.tpl-archived-head')?.click()`);
+      await js(`document.querySelector('.thread-pill.archived')?.closest('.msg')?.scrollIntoView({block:'center'})`);
+      await sleep(500);
+      await shot(join(demo, "2g-thread-archived.png"));
+      await js(`document.querySelector('.threads-panel .tpl-item button[title="Thread actions"]')?.click()`);
+      await sleep(200);
+      await click("Restore thread", ".ctx-item");
+      await sleep(500);
       await js(`document.querySelector('.threads-panel button[title="Collapse the Threads panel"]')?.click()`);
       await sleep(500);
       await shot(join(demo, "2-threads-panel-rail.png"));
