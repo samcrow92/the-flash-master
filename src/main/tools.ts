@@ -28,7 +28,7 @@ export function buildTools(d: {
   return [
     {
       set: "core", name: "delegate",
-      description: "Hand a focused sub-task to a specialist agent. Send a brief (goal, context, files, acceptance), never transcripts. Returns the specialist's compact result. This is the only way to run another agent (including on Copilot/OpenCode/Pi/Duo via `harness`): it gets the project's tools and shows in the Agents tab.",
+      description: "Hand a focused sub-task to a specialist agent. Send a brief (goal, context, files, acceptance), never transcripts. Returns the specialist's compact result. Every call starts a new, separate instance with its own name, session and task (two calls for one role = two specialists working in parallel); pass agentId to send a follow-up to one you started earlier. This is the only way to run another agent (including on Copilot/OpenCode/Pi/Duo via `harness`): it gets the project's tools and shows in the Agents tab.",
       inputSchema: obj({
         role: s("specialist role name, see list_roles"), goal: s("what to achieve, one or two sentences"),
         context: s("only the facts the specialist needs"), files: { type: "array", items: { type: "string" }, description: "relevant paths" },
@@ -36,6 +36,7 @@ export function buildTools(d: {
         timeoutSec: { type: "number", description: "max seconds to wait (default 600)" },
         harness: { type: "string", enum: ["copilot", "opencode", "cursor", "claude", "pi", "duo"], description: "run the specialist on this agent CLI (e.g. the user asked for Pi). Default: the role's configured harness. Never start agent CLIs from a shell instead." },
         model: s("model id for that harness (optional)"),
+        agentId: s("only for a follow-up: the agentId an earlier delegate returned; the same instance continues with its context. Leave out to start a new specialist"),
       }, ["role", "goal"]),
       handler: (a, c) => d.orch.delegate(c.agentId, a),
     },

@@ -52,7 +52,7 @@ export function SpecialistsPill() {
             <button className="icon-btn" title="Add your own agent (template / import)" onClick={() => setImporting(true)}><Plus size={15} /></button>
           </div>
           <div className="spec-list">
-            {rows.map(({ role: r, working: w, paused: p, busyAgent }) => (
+            {rows.map(({ role: r, working: w, paused: p, busyAgent, busyAgents }) => (
               <button key={r.name} className={`palette-item ${w ? "is-working" : p ? "is-paused" : ""}`}
                 title={`${r.description}\n\n${w ? "Working now — click to watch its progress." : `Click: new chat with ${r.title} in the current project.`}\nTip: type @${r.name} in any chat.`}
                 onClick={async () => {
@@ -62,7 +62,7 @@ export function SpecialistsPill() {
                 }}>
                 <span className="palette-icon"><RoleIcon role={r.name} size={24} state={w ? "working" : p ? "paused" : undefined} /></span>
                 <span className="palette-title">{r.title}</span>
-                {w > 0 && <Dots size={5} count={w} title={`${w} working${busyAgent?.lastActivity ? ` — ${busyAgent.lastActivity}` : ""}`} />}
+                {w > 0 && <Dots size={5} count={w} title={busyAgents.map((a) => `${a.name ?? r.title}${a.lastActivity ? ` — ${a.lastActivity}` : ""}`).join("\n")} />}
                 {!w && p > 0 && <span className="paused-tag" title={`${p} paused`}><Pause size={12} /></span>}
                 {r.source === "user" && <span className="custom-tag">custom</span>}
               </button>

@@ -24,3 +24,14 @@ describe("Specialists pill on the chat", () => {
     expect(read("src/renderer/views/ChatView.tsx")).toContain("<SpecialistsPill />");
   });
 });
+
+describe("specialist instance names", () => {
+  it("picks a name not used in the chat, and numbers names once the list runs out", async () => {
+    const { pickInstanceName, agentLabel, INSTANCE_NAMES } = await import("../src/shared/instances");
+    expect(pickInstanceName([])).toBe(INSTANCE_NAMES[0]);
+    expect(pickInstanceName([INSTANCE_NAMES[0], null])).toBe(INSTANCE_NAMES[1]);
+    expect(pickInstanceName([...INSTANCE_NAMES])).toBe(`${INSTANCE_NAMES[0]} 2`);
+    expect(agentLabel({ name: "Nova" }, "Coder")).toBe("Nova · Coder");
+    expect(agentLabel({ name: null }, "Coder")).toBe("Coder");
+  });
+});

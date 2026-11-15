@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check, Circle, CircleAlert, CircleCheck, Compass as CompassIcon, CornerLeftUp, Expand, KeyRound, MessageSquare, Pause, RoleIcon, Wrench, X, type LucideIcon } from "../components/icons";
 import { Dots } from "../components/Dots";
 import type { AgentEvent, AgentFlow, AgentRun, PlanStep } from "@shared/types";
-import { ago, api, fmtTokens, roleOf, useStore } from "../store";
+import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
 
 /**
  * Live flow chart of where an agent is in its task:
@@ -41,11 +41,11 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
   return (
     <div className={`flow ${compact ? "compact" : ""}`}>
       <div className="flow-head">
-        <div className="row gap-s"><RoleIcon role={agent.role} size={24} className="flow-icon" /><strong>{role?.title ?? agent.role}</strong>
+        <div className="row gap-s"><RoleIcon role={agent.role} size={24} className="flow-icon" /><strong>{agent.name ? agentTitle(agent) : role?.title ?? agent.role}</strong>
           <span className={`status st-${agent.status}`}>{agent.status}</span></div>
         <div className="muted small">{agent.harness} · {fmtTokens(agent.tokensIn + agent.tokensOut)} tokens · started {ago(agent.startedAt)} ago</div>
         {plan.length > 0 && <div className="progress"><div style={{ width: `${(done / plan.length) * 100}%` }} /><span>{done}/{plan.length} steps</span></div>}
-        {flow.parent && <button className="link" onClick={() => onSelect?.(flow.parent!.id)}><CornerLeftUp size={13} /> delegated by {roleOf(flow.parent.role)?.title ?? flow.parent.role}</button>}
+        {flow.parent && <button className="link" onClick={() => onSelect?.(flow.parent!.id)}><CornerLeftUp size={13} /> delegated by {agentTitle(flow.parent)}</button>}
       </div>
 
       <div className="flow-chart">
@@ -66,7 +66,7 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
                 const cs = useStore.getState().agents[d.ref ?? ""] ?? child;
                 return (
                   <button key={d.id} className={`branch-node st-${cs?.status ?? "idle"}`} onClick={() => d.ref && onSelect?.(d.ref)} title="Open this specialist's flow">
-                    <div className="row gap-s"><RoleIcon role={cs?.role} size={18} /> <strong>{roleOf(cs?.role)?.title ?? cs?.role ?? "agent"}</strong></div>
+                    <div className="row gap-s"><RoleIcon role={cs?.role} size={18} /> <strong>{agentTitle(cs)}</strong></div>
                     <div className="small muted">{d.label.split(": ").slice(1).join(": ")}</div>
                     <div className="small">{cs?.status ?? "…"}{cs?.plan?.length ? ` · ${cs.plan.filter((p) => p.status === "completed").length}/${cs.plan.length}` : ""}</div>
                   </button>
@@ -139,7 +139,7 @@ export function FlowPanel({ chatId, agentId, onClose }: { chatId: string; agentI
         <div className="row gap-s">
           {agents.length > 0 && (
             <select value={current ?? ""} onChange={(e) => setSel(e.target.value)}>
-              {agents.map((a) => <option key={a.id} value={a.id}>{roleOf(a.role)?.title ?? a.role} · {a.status}</option>)}
+              {agents.map((a) => <option key={a.id} value={a.id}>{agentTitle(a)} · {a.status}</option>)}
             </select>
           )}
           {current && <button className="ghost icon-only" title="Open full page" onClick={() => useStore.getState().setView({ kind: "flow", agentId: current })}><Expand size={15} /></button>}

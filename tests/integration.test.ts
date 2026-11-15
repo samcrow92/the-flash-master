@@ -143,6 +143,30 @@ describe("Orchestrator", () => {
     await until(() => db.getAgent(bg.agentId)!.status === "idle", 10000);
   });
 
+  it("two delegations to the same specialist start two distinct, named instances; agentId sends a follow-up", async () => {
+    const { db, orch, chat } = setup();
+    cleanup = () => orch.stopAll();
+    await orch.sendUserMessage(chat.id, "Plan the brake light feature", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "streaming");
+    const parentId = agentMsgs(db, chat.id)[0]!.agentId!;
+    const a = await orch.delegate(parentId, { role: "tester", goal: "Test the brake light", wait: false });
+    const b = await orch.delegate(parentId, { role: "tester", goal: "Test the turn signal", wait: false });
+    expect(a.agentId).not.toBe(b.agentId);
+    expect(a.name && b.name && a.name !== b.name).toBe(true);
+    const [ra, rb] = [db.getAgent(a.agentId)!, db.getAgent(b.agentId)!];
+    expect([ra.role, rb.role]).toEqual(["tester", "tester"]);
+    expect(ra.brief).toContain("brake light");
+    expect(rb.brief).toContain("turn signal");
+    expect([ra.name, rb.name]).toEqual([a.name, b.name]);
+    await until(() => db.getAgent(a.agentId)!.status === "idle" && db.getAgent(b.agentId)!.status === "idle", 10000);
+    // A follow-up to one instance continues that instance instead of starting a third.
+    const before = db.listAgents({}).length;
+    const f = await orch.delegate(parentId, { role: "tester", goal: "Also cover night mode", agentId: a.agentId });
+    expect(f.agentId).toBe(a.agentId);
+    expect(db.listAgents({}).length).toBe(before);
+    await expect(orch.delegate(parentId, { role: "tester", goal: "x", agentId: "nope" })).rejects.toThrow(/unknown agentId/);
+  });
+
   it("delegate can pick the harness the user asked for, and warns when it is unavailable", async () => {
     const { db, orch, chat } = setup();
     cleanup = () => orch.stopAll();

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Bot as BotIcon, Compass, CornerDownRight, MessageCircle, Pause, Play, RoleIcon, Square } from "../components/icons";
-import { api, ago, fmtTokens, roleOf, useStore } from "../store";
+import { agentTitle, api, ago, fmtTokens, roleOf, useStore } from "../store";
 
 export function AgentsView() {
   const st = useStore();
@@ -51,8 +51,8 @@ export function AgentsView() {
             {list.map((a) => (
               <tr key={a.id} onDoubleClick={() => (a.chatId ? st.openChat(a.chatId) : st.chatWithAgent(a.role))}>
                 <td>
-                  <div className="row gap-s"><span className="avatar small"><RoleIcon role={a.role} size={24} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /></span> <strong>{roleOf(a.role)?.title ?? a.role}</strong></div>
-                  {a.parentAgentId && <div className="muted small row gap-s"><CornerDownRight size={12} /> delegated by {roleOf(st.agents[a.parentAgentId]?.role)?.title ?? "agent"}</div>}
+                  <div className="row gap-s"><span className="avatar small"><RoleIcon role={a.role} size={24} state={a.status === "running" ? "working" : a.status === "paused" ? "paused" : undefined} /></span> <strong>{agentTitle(a)}</strong></div>
+                  {a.parentAgentId && <div className="muted small row gap-s"><CornerDownRight size={12} /> delegated by {agentTitle(st.agents[a.parentAgentId])}</div>}
                 </td>
                 <td>{pname(a)}</td>
                 <td>{a.harness}{a.harness === "duo" && <span className="warn-badge" title="GitLab Duo headless mode auto-approves its own tools">!</span>}</td>

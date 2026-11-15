@@ -128,6 +128,8 @@ export interface AgentRun {
   projectId: string | null;
   chatId: string | null;
   role: string;
+  /** Given name of this instance ("Nova"), so several copies of one specialist can be told apart; null for the coordinator. */
+  name: string | null;
   harness: HarnessId;
   model: string | null;
   status: AgentStatus;
