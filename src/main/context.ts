@@ -280,20 +280,38 @@ ${tools.map(sig).join("\n")}`;
 
 /** TOOL lines: `TOOL name {json}`; the JSON may continue over the next lines. */
 export function parseTextToolCalls(text: string, known?: Set<string>): TextToolCall[] {
-  const out: TextToolCall[] = [];
+  return scanTextToolCalls(text, known).map(({ call }) => call);
+}
+
+/**
+ * The reply text without the TOOL lines that were parsed into calls, so each call shows once (in the tool-call panel)
+ * and not again in the prose. Lines whose arguments failed to parse stay, since no panel entry shows them.
+ */
+export function stripTextToolCalls(text: string, known?: Set<string>): string {
+  const drop = new Set<number>();
+  for (const { call, from, to } of scanTextToolCalls(text, known)) if (!call.error) for (let i = from; i <= to; i++) drop.add(i);
+  if (!drop.size) return text;
+  return text.split(/\r?\n/).filter((_, i) => !drop.has(i)).join("\n")
+    .replace(/^[ \t]*```[\w-]*[ \t]*\n(?:[ \t]*\n)*[ \t]*```[ \t]*$/gm, "") // a fence that held only calls
+    .replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function scanTextToolCalls(text: string, known?: Set<string>): { call: TextToolCall; from: number; to: number }[] {
+  const out: { call: TextToolCall; from: number; to: number }[] = [];
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const m = /^\s*(?:[-*]\s+)?`?TOOL`?\s+`?([a-z][a-z0-9_]*)`?\s*(.*)$/.exec(lines[i]!);
     if (!m || (known && !known.has(m[1]!))) continue;
+    const from = i;
     let json = m[2]!.trim().replace(/`+$/, "");
-    if (!json) { out.push({ name: m[1]!, args: {} }); continue; }
+    if (!json) { out.push({ call: { name: m[1]!, args: {} }, from, to: i }); continue; }
     let parsed: unknown;
     for (let j = i; j < Math.min(lines.length, i + 60); j++) {
       if (j > i) json += `\n${lines[j]}`;
       try { parsed = JSON.parse(json); i = j; break; } catch { /* keep reading */ }
     }
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) out.push({ name: m[1]!, args: parsed as Record<string, unknown> });
-    else out.push({ name: m[1]!, args: {}, error: "arguments are not a JSON object" });
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) out.push({ call: { name: m[1]!, args: parsed as Record<string, unknown> }, from, to: i });
+    else out.push({ call: { name: m[1]!, args: {}, error: "arguments are not a JSON object" }, from, to: from });
   }
   return out;
 }

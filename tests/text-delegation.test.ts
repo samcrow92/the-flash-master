@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTextAgents, parseTextDelegations, parseTextToolCalls, textToolRules } from "../src/main/context";
+import { parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, textToolRules } from "../src/main/context";
 import { parseRole, roleMarkdown } from "../src/main/roles";
 import { saysNoDelegate } from "../src/main/orchestrator";
 
@@ -39,6 +39,17 @@ describe("text-mode tools", () => {
     const calls = parseTextToolCalls(t, new Set(["create_task", "jazz_get", "rm_search"]));
     expect(calls).toEqual([{ name: "create_task", args: { title: "A" } }, { name: "jazz_get", args: { id: "123" } },
       { name: "rm_search", args: {}, error: "arguments are not a JSON object" }]);
+  });
+  it("strips parsed TOOL lines from the reply text so each call shows only once", () => {
+    const known = new Set(["get_result", "list_agents", "jazz_get", "rm_search"]);
+    const t = ["Polling the push agent and checking its current activity.", "",
+      'TOOL get_result {"agentId": "5bd5b43b"}', 'TOOL list_agents {"activeOnly": true}'].join("\r\n");
+    expect(stripTextToolCalls(t, known)).toBe("Polling the push agent and checking its current activity.");
+    // Multi-line JSON, calls inside a fence, unknown tools and unparsable calls.
+    const u = ["Before.", "TOOL jazz_get {", '  "id": "1"', "}", "", "```", 'TOOL list_agents {}', "```", "Middle.",
+      'TOOL unknown {"x":1}', "TOOL rm_search not json", "After."].join("\n");
+    expect(stripTextToolCalls(u, known)).toBe(["Before.", "", "Middle.", 'TOOL unknown {"x":1}', "TOOL rm_search not json", "After."].join("\n"));
+    expect(stripTextToolCalls("No calls here.", known)).toBe("No calls here.");
   });
   it("lists compact signatures", () => {
     const r = textToolRules([{ name: "rm_search", description: "Search requirements. Long text.", inputSchema: { properties: { q: {}, limit: {} }, required: ["q"] } }]);
