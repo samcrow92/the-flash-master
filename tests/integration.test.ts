@@ -167,6 +167,27 @@ describe("Orchestrator", () => {
     await expect(orch.delegate(parentId, { role: "tester", goal: "x", agentId: "nope" })).rejects.toThrow(/unknown agentId/);
   });
 
+  it("closes finished specialists after they sit idle, never the coordinator; a follow-up brings one back", async () => {
+    const { db, orch, chat, setSettings } = setup();
+    cleanup = () => orch.stopAll();
+    await orch.sendUserMessage(chat.id, "Plan the brake light feature", null);
+    await until(() => agentMsgs(db, chat.id)[0]?.status === "streaming");
+    const parentId = agentMsgs(db, chat.id)[0]!.agentId!;
+    const r = await orch.delegate(parentId, { role: "tester", goal: "Test the brake light" });
+    await until(() => db.getAgent(r.agentId)!.status === "idle" && db.getAgent(parentId)!.status === "idle", 10000);
+    expect(await orch.closeIdle(Date.now() + 29 * 60_000)).toEqual([]); // default 30 min
+    expect(await orch.closeIdle(Date.now() + 31 * 60_000)).toEqual([r.agentId]);
+    expect(db.getAgent(r.agentId)).toMatchObject({ status: "done", lastActivity: expect.stringMatching(/^Closed after \d+ min idle/) });
+    expect(db.getAgent(parentId)!.status).toBe("idle"); // the coordinator stays
+    expect(db.listEvents(r.agentId).some((e) => /closed after/.test(e.label))).toBe(true);
+    // The coordinator can still send it a follow-up: it comes back under the same id and name.
+    const f = await orch.delegate(parentId, { role: "tester", goal: "Also cover night mode", agentId: r.agentId });
+    expect(f).toMatchObject({ agentId: r.agentId, name: r.name });
+    await until(() => db.getAgent(r.agentId)!.status === "idle", 10000);
+    setSettings({ agents: { closeIdleAfterMinutes: 0 } });
+    expect(await orch.closeIdle(Date.now() + 24 * 60 * 60_000)).toEqual([]);
+  });
+
   it("delegate can pick the harness the user asked for, and warns when it is unavailable", async () => {
     const { db, orch, chat } = setup();
     cleanup = () => orch.stopAll();

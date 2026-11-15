@@ -142,6 +142,34 @@ describe("agent worktrees", () => {
     expect(() => buildFixRequest("b", [], " ")).toThrow(/comment/);
   });
 
+  it("keeps an idle specialist while its worktree holds unmerged or uncommitted work, and closes it once merged", async () => {
+    const db = new Db(":memory:");
+    const settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" } }) as Settings;
+    const roles = loadRoles(join(__dirname, "..", "agents"), "/none");
+    const orch = new Orchestrator({ db, harnesses: new HarnessRegistry([new MockAdapter(1)]), settings: () => settings, roles: () => roles,
+      skills: () => [], emit: () => undefined, mcpServersFor: () => [], homeDir: tmpdir(), dataDir: mkdtempSync(join(tmpdir(), "data-")) });
+    const p = db.createProject("p", repo());
+    const chat = db.createChat({ projectId: p.id, title: "c", kind: "project", agentRole: "flashmaster" });
+    await orch.sendUserMessage(chat.id, "hello", null);
+    await until(() => db.listAgents({}).some((x) => x.role === "flashmaster" && x.status === "idle"));
+    const parentId = db.listAgents({}).find((x) => x.role === "flashmaster")!.id;
+    const r = await orch.delegate(parentId, { role: "tester", goal: "Add a test" });
+    const a = db.getAgent(r.agentId)!;
+    expect(existsSync(a.worktree!)).toBe(true);
+    const later = () => Date.now() + 60 * 60_000;
+    writeFileSync(join(a.worktree!, "wip.c"), "int wip;\n");
+    expect(await orch.closeIdle(later())).toEqual([]); // uncommitted
+    git(a.worktree!, "add", "-A");
+    git(a.worktree!, "commit", "-qm", "wip");
+    expect(await orch.closeIdle(later())).toEqual([]); // committed but not merged
+    expect(db.getAgent(a.id)!.status).toBe("idle");
+    expect((await orch.mergeWork(a.id)).ok).toBe(true);
+    expect(await orch.closeIdle(later())).toEqual([a.id]);
+    expect(db.getAgent(a.id)).toMatchObject({ status: "done", worktree: null, branch: null });
+    expect(existsSync(a.worktree!)).toBe(false);
+    await orch.stopAll();
+  });
+
   it("sends review comments to a finished specialist, which works on in its own copy", async () => {
     const db = new Db(":memory:");
     const settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" } }) as Settings;

@@ -97,6 +97,10 @@ interface Live {
   stuckSince?: number | null;
   /** Waiting for the user to answer a permission request: silence is expected. */
   awaitingApproval?: boolean;
+  /** When the agent last finished a turn (drives closing idle specialists); null while it works. */
+  idleSince?: number | null;
+  /** closeIdle is checking this agent's worktree right now. */
+  closing?: boolean;
   currentMessageId: string | null;
   waiters: ((result: string) => void)[];
   lastResult: string | null;
@@ -115,6 +119,8 @@ interface Live {
 }
 
 const MAX_CONCURRENT_FALLBACK = 4;
+/** lastActivity of a specialist the app closed for being idle (a follow-up with its agentId brings it back). */
+const IDLE_CLOSED = "Closed after";
 const MAX_TEXT_ROUNDS = 12;
 const MAX_TOOLS_PER_REPLY = 200;
 const MAX_TOOL_OUTPUT = 20000;
@@ -290,8 +296,14 @@ export class Orchestrator {
     // conversation. Only an explicit agentId (an instance this agent started earlier) sends a follow-up to it.
     let live: Live;
     if (a.agentId) {
-      const prev = this.byAgent.get(a.agentId);
-      if (!prev || prev.stopped || this.d.db.getAgent(a.agentId)?.parentAgentId !== parentAgentId)
+      let prev = this.byAgent.get(a.agentId);
+      const known = this.d.db.getAgent(a.agentId);
+      // A specialist closed for being idle comes back (fresh session, same name, thread and worktree) for a follow-up.
+      if (!prev && known?.parentAgentId === parentAgentId && known.status === "done" && known.lastActivity?.startsWith(IDLE_CLOSED)) {
+        prev = this.reviveLive(known, chat);
+        this.emitAgent(this.d.db.updateAgent(known.id, { status: "idle", ended: false, lastActivity: "Back for a follow-up" }));
+      }
+      if (!prev || prev.stopped || known?.parentAgentId !== parentAgentId)
         throw new Error("unknown agentId: pass an id an earlier delegate returned to you, or leave it out to start a new specialist");
       if (prev.busy) throw new Error(`${agentLabel(prev, prev.role.title)} is still working on its current task: call get_result, or leave agentId out to start another instance`);
       live = prev;
@@ -514,6 +526,53 @@ export class Orchestrator {
     return flagged;
   }
 
+  /**
+   * Idle-specialist cleanup, called every minute by the app. A delegated specialist that finished and has been idle for
+   * `agents.closeIdleAfterMinutes` is closed: its CLI process ends and it leaves the agent chips (it stays in the Agents
+   * page history). Never closed: the coordinator or any agent the user opened directly, a working, paused or queued agent,
+   * one whose own specialists still run, and one whose worktree holds uncommitted changes or unmerged commits (it waits
+   * for review). A clean, merged worktree is removed with it.
+   */
+  async closeIdle(now = Date.now()): Promise<string[]> {
+    const mins = this.d.settings().agents.closeIdleAfterMinutes;
+    if (!mins || mins <= 0) return [];
+    const closed: string[] = [];
+    for (const l of [...this.live.values()]) {
+      if (l.busy || l.paused || l.stopped || l.closing || l.awaitingApproval || l.queue.length || l.redirect || !l.idleSince) continue;
+      if (now - l.idleSince < mins * 60_000) continue;
+      const a = this.d.db.getAgent(l.agentId);
+      if (!a?.parentAgentId) continue; // coordinator / directly-opened chats stay
+      if ([...this.live.values()].some((c) => c !== l && c.key.startsWith(`${l.agentId}>`) && (c.busy || c.paused || c.queue.length))) continue;
+      l.closing = true;
+      try {
+        const w = l.worktree && l.branch ? { dir: l.worktree, branch: l.branch } : a.worktree && a.branch ? { dir: a.worktree, branch: a.branch } : null;
+        const repo = a.projectId ? this.d.db.getProject(a.projectId)?.path ?? null : null;
+        if (w && repo) {
+          const st = await worktreeState(repo, w.dir, w.branch, this.git);
+          if (st.dirty.length || st.unmerged) continue; // work waiting for review: keep the agent
+          const r = await removeWorktree(repo, w.dir, w.branch, false, this.git);
+          if (!r.ok) continue;
+          this.d.db.setAgentWorktree(l.agentId, null, null);
+        }
+        // Re-check: a message may have reached it while git ran.
+        if (l.busy || l.queue.length || l.stopped || this.byAgent.get(l.agentId) !== l) continue;
+        const idle = Math.round((now - l.idleSince) / 60_000);
+        l.session?.close();
+        l.session = null;
+        this.live.delete(l.key);
+        this.byAgent.delete(l.agentId);
+        this.flow(l.agentId, { kind: "status", label: `closed after ${idle} min idle`, status: "closed" });
+        this.emitAgent(this.d.db.updateAgent(l.agentId, { status: "done", ended: true, lastActivity: `${IDLE_CLOSED} ${idle} min idle` }));
+        closed.push(l.agentId);
+      } catch (e: any) {
+        this.d.log?.("warn", `closing idle agent ${l.agentId} failed: ${String(e?.message ?? e)}`);
+      } finally {
+        l.closing = false;
+      }
+    }
+    return closed;
+  }
+
   private noteOutput(l: Live): void {
     l.lastOutputAt = Date.now();
     if (!l.stuckSince) return;
@@ -721,6 +780,7 @@ export class Orchestrator {
     if (blocked) return;
 
     live.busy = true;
+    live.idleSince = null;
     const borrowed = !!t.borrowSlot;
     if (!borrowed) {
       const max = s.agents.maxConcurrent || MAX_CONCURRENT_FALLBACK;
@@ -967,6 +1027,7 @@ export class Orchestrator {
       live.rollover = null;
       live.splitPending = false;
       live.busy = false;
+      live.idleSince = Date.now();
       live.currentMessageId = null;
       if (!borrowed) this.releaseSlot();
     }
