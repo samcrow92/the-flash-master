@@ -213,3 +213,22 @@ describe("specialists pill", () => {
     expect(tsx).not.toMatch(/createChat\(/);
   });
 });
+
+describe("quiet UI", () => {
+  // The minimal pass turned labelled buttons into icons; each must still say what it does (tooltip + screen-reader text),
+  // and hiding the header's field captions must not hide the model field that sits in the same <label>.
+  it("icon-only message and header actions keep a tooltip and a hidden text label", () => {
+    const tsx = read("src/renderer/views/ChatView.tsx");
+    const actions = tsx.slice(tsx.indexOf('<div className="msg-actions">'), tsx.indexOf("emoji-picker"));
+    const buttons = actions.split("\n").filter((l) => l.includes("<button"));
+    expect(buttons.length).toBeGreaterThan(4);
+    for (const b of buttons) expect(b, "msg action without a title").toMatch(/title=/);
+    for (const label of ["Reply", "Edit", "Retry", "Progress", "Artifacts"]) expect(tsx).toContain(`<span className="sr-only">${label}</span>`);
+    expect(read("src/renderer/styles.css")).toMatch(/^\.sr-only \{[^}]*clip: rect\(0 0 0 0\)/m);
+  });
+  it("hides only the caption span in header fields, never the model input wrapper", () => {
+    const css = read("src/renderer/styles.css");
+    expect(css).not.toMatch(/^\.ctl > span \{/m);
+    expect(css).toMatch(/^\.ctl > span:first-child:not\(\.model-input-wrap\) \{/m);
+  });
+});
