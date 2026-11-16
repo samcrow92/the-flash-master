@@ -199,6 +199,8 @@ function Agents(f: F) {
     <Row label="Warn when an agent is silent for (minutes)" hint="A working agent that sends nothing for this long gets a warning in its chat. It keeps running. 0 = off."><Num f={f} path="agents.stuckAfterMinutes" min={0} /></Row>
     <Row label="Close finished specialists after (minutes idle)" hint="A delegated specialist that finished its task and sat idle this long is closed and leaves the agent chips. Specialists with uncommitted or unmerged work in their worktree are kept for review. 0 = never."><Num f={f} path="agents.closeIdleAfterMinutes" min={0} /></Row>
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
+    <Row label="Delete finished tasks after (minutes)" hint="Tasks that are done, or whose agent stopped, failed or ended, are deleted from the task board this long after they finished. Tasks in Review and tasks with a working agent are kept. Right-click a task to delete it right away. 0 = never."><Num f={f} path="tasks.deleteFinishedAfterMinutes" min={0} /></Row>
+    <Row label="Delete stale tasks after (days)" hint="Open tasks (to do, in progress, blocked) that nobody touched for this many days are deleted. Tasks with a working agent are kept. 0 = never."><Num f={f} path="tasks.deleteStaleAfterDays" min={0} /></Row>
     <InstructionSettings f={f} />
     <div className="row between">
       <h4>Agents</h4>

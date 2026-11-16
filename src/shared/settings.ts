@@ -57,6 +57,13 @@ export interface Settings {
     /** Code-writing specialists (roles with `isolate: true`) work in their own git worktree and branch when delegated. */
     isolateWriters: boolean;
   };
+  /** Task board auto-cleanup; Review tasks and tasks with a working agent are always kept. */
+  tasks: {
+    /** Delete finished tasks this long after they finished: done, or their agent stopped / failed / ended (0 = never). */
+    deleteFinishedAfterMinutes: number;
+    /** Delete open tasks (to do, in progress, blocked) nobody touched for this many days (0 = never). */
+    deleteStaleAfterDays: number;
+  };
   updates: {
     autoCheck: boolean; // check at startup and every few hours
     autoDownload: boolean; // download in the background; installing always asks
@@ -183,6 +190,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, closeIdleAfterMinutes: 30, isolateWriters: true },
+  tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },
   tokens: {
