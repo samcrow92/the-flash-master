@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: taskbar still showed the Electron icon on Windows.** The window had the bolt, but the taskbar button follows the app ID, so it drew electron.exe (from source) or whatever icon Windows had cached for an older shortcut. Every window now carries the bolt as its taskbar/relaunch icon, and source runs use their own app ID so they never borrow an installed copy's shortcut.
 - **Integrated terminal in the top bar.** A terminal button next to the light/dark toggle (or Ctrl+`) drops down a glass panel with a real shell: PowerShell on Windows (PowerShell 7 when installed), your login shell on macOS. It uses xterm.js, the terminal VS Code uses, on ConPTY.
   - Starts in the current project's folder; several tabs, an expand button to fill the window, and hiding keeps the shells running.
   - Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V pastes. The smoke test on every CI platform opens it and runs a command.
