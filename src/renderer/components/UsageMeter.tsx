@@ -1,7 +1,7 @@
 import { useEffect } from "react";
-import { usageLabel } from "@shared/usage-label";
+import { chatCredits, creditsText, usageLabel } from "@shared/usage-label";
 export { usageLabel, unitName } from "@shared/usage-label";
-import { api, useStore } from "../store";
+import { agentTitle, api, useStore } from "../store";
 import { CircleAlert, Gauge, Loader2, RotateCcw } from "./icons";
 
 const ago = (t: number) => {
@@ -11,10 +11,17 @@ const ago = (t: number) => {
 const level = (p: number) => (p >= 90 ? "crit" : p >= 75 ? "warn" : "ok");
 
 /** Thin progress bar under the chat box (GitHub billing API, or Copilot's /usage); always shows its state. */
-export function UsageMeter() {
+export function UsageMeter({ chatId = null }: { chatId?: string | null }) {
   const st = useStore();
   const u = st.copilotUsage;
   const cfg = st.settings?.usage;
+  const unit = u?.billing?.unit ?? "credits";
+  const mine = chatCredits(Object.values(st.agents), chatId);
+  // Credits this chat's agents used, counted from Copilot's /usage after each of their turns.
+  const chatCount = mine.total > 0
+    ? <span className="usage-chat" title={`Counted in this chat:\n${mine.agents.map((a) => `${agentTitle(a)}: ${creditsText(a.credits, unit)}`).join("\n")}`}>
+        This chat · <strong>{creditsText(mine.total, unit)}</strong></span>
+    : null;
   // Check on first view when there is no fresh data (e.g. Copilot was set up after the app started).
   useEffect(() => {
     if (!cfg?.copilotMeter) return;
@@ -45,6 +52,7 @@ export function UsageMeter() {
         {pct !== null ? <div className="usage-bar"><div className={`usage-fill ${level(pct)}`} style={{ width: `${Math.min(100, pct)}%` }} /></div> : <Gauge size={13} className="muted" />}
         <span className="usage-text">{usageLabel(u)}</span>
       </button>
+      {chatCount}
       {refresh}
     </div>
   );

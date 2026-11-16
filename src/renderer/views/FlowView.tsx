@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowUpRight, Check, Circle, CircleAlert, CircleCheck, Compa
 import { Dots } from "../components/Dots";
 import type { AgentEvent, AgentFlow, AgentRun, PlanStep } from "@shared/types";
 import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
+import { creditsText } from "@shared/usage-label";
 
 /**
  * Live flow chart of where an agent is in its task:
@@ -44,7 +45,7 @@ export function FlowChart({ agentId, onSelect, compact }: { agentId: string; onS
       <div className="flow-head">
         <div className="row gap-s"><RoleIcon role={agent.role} size={24} className="flow-icon" /><strong>{agent.name ? agentTitle(agent) : role?.title ?? agent.role}</strong>
           <span className={`status st-${agent.status}`}>{agent.status}</span></div>
-        <div className="muted small">{agent.harness} · {fmtTokens(agent.tokensIn + agent.tokensOut)} tokens · started {ago(agent.startedAt)} ago</div>
+        <div className="muted small">{agent.harness} · {fmtTokens(agent.tokensIn + agent.tokensOut)} tokens{agent.credits > 0 ? ` · ${creditsText(agent.credits)}` : ""} · started {ago(agent.startedAt)} ago</div>
         {plan.length > 0 && <div className="progress"><div style={{ width: `${(done / plan.length) * 100}%` }} /><span>{done}/{plan.length} steps</span></div>}
         {flow.parent && <button className="link" onClick={() => onSelect?.(flow.parent!.id)}><CornerLeftUp size={13} /> delegated by {agentTitle(flow.parent)}</button>}
       </div>

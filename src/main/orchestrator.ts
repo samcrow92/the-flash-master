@@ -42,7 +42,7 @@ export interface OrchestratorDeps {
   toolsLoaded?: (agentId: string) => boolean;
   onModels?: (harness: HarnessId, models: import("@shared/types").ModelInfo[]) => void;
   /** Copilot's silent /usage after each turn (text null when Copilot does not offer /usage to apps). */
-  onCopilotUsage?: (r: { sessionId: string; text: string | null; commands: string[] }) => void;
+  onCopilotUsage?: (r: { sessionId: string; text: string | null; commands: string[]; agentId: string }) => void;
   log?: (level: "error" | "warn" | "info" | "debug", msg: string) => void;
   db: Db;
   harnesses: HarnessRegistry;
@@ -1244,7 +1244,7 @@ export class Orchestrator {
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
       env: { ...networkEnv(s), ...ins.env, ...(this.d.harnessEnv?.(live.harness) ?? {}), ...(this.d.roleEnv?.(live.role) ?? {}) },
       resumeSessionId: this.d.db.getAgentSession(live.agentId),
-      onUsage: live.harness === "copilot" && this.d.onCopilotUsage ? this.d.onCopilotUsage : undefined,
+      onUsage: live.harness === "copilot" && this.d.onCopilotUsage ? (r) => this.d.onCopilotUsage!({ ...r, agentId: live.agentId }) : undefined,
       policy: {
         approval: s.permissions.approval, readOnly: s.permissions.readOnly, projectRoot: projectPath,
         extraRoots: this.d.attachmentRoots?.() ?? [],

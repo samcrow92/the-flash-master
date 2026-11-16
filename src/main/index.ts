@@ -390,10 +390,12 @@ const liveLedger = new LiveLedger(() => { try { return readFileSync(liveFile, "u
 let usageAdvertised: { advertised: boolean; commands: string[] } | null = null;
 let usageInflight: Promise<CopilotUsage | null> | null = null;
 /** Silent /usage at the end of each Copilot turn (from the orchestrator). */
-function recordCopilotUsage(r: { sessionId: string; text: string | null; commands: string[] }): void {
+function recordCopilotUsage(r: { sessionId: string; text: string | null; commands: string[]; agentId: string }): void {
   usageAdvertised = { advertised: r.text !== null, commands: r.commands };
   const seg = r.text ? parseSessionUsage(r.text) : null;
-  if (seg && r.sessionId) liveLedger.record(r.sessionId, seg);
+  const used = seg && r.sessionId ? liveLedger.record(r.sessionId, seg) : 0;
+  // Count the credits on the agent too, so each chat and agent shows what it used.
+  if (used > 0) { const a = db.addAgentCredits(r.agentId, used); if (a) emit({ type: "agent.updated", agent: a }); }
   if (settings.get().usage.copilotMeter) void refreshCopilotUsage();
 }
 const quotaFetch = withProxyFallback(() => session.defaultSession, (url, init) => session.defaultSession.fetch(url, init as any) as any);

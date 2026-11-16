@@ -151,19 +151,32 @@ export function toUsage(b: CopilotBilling, opts: { advertised?: boolean | null; 
   };
 }
 
+/**
+ * Credits used since the previous /usage snapshot of the same session. /usage is cumulative per session, so this is
+ * the difference; a smaller total means Copilot restarted the session's count (resumed after a restart), so all of it is new.
+ */
+export function creditDelta(prev: Pick<Segment, "total"> | null | undefined, next: Pick<Segment, "total">): number {
+  if (!(next.total > 0)) return 0;
+  const d = !prev || next.total < prev.total ? next.total : next.total - prev.total;
+  return round(d, 4);
+}
+
 /** Live /usage snapshots of the app's sessions, kept for the current and previous month. */
 export class LiveLedger {
   private snaps: LiveSnapshot[] = [];
   constructor(private load: () => string | null, private save: (json: string) => void) {
     try { this.snaps = JSON.parse(this.load() ?? "[]").filter((s: LiveSnapshot) => s && typeof s.sessionId === "string"); } catch { this.snaps = []; }
   }
-  record(sessionId: string, seg: Omit<Segment, "at">, at = Date.now()): void {
+  /** Keeps the snapshot and returns the credits used since this session's previous one. */
+  record(sessionId: string, seg: Omit<Segment, "at">, at = Date.now()): number {
+    const delta = creditDelta(this.snaps.find((s) => s.sessionId === sessionId), seg);
     // /usage is cumulative per session: keep only the latest snapshot of each session.
     this.snaps = this.snaps.filter((s) => s.sessionId !== sessionId);
     this.snaps.push({ sessionId, at, ...seg });
     const keepFrom = Date.UTC(new Date(at).getUTCFullYear(), new Date(at).getUTCMonth() - 1, 1);
     this.snaps = this.snaps.filter((s) => s.at >= keepFrom);
     try { this.save(JSON.stringify(this.snaps)); } catch { /* best effort */ }
+    return delta;
   }
   all(): LiveSnapshot[] { return [...this.snaps]; }
 }
