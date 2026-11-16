@@ -51,6 +51,8 @@ export const MIGRATIONS: string[] = [
    ALTER TABLE agents ADD COLUMN branch TEXT;`,
   // v8: each specialist instance has its own given name (several copies of one role can run at once)
   `ALTER TABLE agents ADD COLUMN name TEXT;`,
+  // v9: Copilot credits each agent used, counted from Copilot's own /usage after each turn
+  `ALTER TABLE agents ADD COLUMN credits REAL NOT NULL DEFAULT 0;`,
 ];
 
 type Row = Record<string, any>;
@@ -400,6 +402,12 @@ export class Db {
     this.run("UPDATE agents SET worktree=?, branch=? WHERE id=?", worktree, branch, id);
     return this.getAgent(id)!;
   }
+  /** Adds Copilot credits an agent used (from the change in Copilot's /usage total since its last turn). */
+  addAgentCredits(id: string, credits: number): AgentRun | null {
+    if (!(credits > 0)) return this.getAgent(id);
+    this.run("UPDATE agents SET credits=credits+? WHERE id=?", credits, id);
+    return this.getAgent(id);
+  }
   getAgentSession(id: string): string | null {
     return (this.get("SELECT session_id FROM agents WHERE id=?", id)?.session_id as string) ?? null;
   }
@@ -601,7 +609,7 @@ const toAgent = (r: Row): AgentRun => ({
   status: r.status, parentAgentId: r.parent_agent_id ?? null, brief: r.brief, resultSummary: r.result_summary ?? null,
   tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), estimated: !!r.estimated, startedAt: Number(r.started_at),
   endedAt: r.ended_at == null ? null : Number(r.ended_at), lastActivity: r.last_activity ?? null, plan: parsePlan(r.plan),
-  worktree: r.worktree ?? null, branch: r.branch ?? null,
+  worktree: r.worktree ?? null, branch: r.branch ?? null, credits: Number(r.credits ?? 0),
 });
 function parsePlan(s: unknown): PlanStep[] {
   try { const v = JSON.parse(String(s ?? "[]")); return Array.isArray(v) ? v : []; } catch { return []; }

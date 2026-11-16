@@ -150,6 +150,8 @@ export interface AgentRun {
   /** Isolated git worktree this agent works in (code-writing specialists), and its branch. */
   worktree: string | null;
   branch: string | null;
+  /** Copilot credits (or premium requests) this agent used, counted from Copilot's /usage after each turn. */
+  credits: number;
 }
 
 export interface Task {

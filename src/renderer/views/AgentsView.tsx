@@ -46,7 +46,7 @@ export function AgentsView() {
       <AgentChatStrip />
       {list.length === 0 ? <div className="empty">No {filter === "active" ? "active " : ""}agents.</div> : (
         <table className="table">
-          <thead><tr><th>Agent</th><th>Project</th><th>Harness</th><th>Status</th><th>Activity</th><th>Tokens</th><th>Age</th><th /></tr></thead>
+          <thead><tr><th>Agent</th><th>Project</th><th>Harness</th><th>Status</th><th>Activity</th><th>Tokens</th><th>Credits</th><th>Age</th><th /></tr></thead>
           <tbody>
             {list.map((a) => (
               <tr key={a.id} onDoubleClick={() => (a.chatId ? st.openChat(a.chatId) : st.chatWithAgent(a.role))}>
@@ -62,6 +62,7 @@ export function AgentsView() {
                   {a.lastActivity ?? "—"}
                 </td>
                 <td title={a.estimated ? "estimated" : "reported"}>{fmtTokens(a.tokensIn + a.tokensOut)}{a.estimated ? "*" : ""}</td>
+                <td title="Copilot credits, counted from Copilot's /usage after each turn">{a.credits > 0 ? (Math.round(a.credits * 100) / 100).toLocaleString() : "—"}</td>
                 <td>{ago(a.startedAt)}</td>
                 <td className="actions">
                   {a.status === "running" && <button onClick={() => api().pauseAgent(a.id)} title="Pause" className="icon-only"><Pause size={14} /></button>}

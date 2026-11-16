@@ -167,7 +167,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
           </div>
         </div>
         <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
-        <UsageMeter />
+        <UsageMeter chatId={chatId} />
       </section>
       <ThreadsPanel key={chatId} chatId={chatId} otherPanel={st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId} />
       {st.artifactsPanel === chatId && <ArtifactsPanel chatId={chatId} onClose={() => useStore.setState({ artifactsPanel: null })} />}
