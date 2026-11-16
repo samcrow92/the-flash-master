@@ -6,7 +6,7 @@ import { TABS as SETTINGS_TABS } from "../views/SettingsView";
 import { useMenu } from "./ContextMenu";
 import { toggleTerminal } from "./TerminalPanel";
 import {
-  BookOpen, Bot, Brain, ClipboardList, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
+  BookOpen, Bot, Brain, ClipboardList, RefreshCw, Sparkles, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
 } from "./icons";
 
 export const usePalette = create<{ open: boolean; setOpen(v: boolean): void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
@@ -90,6 +90,28 @@ export function useShortcuts(): void {
   }, []);
 }
 
+/** Build / update and sync the open project's knowledge base (also on the Memory page and as /kb, /kb-sync in a chat). */
+function knowledgeActions(projectId: string | null, projectName: (id: string | null) => string): Item[] {
+  if (!projectId) return [];
+  const st = useStore.getState();
+  const fail = (e: any) => st.toast("error", String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
+  const hint = projectName(projectId);
+  return [
+    { id: "a:kb-build", group: "Action", label: "Knowledge base · Build or update", hint, keywords: "kb knowledge docs index learn project", icon: <Sparkles size={16} />,
+      run: async () => {
+        try { const chat = await api().buildKnowledge(projectId); st.upsertChat(chat); await st.openChat(chat.id); } catch (e) { fail(e); }
+      } },
+    { id: "a:kb-sync", group: "Action", label: "Knowledge base · Sync with the repo", hint, keywords: "kb knowledge git pull push team", icon: <RefreshCw size={16} />,
+      run: async () => {
+        try {
+          const r = await api().syncKnowledge(projectId);
+          const moved = r.imported.length + r.exported.length + r.deletedLocal.length + r.deletedRepo.length;
+          st.toast(r.conflicts.length ? "warn" : "info", r.conflicts.length ? `Knowledge base: ${r.conflicts.length} conflict${r.conflicts.length === 1 ? "" : "s"} (Memory page)` : moved ? `Knowledge base synced: ${moved} change${moved === 1 ? "" : "s"}` : "Knowledge base already in sync");
+        } catch (e) { fail(e); }
+      } },
+  ];
+}
+
 interface Item extends Command { icon: ReactNode; run: () => void | Promise<void>; shortcut?: ShortcutId }
 
 /** Ctrl/Cmd+K: jump to any chat, agent, page or setting, or run an action, by typing a few letters. */
@@ -117,6 +139,7 @@ function PaletteBox({ onClose }: { onClose: () => void }) {
       { id: "a:search", group: "Action", label: "Search all chats", keywords: "find messages history", icon: <Search size={16} />, run: () => runShortcut("search"), shortcut: "search" },
       { id: "a:terminal", group: "Action", label: "Show or hide the terminal", keywords: "shell console powershell command line", icon: <SquareTerminal size={16} />, run: () => toggleTerminal() },
       { id: "a:theme", group: "Action", label: "Switch light / dark theme", keywords: "appearance mode", icon: <SunMoon size={16} />, run: () => toggleTheme() },
+      ...knowledgeActions(currentChat ? st.chatById[currentChat]?.projectId ?? st.currentProjectId : st.currentProjectId, projectName),
     ];
     const order = chatOrder(st.masterChatId, st.projects.map((p) => p.id), st.chats);
     const archived = Object.values(st.chats).flat().filter((c) => c.archived).map((c) => c.id);

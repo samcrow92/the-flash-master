@@ -17,6 +17,7 @@ import { agentLabel, pickInstanceName } from "@shared/instances";
 import { planEdit, planRetry, type RewindPlan } from "@shared/rewind";
 import type { Db } from "./db";
 import type { MemoryStore } from "./memory";
+import { describeSync, type KnowledgeBase } from "./knowledge";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
 import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
@@ -59,6 +60,8 @@ export interface OrchestratorDeps {
   db: Db;
   /** Agent memory: relevant memories are put in front of agents, and specialists' results become short-term memories. */
   memory?: MemoryStore;
+  /** Project knowledge base (/kb builds or updates it, /kb-sync syncs it with the repo folder). */
+  knowledge?: KnowledgeBase;
   harnesses: HarnessRegistry;
   settings: () => Settings;
   roles: () => RoleDef[];
@@ -269,6 +272,23 @@ export class Orchestrator {
     }
     if (slash.command === "stop") { await this.stopChat(chatId); return; }
     if (slash.command === "help") { this.system(chatId, threadRoot, this.helpText()); return; }
+    if (slash.command === "kb-sync" || slash.command === "knowledge-sync") {
+      if (!chat.projectId || !this.d.knowledge) { this.system(chatId, threadRoot, "The knowledge base belongs to a project: use `/kb-sync` in a project chat.", "warn"); return; }
+      try { this.system(chatId, threadRoot, `📚 ${describeSync(this.d.knowledge.sync(chat.projectId))}`); } catch (e: any) { this.system(chatId, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"); }
+      return;
+    }
+    if (slash.command === "kb" || slash.command === "knowledge") {
+      if (!chat.projectId || !this.d.knowledge || !this.memoryOn()) {
+        this.system(chatId, threadRoot, !this.memoryOn() ? "Memory is turned off (Settings → Memory), and the knowledge base with it." : "The knowledge base belongs to a project: use `/kb` in a project chat.", "warn");
+        return;
+      }
+      let brief: string;
+      try { brief = await this.d.knowledge.prompt(chat.projectId, slash.text); } catch (e: any) { this.system(chatId, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"); return; }
+      const role = this.role(chat.agentRole);
+      void this.turn({ chat, threadRoot, role, input: brief, attachments, skills: [], depth: 0, brief: null, msgIds: [userMsg.id], pick }).catch((e) =>
+        this.system(chatId, threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
+      return;
+    }
 
     const roles = this.d.roles();
     const mention = parseMention(slash.command ? slash.text : content, roles.map((r) => r.name));
@@ -1698,6 +1718,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     const cmds = this.d.skills().filter((s) => s.command !== "superpowers-index").map((s) => `\`/${s.command}\` — ${s.description}`);
     const roles = this.d.roles().map((r) => `\`@${r.name}\` — ${r.title}`);
     return ["**Commands**", "`/superpowers` — toggle the superpowers workflow for this chat", "`/stop` — stop agents in this chat",
+      "`/kb` — build or update this project's knowledge base (add words to focus it)", "`/kb-sync` — sync the knowledge base with .flashmaster/knowledge in the repo",
       ...cmds, "", "**Specialists** (mention to route a message)", ...roles].join("\n");
   }
 

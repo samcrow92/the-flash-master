@@ -1631,3 +1631,21 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .memory-dots .off { color: var(--line); }
 .memory-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .memory-card:hover .memory-actions, .memory-card:focus-within .memory-actions { opacity: 1; }
+
+/* ---------- Knowledge base (Memory page) ---------- */
+.kb-panel { border-radius: 14px; background: var(--glass); border: 1px solid var(--rim); box-shadow: var(--hi); backdrop-filter: blur(16px) saturate(1.4); padding: 10px 12px; }
+.kb-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kb-main .grow { flex: 1; }
+.kb-main button { display: inline-flex; align-items: center; gap: 6px; }
+.kb-icon { color: var(--blue); flex: none; }
+.kb-text { min-width: 0; }
+.kb-title { font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
+.kb-title .link-btn { background: none; border: none; padding: 0; font: inherit; font-weight: 400; font-size: 12px; cursor: pointer; }
+.kb-title .link-btn:hover { color: var(--fg); text-decoration: underline; }
+.kb-conflicts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.kb-conflict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kb-conflict .grow { flex: 1; }
+.kb-slug { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12px; color: var(--amber); }
+.kb-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--blue); }
+.memory-text.kb { max-height: 9.5em; overflow: hidden; }
+.kb-card-title { font-weight: 600; margin-bottom: 4px; }

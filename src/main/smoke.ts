@@ -5,7 +5,7 @@
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  */
 import { app, BrowserWindow, type NativeImage } from "electron";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -120,6 +120,12 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await a.saveMemory({ content: "Merge PRs once CI is green on Windows, macOS and Linux", scope: "user", kind: "procedure", tags: ["ci"] });
         await a.saveMemory({ content: "Brake light debounce must stay at 20 ms (BCM requirement 1240)", scope: "project", projectId: p, kind: "decision", importance: 5, tags: ["brake", "timing"] });
         await a.saveMemory({ content: "HIL bench 3 cannot reach -20 °C; cold-start tests run in the climate chamber", scope: "project", projectId: p, tags: ["hil"] });})()`);
+      // Project knowledge base: two entries as a teammate committed them, picked up by a sync (Memory page, project selected).
+      const kbDir = join(proj, ".flashmaster", "knowledge");
+      mkdirSync(kbDir, { recursive: true });
+      writeFileSync(join(kbDir, "overview.md"), "---\ntags: brake, bcm\nimportance: 4\n---\n\n# Overview\n\nThe brake ECU reads the pedal switch over CAN (BrakeLightReq, 0x1A0) and drives the lamps through the BCM. SWCs: BrakePedal, LampCtrl, Diag.\n");
+      writeFileSync(join(kbDir, "build-and-test.md"), "---\ntags: ci, hil\n---\n\n# Build and test\n\nDaVinci project in /config, CAPL tests in /tests/capl. HIL bench 3 runs the nightly suite; cold-start cases run in the climate chamber.\n");
+      await js(`(async()=>{const p=(await window.flash.api.listProjects())[0]?.id; if (p) await window.flash.api.syncKnowledge(p);})()`);
       for (const [label, name] of [["Agents", "3-agents"], ["Dashboard", "4-dashboard"], ["Tasks", "5-tasks"], ["Memory", "5m-memory"], ["Settings", "6-settings"]] as const) {
         await click(label, ".sidebar button");
         await sleep(1200);

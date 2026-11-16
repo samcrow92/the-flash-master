@@ -9,6 +9,7 @@ import type { RoleDef } from "@shared/types";
 import { MEMORY_KINDS, MEMORY_SCOPES } from "@shared/types";
 import type { Memory } from "@shared/types";
 import type { MemoryContext, MemoryStore } from "./memory";
+import { entryTitle, type KnowledgeBase } from "./knowledge";
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
 const s = (description: string) => ({ type: "string", description });
@@ -18,6 +19,7 @@ export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
+  knowledge?: KnowledgeBase;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -37,6 +39,14 @@ export function buildTools(d: {
     return { projectId: a?.projectId ?? null, chatId: a?.chatId ?? null, agentId: a?.id ?? null, role: a?.role ?? null };
   };
   const changed = <T>(x: T): T => { d.onMemory?.(); return x; };
+  const kb = (agentId: string): { kb: KnowledgeBase; projectId: string; ctx: MemoryContext } => {
+    if (!d.knowledge || d.memoryEnabled?.() === false) throw new Error("Memory is turned off (Settings → Memory), and the knowledge base with it");
+    const ctx = memCtx(agentId);
+    if (!ctx.projectId) throw new Error("the knowledge base belongs to a project: this chat has no project folder");
+    return { kb: d.knowledge, projectId: ctx.projectId, ctx };
+  };
+  const syncNote = (r: { conflicts: { slug: string; detail?: string; reason: string }[] }) =>
+    r.conflicts.length ? { conflicts: r.conflicts.map((c) => `${c.slug}: ${c.detail ?? c.reason}`), hint: "the user settles conflicts on the Memory page; don't rewrite those entries" } : {};
   const memBrief = (m: Memory) => ({ id: m.id, scope: m.scope, kind: m.kind, content: m.content, ...(m.tags.length ? { tags: m.tags } : {}),
     importance: m.importance, ...(m.pinned ? { pinned: true } : {}), ...(m.expiresAt ? { expires: new Date(m.expiresAt).toISOString().slice(0, 10) } : {}) });
   const scopeProp = (what: string) => ({ type: "string", enum: [...MEMORY_SCOPES], description: what });
@@ -246,6 +256,65 @@ export function buildTools(d: {
         const m = mem().require(a.id, ctx);
         const r = mem().promote(m.id, a.to, ctx);
         return changed({ ...memBrief(r.memory), status: r.status });
+      },
+    },
+    // ---------------- Project knowledge base (synced with .flashmaster/knowledge in the repo) ----------------
+    {
+      set: "core", name: "knowledge_list",
+      description: "List the entries of this project's knowledge base (team-reviewed docs kept in the repo under .flashmaster/knowledge): slug, title, tags, size.",
+      inputSchema: obj({}),
+      handler: async (_a, c) => {
+        const k = kb(c.agentId);
+        k.kb.sync(k.projectId);
+        const cp = k.kb.readCheckpoint(k.projectId);
+        return { checkpoint: cp?.commit ?? null, entries: mem().knowledgeEntries(k.projectId).map((m) => ({ slug: m.kbSlug, title: entryTitle(m.content, m.kbSlug!),
+          ...(m.tags.length ? { tags: m.tags } : {}), chars: m.content.length, updated: new Date(m.updatedAt).toISOString().slice(0, 10) })) };
+      },
+    },
+    {
+      set: "core", name: "knowledge_read",
+      description: "Read one knowledge base entry in full (Markdown).",
+      inputSchema: obj({ slug: s("entry slug from knowledge_list") }, ["slug"]),
+      handler: async (a, c) => {
+        const k = kb(c.agentId);
+        const m = mem().getKnowledge(k.projectId, String(a.slug ?? "").trim().toLowerCase());
+        if (!m) throw new Error(`no knowledge entry '${String(a.slug)}': use a slug from knowledge_list`);
+        return { slug: m.kbSlug, content: m.content, ...(m.tags.length ? { tags: m.tags } : {}), importance: m.importance };
+      },
+    },
+    {
+      set: "core", name: "knowledge_write",
+      description: "Add or replace one knowledge base entry: a Markdown document on one topic, starting with '# Title' (overview, module map, build/test/release, conventions, gotchas, decisions, glossary). "
+        + "It is saved in the app and written to .flashmaster/knowledge/<slug>.md in the repo for the team to review. Replaces the whole entry: read it first to keep what is still right.",
+      inputSchema: obj({
+        slug: s("short kebab-case name, e.g. build-and-release"), content: s("the whole entry, Markdown, starting with '# Title'"),
+        tags: { type: "array", items: { type: "string" }, description: "a few keywords (optional)" },
+        importance: { type: "number", description: "1 … 5 (default 3); 4–5 for what every agent should know" },
+      }, ["slug", "content"]),
+      handler: async (a, c) => {
+        const k = kb(c.agentId);
+        const r = k.kb.write(k.projectId, { slug: a.slug, content: a.content, tags: a.tags, importance: a.importance }, k.ctx);
+        return changed({ slug: r.memory.kbSlug, file: `.flashmaster/knowledge/${r.memory.kbSlug}.md`, chars: r.memory.content.length, ...syncNote(r.sync) });
+      },
+    },
+    {
+      set: "core", name: "knowledge_delete",
+      description: "Delete a knowledge base entry that is wrong or obsolete (its file in the repo folder goes too).",
+      inputSchema: obj({ slug: s("entry slug") }, ["slug"]),
+      handler: async (a, c) => {
+        const k = kb(c.agentId);
+        const r = k.kb.remove(k.projectId, String(a.slug ?? ""));
+        return changed({ slug: a.slug, deleted: r.deleted, ...syncNote(r.sync) });
+      },
+    },
+    {
+      set: "core", name: "knowledge_checkpoint",
+      description: "Call once when a knowledge base build or update is finished: records the current commit in .flashmaster/knowledge/manifest.json, so the next update only looks at changes after it.",
+      inputSchema: obj({}),
+      handler: async (_a, c) => {
+        const k = kb(c.agentId);
+        const r = await k.kb.checkpoint(k.projectId);
+        return changed({ checkpoint: r.commit, entries: r.sync.entries, ...(r.commit ? {} : { note: "not a git repository: no commit to record" }), ...syncNote(r.sync) });
       },
     },
     // ---------------- Jazz ----------------

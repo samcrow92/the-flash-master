@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Brain, Pin, PinOff, Plus, Search, Trash2 } from "../components/icons";
+import { ArrowUpRight, BookOpen, Brain, FolderOpen, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
-import type { Memory, MemoryKind, MemoryScope } from "@shared/types";
+import type { KnowledgeStatus, Memory, MemoryKind, MemoryScope } from "@shared/types";
 import { MEMORY_KINDS } from "@shared/types";
 import { api, ago, roleOf, useStore } from "../store";
 
@@ -17,7 +17,7 @@ const SCOPES: MemoryScope[] = ["user", "project", "session"];
 export function MemoryView() {
   const st = useStore();
   const rev = useStore((s) => s.memoryRev);
-  const [scope, setScope] = useState<MemoryScope | "">("");
+  const [scope, setScope] = useState<MemoryScope | "" | "kb">("");
   const [project, setProject] = useState<string>(st.currentProjectId ?? "");
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Memory[]>([]);
@@ -27,7 +27,8 @@ export function MemoryView() {
     let live = true;
     const t = setTimeout(() => {
       const projectId = project === "" ? undefined : project === "none" ? null : project;
-      void api().listMemories({ scope: scope || undefined, projectId, query: q }).then((m) => { if (live) setItems(m); }).catch(() => { if (live) setItems([]); });
+      void api().listMemories({ scope: scope === "kb" ? "project" : scope || undefined, projectId, query: q })
+        .then((m) => (scope === "kb" ? m.filter((x) => x.kbSlug) : m)).then((m) => { if (live) setItems(m); }).catch(() => { if (live) setItems([]); });
     }, q ? 160 : 0);
     return () => { live = false; clearTimeout(t); };
   }, [scope, project, q, rev]);
@@ -44,7 +45,7 @@ export function MemoryView() {
     { label: "Edit…", icon: <Brain size={15} />, onClick: () => setEditing(m) },
     { label: m.pinned ? "Unpin" : "Pin (always shown to agents)", icon: m.pinned ? <PinOff size={15} /> : <Pin size={15} />, onClick: () => void pin(m) },
     ...(m.scope === "session" ? [{ label: "Keep for this project", icon: <ArrowUpRight size={15} />, onClick: () => void promote(m, "project") }] : []),
-    ...(m.scope !== "user" ? [{ label: "Keep for every project", icon: <ArrowUpRight size={15} />, onClick: () => void promote(m, "user") }] : []),
+    ...(m.scope !== "user" && !m.kbSlug ? [{ label: "Keep for every project", icon: <ArrowUpRight size={15} />, onClick: () => void promote(m, "user") }] : []),
     { label: "", separator: true },
     { label: "Delete", icon: <Trash2 size={15} />, danger: true, hint: "Del", onClick: () => void remove(m) },
   ];
@@ -65,13 +66,15 @@ export function MemoryView() {
           </button>
         </div>
       </header>
+      {project && project !== "none" && st.projects.some((p) => p.id === project) && <KnowledgePanel projectId={project} rev={rev} onError={failed} onShow={() => setScope("kb")} />}
       <div className="seg memory-scopes">
         <button className={scope === "" ? "on" : ""} onClick={() => setScope("")}>All</button>
         {SCOPES.map((s) => <button key={s} className={scope === s ? "on" : ""} title={SCOPE_HINT[s]} onClick={() => setScope(s)}>
           {SCOPE_TITLE[s]}{scope === "" && counts[s] ? <span className="muted"> {counts[s]}</span> : null}
         </button>)}
+        <button className={scope === "kb" ? "on" : ""} title={KB_HINT} onClick={() => setScope("kb")}>Knowledge base</button>
       </div>
-      {scope && <div className="muted small">{SCOPE_HINT[scope]}</div>}
+      {scope && <div className="muted small">{scope === "kb" ? KB_HINT : SCOPE_HINT[scope]}</div>}
       <div className="memory-list">
         {items.length === 0 && <div className="empty-hint">{q ? "No memory matches." : "Nothing remembered yet. Agents save memories with memory_save, or add one yourself."}</div>}
         {items.map((m) => (
@@ -80,9 +83,9 @@ export function MemoryView() {
               if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); void remove(m); }
               else if (e.key === "Enter") setEditing(m);
             }}>
-            <div className="memory-text">{m.pinned && <Pin size={12} className="memory-pin" />}{m.content}</div>
+            <div className={`memory-text${m.kbSlug ? " kb" : ""}`}>{m.pinned && <Pin size={12} className="memory-pin" />}{m.kbSlug ? <KbPreview content={m.content} /> : m.content}</div>
             <div className="memory-meta">
-              <span className="pill">{SCOPE_TITLE[m.scope]}</span>
+              {m.kbSlug ? <span className="pill kb-pill" title={`.flashmaster/knowledge/${m.kbSlug}.md`}><BookOpen size={11} /> {m.kbSlug}</span> : <span className="pill">{SCOPE_TITLE[m.scope]}</span>}
               {m.scope !== "user" && <span className="muted">{projectName(m.projectId)}</span>}
               {m.kind !== "fact" && <span className="muted">{m.kind}</span>}
               {m.tags.map((t) => <span key={t} className="memory-tag">#{t}</span>)}
@@ -101,6 +104,80 @@ export function MemoryView() {
         ))}
       </div>
       {editing && <MemoryEditor memory={editing} onClose={() => setEditing(null)} onError={failed} />}
+    </div>
+  );
+}
+
+const KB_HINT = "The project's knowledge base: documents agents write and the team reviews in git (.flashmaster/knowledge). Edits here go to the repo folder on the next sync.";
+const clipText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n).trimEnd()}…` : s);
+const short = (c: string) => c.slice(0, 7);
+
+/** A knowledge entry on a card: its "# Title" as a title, then the start of the text. */
+function KbPreview({ content }: { content: string }) {
+  const m = /^#\s+(.+)\n*/.exec(content);
+  return <>{m && <div className="kb-card-title">{m[1]}</div>}{clipText(m ? content.slice(m[0].length) : content, 320)}</>;
+}
+
+/** Knowledge base strip of the Memory page: build / update it with Flash Master, sync it with the repo, settle conflicts. */
+function KnowledgePanel({ projectId, rev, onError, onShow }: { projectId: string; rev: number; onError: (e: unknown) => void; onShow: () => void }) {
+  const st = useStore();
+  const [status, setStatus] = useState<KnowledgeStatus | null>(null);
+  const [busy, setBusy] = useState<"" | "sync" | "build">("");
+  const reload = () => api().knowledgeStatus(projectId).then(setStatus).catch(() => setStatus(null));
+  useEffect(() => { void reload(); }, [projectId, rev]);
+  const sync = async () => {
+    setBusy("sync");
+    try {
+      const r = await api().syncKnowledge(projectId);
+      const moved = r.imported.length + r.exported.length + r.deletedLocal.length + r.deletedRepo.length;
+      st.toast(r.conflicts.length ? "warn" : "info", r.conflicts.length ? `${r.conflicts.length} knowledge entr${r.conflicts.length === 1 ? "y needs" : "ies need"} you` : moved ? `Knowledge base synced: ${moved} change${moved === 1 ? "" : "s"}` : "Knowledge base already in sync");
+      await reload();
+    } catch (e) { onError(e); } finally { setBusy(""); }
+  };
+  const build = async () => {
+    setBusy("build");
+    try {
+      const chat = await api().buildKnowledge(projectId);
+      st.upsertChat(chat);
+      await st.openChat(chat.id);
+    } catch (e) { onError(e); } finally { setBusy(""); }
+  };
+  const resolve = async (slug: string, keep: "repo" | "local") => {
+    try { await api().resolveKnowledgeConflict(projectId, slug, keep); await reload(); } catch (e) { onError(e); }
+  };
+  const s = status;
+  const fresh = !s?.entries;
+  const state = !s ? "" : !s.repo ? "not a git repository" : !s.checkpoint ? "no checkpoint yet"
+    : s.behind === null ? `checkpoint ${short(s.checkpoint.commit)} not in this clone` : s.behind === 0 ? `up to date with ${short(s.checkpoint.commit)}`
+    : `${s.behind} commit${s.behind === 1 ? "" : "s"} since ${short(s.checkpoint.commit)}`;
+  return (
+    <div className="kb-panel">
+      <div className="kb-main">
+        <BookOpen size={18} className="kb-icon" />
+        <div className="kb-text">
+          <div className="kb-title">Knowledge base <button className="link-btn muted" title="Show the entries" onClick={onShow}>{s ? `${s.entries} entr${s.entries === 1 ? "y" : "ies"}` : "…"}</button></div>
+          <div className="muted small">
+            {state}{s?.uncommitted ? ` · ${s.uncommitted} file${s.uncommitted === 1 ? "" : "s"} to commit` : ""}{s?.lastSync ? ` · synced ${ago(s.lastSync.at)}` : ""}
+          </div>
+        </div>
+        <span className="grow" />
+        <button className="icon-btn" title={s ? `Open ${s.folder}` : "Open the folder"} onClick={() => void api().openKnowledgeFolder(projectId).catch(onError)}><FolderOpen size={15} /></button>
+        <button title="Sync with .flashmaster/knowledge in the repo: take teammates' changes, write yours" disabled={!!busy} onClick={() => void sync()}>
+          <RefreshCw size={14} className={busy === "sync" ? "spin" : ""} /> Sync
+        </button>
+        <button className="primary" disabled={!!busy} title={fresh ? "Flash Master reads the project and writes the knowledge base" : "Flash Master updates the entries the commits since the checkpoint affect"} onClick={() => void build()}>
+          <Sparkles size={14} /> {fresh ? "Build" : "Update"}
+        </button>
+      </div>
+      {!!s?.conflicts.length && <div className="kb-conflicts">
+        {s.conflicts.map((c) => (
+          <div key={c.slug} className="kb-conflict">
+            <span className="kb-slug">{c.slug}</span><span className="muted small">{c.detail ?? c.reason}</span><span className="grow" />
+            {c.reason !== "merge-markers" && c.reason !== "invalid" && <button className="ghost" onClick={() => void resolve(c.slug, "repo")}>Use repo version</button>}
+            <button className="ghost" onClick={() => void resolve(c.slug, "local")}>Keep mine</button>
+          </div>
+        ))}
+      </div>}
     </div>
   );
 }
@@ -128,7 +205,7 @@ function MemoryEditor({ memory, onClose, onError }: { memory: Partial<Memory>; o
       <div className="modal" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void save(); if (e.key === "Escape") onClose(); }}>
         <h3>{isNew ? "New memory" : "Memory"}</h3>
         <label className="field"><span>What to remember</span>
-          <textarea rows={4} autoFocus value={m.content ?? ""} placeholder="One self-contained fact, e.g. “Mari prefers minimal glass UI.”" onChange={(e) => setM({ ...m, content: e.target.value })} />
+          <textarea rows={m.kbSlug ? 16 : 4} autoFocus value={m.content ?? ""} placeholder="One self-contained fact, e.g. “Mari prefers minimal glass UI.”" onChange={(e) => setM({ ...m, content: e.target.value })} />
         </label>
         <div className="grid3">
           <label className="field"><span>Scope</span>

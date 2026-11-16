@@ -77,6 +77,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
     if (sl) {
       const cmds = [
         { c: "superpowers", d: "toggle the superpowers workflow for this chat" }, { c: "stop", d: "stop agents in this chat" }, { c: "help", d: "list commands and specialists" },
+        { c: "kb", d: "build or update this project's knowledge base (add words to focus it)" }, { c: "kb-sync", d: "sync the knowledge base with .flashmaster/knowledge in the repo" },
         ...skills.filter((s) => s.command !== "superpowers-index").map((s) => ({ c: s.command, d: s.description })),
       ];
       return cmds.filter((x) => x.c.startsWith(sl[1]!.toLowerCase())).map((x) => ({ insert: `/${x.c} `, label: <span>/{x.c}</span>, hint: x.d }));

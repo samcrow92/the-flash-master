@@ -208,6 +208,8 @@ function Agents(f: F) {
     <Row label="Memories per reminder"><Num f={f} path="memory.maxInjected" min={0} /></Row>
     <Row label="Short-term memories expire after (days)" hint="A chat's short-term memories are deleted after this long unless an agent or you promote them to a long-term scope. Using one again restarts its clock."><Num f={f} path="memory.shortTermDays" min={1} /></Row>
     <Row label="Remember specialists' results" hint="Each delegated specialist's result summary is saved as a short-term memory of the chat, so the other agents there know what was done."><Bool f={f} path="memory.captureResults" /></Row>
+    <Row label="Sync project knowledge bases" hint="Keeps each project's knowledge base (Memory page) in step with .flashmaster/knowledge in its git repo: teammates' changes come in after a pull, your agents' updates go out to the folder for you to commit."><Bool f={f} path="memory.knowledgeSync" /></Row>
+    <Row label="Knowledge sync interval (minutes)"><Num f={f} path="memory.knowledgeSyncMinutes" min={1} /></Row>
     <InstructionSettings f={f} />
     <div className="row between">
       <h4>Agents</h4>

@@ -20,6 +20,8 @@ import type { Db } from "./db";
 type Row = Record<string, any>;
 const DAY = 86_400_000;
 export const MAX_MEMORY_CHARS = 2000;
+/** A knowledge base entry is a short document, not one fact. */
+export const MAX_KNOWLEDGE_CHARS = 12000;
 /** Above this similarity a new memory is the same fact: merge instead of adding. */
 export const DUPLICATE_AT = 0.9;
 /** Above this, report it as similar so the agent can decide to update / replace. */
@@ -62,6 +64,16 @@ export interface SearchOptions {
   touch?: boolean;
   /** Hide these ids (already shown to the agent). */
   exclude?: Iterable<number>;
+}
+
+/** A knowledge base entry as it is stored in the repo (`.flashmaster/knowledge/<slug>.md`) and in the database. */
+export interface KnowledgeEntry {
+  slug: string;
+  content: string;
+  kind: MemoryKind;
+  tags: string[];
+  importance: number;
+  pinned: boolean;
 }
 
 export class MemoryStore {
@@ -138,7 +150,7 @@ export class MemoryStore {
       if (m && this.visible(m, ctx)) { this.delete(m.id); replaced.push(m.id); }
     }
     // Consolidate: the same fact in the same place is merged, not stored twice.
-    const peers = this.all(`SELECT * FROM memories WHERE scope=? AND project_id IS ? AND chat_id IS ?`, scope, owner.projectId, owner.chatId).map(toMemory);
+    const peers = this.all(`SELECT * FROM memories WHERE scope=? AND project_id IS ? AND chat_id IS ? AND kb_slug IS NULL`, scope, owner.projectId, owner.chatId).map(toMemory);
     const sketch = vectorize(content);
     const scored = peers.map((m) => ({ m, sim: cosine(sketch, vectorize(m.content)) })).sort((a, b) => b.sim - a.sim);
     const dup = scored.find((x) => x.sim >= DUPLICATE_AT || normalize(x.m.content) === normalize(content));
@@ -164,7 +176,7 @@ export class MemoryStore {
     const m = this.get(id);
     if (!m) throw new Error(`unknown memory id ${id}`);
     const n = {
-      content: patch.content !== undefined ? cleanContent(patch.content) : m.content,
+      content: patch.content !== undefined ? cleanContent(patch.content, m.kbSlug ? MAX_KNOWLEDGE_CHARS : MAX_MEMORY_CHARS) : m.content,
       kind: patch.kind && MEMORY_KINDS.includes(patch.kind) ? patch.kind : m.kind,
       tags: patch.tags !== undefined ? parseTags(patch.tags) : m.tags,
       importance: patch.importance !== undefined ? clampImportance(patch.importance) : m.importance,
@@ -190,10 +202,11 @@ export class MemoryStore {
     const m = this.get(id);
     if (!m) throw new Error(`unknown memory id ${id}`);
     if (to === "session") throw new Error("promote moves a memory to a long-term scope: project or user");
+    if (m.kbSlug && to !== m.scope) throw new Error("knowledge base entries belong to their project's repo and can't move to another scope");
     if (to === m.scope) return { memory: m, status: "saved", similar: [], replaced: [] };
     const target = { ...ctx, projectId: m.scope === "project" ? m.projectId : (m.projectId ?? ctx.projectId) };
     const owner = this.owner(to, target);
-    const dup = this.all(`SELECT * FROM memories WHERE scope=? AND project_id IS ? AND chat_id IS NULL AND id<>?`, to, owner.projectId, id).map(toMemory)
+    const dup = this.all(`SELECT * FROM memories WHERE scope=? AND project_id IS ? AND chat_id IS NULL AND id<>? AND kb_slug IS NULL`, to, owner.projectId, id).map(toMemory)
       .find((x) => cosine(vectorize(x.content), vectorize(m.content)) >= DUPLICATE_AT);
     if (dup) {
       const merged = this.update(dup.id, { content: m.content.length >= dup.content.length ? m.content : dup.content,
@@ -267,7 +280,9 @@ export class MemoryStore {
     const hits = this.search(query, ctx, { limit: max - pinned.length, exclude, minRelevance: o.minRelevance ?? 0.25 });
     const shown = [...pinned, ...hits];
     if (!shown.length) return { text: "", ids: [] };
-    const lines = shown.map((m) => `- [${m.id}] (${SCOPE_LABEL[m.scope]}${m.kind !== "fact" ? `, ${m.kind}` : ""}) ${clip(m.content, 400).replace(/\s+/g, " ")}`);
+    const lines = shown.map((m) => m.kbSlug
+      ? `- [${m.id}] (knowledge base: ${m.kbSlug}; full text with knowledge_read) ${clip(m.content, 400).replace(/\s+/g, " ")}`
+      : `- [${m.id}] (${SCOPE_LABEL[m.scope]}${m.kind !== "fact" ? `, ${m.kind}` : ""}) ${clip(m.content, 400).replace(/\s+/g, " ")}`);
     return { text: `## Relevant memory\nSaved earlier; may be outdated. Fix wrong ones with memory_update / memory_delete.\n${lines.join("\n")}`, ids: shown.map((m) => m.id) };
   }
 
@@ -277,7 +292,52 @@ export class MemoryStore {
     const r1 = this.run("DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?", t);
     const r2 = this.run("DELETE FROM memories WHERE scope='session' AND (chat_id IS NULL OR chat_id NOT IN (SELECT id FROM chats))");
     const r3 = this.run("DELETE FROM memories WHERE scope='project' AND project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects)");
+    this.run("DELETE FROM knowledge_sync WHERE project_id NOT IN (SELECT id FROM projects)");
     return Number(r1.changes) + Number(r2.changes) + Number(r3.changes);
+  }
+
+  // ---------------- project knowledge base (entries are project memories with a slug; see knowledge.ts) ----------------
+
+  knowledgeEntries(projectId: string): Memory[] {
+    return this.all("SELECT * FROM memories WHERE scope='project' AND project_id=? AND kb_slug IS NOT NULL ORDER BY kb_slug", projectId).map(toMemory);
+  }
+
+  getKnowledge(projectId: string, slug: string): Memory | null {
+    const r = this.one("SELECT * FROM memories WHERE scope='project' AND project_id=? AND kb_slug=?", projectId, slug);
+    return r ? toMemory(r) : null;
+  }
+
+  /** Create or replace the entry with this slug (never merged with other memories). */
+  putKnowledge(projectId: string, e: KnowledgeEntry, ctx: { agentId?: string | null; role?: string | null } = {}): Memory {
+    const content = cleanContent(e.content, MAX_KNOWLEDGE_CHARS, true);
+    const kind = MEMORY_KINDS.includes(e.kind) ? e.kind : "fact";
+    const tags = parseTags(e.tags).join(" ");
+    const importance = clampImportance(e.importance);
+    const t = this.now();
+    const cur = this.getKnowledge(projectId, e.slug);
+    if (cur) {
+      this.run("UPDATE memories SET content=?, kind=?, tags=?, importance=?, pinned=?, updated_at=? WHERE id=?",
+        content, kind, tags, importance, e.pinned ? 1 : 0, t, cur.id);
+      return this.get(cur.id)!;
+    }
+    const r = this.run(`INSERT INTO memories(scope, project_id, chat_id, kind, content, tags, importance, pinned, source_agent_id, source_role,
+      created_at, updated_at, last_accessed_at, access_count, expires_at, kb_slug) VALUES('project',?,NULL,?,?,?,?,?,?,?,?,?,?,0,NULL,?)`,
+    projectId, kind, content, tags, importance, e.pinned ? 1 : 0, ctx.agentId ?? null, ctx.role ?? null, t, t, t, e.slug);
+    return this.get(Number(r.lastInsertRowid))!;
+  }
+
+  deleteKnowledge(projectId: string, slug: string): boolean {
+    return Number(this.run("DELETE FROM memories WHERE scope='project' AND project_id=? AND kb_slug=?", projectId, slug).changes) > 0;
+  }
+
+  /** Each entry's hash at the last sync: the common base that tells who changed what since. */
+  syncHashes(projectId: string): Map<string, string> {
+    return new Map(this.all("SELECT slug, hash FROM knowledge_sync WHERE project_id=?", projectId).map((r) => [String(r.slug), String(r.hash)]));
+  }
+
+  setSyncHash(projectId: string, slug: string, hash: string | null): void {
+    if (hash) this.run("INSERT INTO knowledge_sync(project_id, slug, hash) VALUES(?,?,?) ON CONFLICT(project_id, slug) DO UPDATE SET hash=excluded.hash", projectId, slug, hash);
+    else this.run("DELETE FROM knowledge_sync WHERE project_id=? AND slug=?", projectId, slug);
   }
 
   counts(projectId?: string | null): Record<MemoryScope, number> {
@@ -332,6 +392,7 @@ function toMemory(r: Row): Memory {
     tags: String(r.tags ?? "").split(/\s+/).filter(Boolean), importance: Number(r.importance), pinned: !!r.pinned,
     sourceAgentId: r.source_agent_id ?? null, sourceRole: r.source_role ?? null, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
     lastAccessedAt: Number(r.last_accessed_at), accessCount: Number(r.access_count), expiresAt: r.expires_at == null ? null : Number(r.expires_at),
+    kbSlug: r.kb_slug ?? null,
   };
 }
 
@@ -343,10 +404,11 @@ function parseScope(s: unknown, ctx: MemoryContext): MemoryScope {
   throw new Error(`scope must be one of ${MEMORY_SCOPES.join(", ")}`);
 }
 
-function cleanContent(c: unknown): string {
+function cleanContent(c: unknown, max = MAX_MEMORY_CHARS, strict = false): string {
   const s = String(c ?? "").trim();
   if (!s) throw new Error("memory content is empty");
-  return s.length > MAX_MEMORY_CHARS ? s.slice(0, MAX_MEMORY_CHARS) : s;
+  if (s.length > max && strict) throw new Error(`entry is ${s.length} characters, more than ${max}: split it into several entries`);
+  return s.length > max ? s.slice(0, max) : s;
 }
 
 export function parseTags(t: unknown): string[] {
@@ -354,7 +416,7 @@ export function parseTags(t: unknown): string[] {
   return [...new Set(list.map((x) => String(x).toLowerCase().replace(/[^\p{L}\p{N}_.-]/gu, "")).filter(Boolean))].slice(0, 12);
 }
 
-function clampImportance(n: unknown): number {
+export function clampImportance(n: unknown): number {
   const v = Math.round(Number(n));
   return Number.isFinite(v) ? Math.min(5, Math.max(1, v)) : 3;
 }
