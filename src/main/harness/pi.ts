@@ -16,8 +16,14 @@ type Json = Record<string, any>;
 type PiTurn = { resolve: (r: TurnResult) => void; tokensIn: number; tokensOut: number; stop: string; error?: string; accepted: boolean; cmd: Json };
 /** Pi's refusal of a prompt sent while it is still running (its error asks for a streamingBehavior). */
 export const PI_STILL_RUNNING = /already processing|streamingBehavior/i;
-/** Waits before re-sending a refused prompt (~10 s in all); after the last one it goes as a follow-up. */
-const PROMPT_RETRY_DELAYS = [25, 50, 100, 200, 400, 800, 1000, 1500, 2000, 2000, 2000];
+/**
+ * Waits before re-sending a refused prompt. Pi turns idle only once its agent_end work is done (that can include
+ * compacting the session), so keep trying about every second for up to 5 minutes. Never fall back to
+ * streamingBehavior "followUp": a follow-up queued after the run's last check waits for a next prompt, and the turn would hang.
+ */
+/** Starts the run that answers a steering message Pi received just as its last run ended. */
+export const STEER_FOLLOW_UP = "(The user sent the message above while you were finishing. Take it into account and continue.)";
+const PROMPT_RETRY_DELAYS = [25, 50, 100, 200, 400, 800, ...Array<number>(300).fill(1000)];
 
 const TOOL_KIND: Record<string, ToolKind> = { bash: "execute", read: "read", write: "edit", edit: "edit", grep: "search", find: "search", ls: "search" };
 
@@ -88,34 +94,39 @@ export class PiSession implements HarnessSession {
       const turn: PiTurn = { resolve, tokensIn: 0, tokensOut: 0, stop: "end_turn", accepted: false, cmd: { type: "prompt", message, ...(images.length ? { images } : {}) } };
       this.turn = turn;
       this.userMsgsThisTurn = 0;
-      void this.sendPrompt(turn, 0);
+      this.sendPrompt(turn, 0);
     });
   }
 
   /**
    * Pi emits agent_end a moment before it is ready for the next prompt, so a prompt sent right away (queued message,
    * steering redirect, stopped tool call) is refused with "Agent is already processing. Specify streamingBehavior…".
-   * Wait and try again; if Pi is still running after that, hand it over as a follow-up so it runs next instead of failing.
+   * Wait and try again until Pi is idle.
    */
-  private async sendPrompt(turn: PiTurn, attempt: number): Promise<void> {
-    const followUp = attempt >= PROMPT_RETRY_DELAYS.length;
+  private sendPrompt(turn: PiTurn, attempt: number): void {
     const sent = turn.cmd;
-    const r = await this.command(followUp ? { ...sent, streamingBehavior: "followUp" } : sent);
-    if (this.turn !== turn) return;
-    if (r.success) {
-      turn.accepted = true;
-      // A steering message joined the prompt while this attempt was on its way: deliver it the normal way.
-      const extra = String(turn.cmd.message).slice(String(sent.message).length).trim();
-      if (extra) void this.command({ type: "steer", message: extra });
-      return;
-    }
-    if (!followUp && !this.exited && PI_STILL_RUNNING.test(String(r.error ?? ""))) {
-      await new Promise((ok) => setTimeout(ok, PROMPT_RETRY_DELAYS[attempt]));
-      if (this.turn === turn) await this.sendPrompt(turn, attempt + 1);
-      return;
-    }
-    turn.resolve({ stopReason: "error", error: r.error ?? "prompt rejected" });
-    this.turn = null;
+    // The answer is handled synchronously, in the same pass over Pi's output: a quick run's events (up to agent_end)
+    // can arrive in the same chunk right behind it and must already count for this turn, or the turn never ends.
+    this.request(sent, (r) => {
+      if (this.turn !== turn) {
+        // Stopped while Pi was taking the prompt: stop the run it just started too.
+        if (r.success) this.write({ type: "abort" });
+        return;
+      }
+      if (r.success) {
+        turn.accepted = true;
+        // A steering message joined the prompt while this attempt was on its way: deliver it the normal way.
+        const extra = String(turn.cmd.message).slice(String(sent.message).length).trim();
+        if (extra) void this.command({ type: "steer", message: extra });
+        return;
+      }
+      if (attempt < PROMPT_RETRY_DELAYS.length && !this.exited && PI_STILL_RUNNING.test(String(r.error ?? ""))) {
+        setTimeout(() => { if (this.turn === turn) this.sendPrompt(turn, attempt + 1); }, PROMPT_RETRY_DELAYS[attempt]);
+        return;
+      }
+      turn.resolve({ stopReason: "error", error: r.error ?? "prompt rejected" });
+      this.turn = null;
+    });
   }
 
   async cancel(): Promise<void> {
@@ -147,11 +158,14 @@ export class PiSession implements HarnessSession {
   // ------------------------------------------------------------------ protocol
 
   private command(cmd: Json): Promise<Json> {
+    return new Promise((resolve) => this.request(cmd, resolve));
+  }
+
+  /** Send a command; `onResponse` runs synchronously when Pi's response line is read, before the lines after it. */
+  private request(cmd: Json, onResponse: (r: Json) => void): void {
     const id = `fm-${this.nextId++}`;
-    return new Promise((resolve) => {
-      this.pending.set(id, resolve);
-      this.write({ id, ...cmd });
-    });
+    this.pending.set(id, onResponse);
+    this.write({ id, ...cmd });
   }
 
   private write(obj: Json): void {
@@ -233,6 +247,15 @@ export class PiSession implements HarnessSession {
       case "agent_end":
         // Not yet accepted = the end of the run before ours, which Pi was still finishing.
         if (t?.accepted) {
+          if (this.pendingSteers > 0 && t.stop === "end_turn" && !this.exited) {
+            // The run ended before Pi took the steering message (it keeps it for the next run): start that run now,
+            // in the same turn, so the message is answered instead of waiting for the user's next one.
+            t.accepted = false;
+            t.cmd = { type: "prompt", message: STEER_FOLLOW_UP };
+            this.sendPrompt(t, 0);
+            break;
+          }
+          this.pendingSteers = 0;
           this.turn = null;
           t.resolve({ stopReason: t.stop, error: t.error, usage: t.tokensIn || t.tokensOut ? { tokensIn: t.tokensIn, tokensOut: t.tokensOut } : undefined });
         }
