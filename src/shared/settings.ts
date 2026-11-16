@@ -167,6 +167,8 @@ export interface Settings {
     maxInjected: number; // memories per reminder
     shortTermDays: number; // a chat's short-term memories expire after this many days unless promoted
     captureResults: boolean; // save each specialist's result summary as a short-term memory of the chat
+    knowledgeSync: boolean; // keep each project's knowledge base in step with .flashmaster/knowledge in its repo (at start and every few minutes)
+    knowledgeSyncMinutes: number;
   };
   data: {
     retentionDays: number; // 0 = keep forever
@@ -237,7 +239,7 @@ export const DEFAULT_SETTINGS: Settings = {
     pluginPackage: "", autoSetup: true },
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
-  memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true },
+  memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true, knowledgeSync: true, knowledgeSyncMinutes: 2 },
   data: { retentionDays: 0 },
   advanced: { logLevel: "info", devTools: false, showMockHarness: true },
 };

@@ -32,6 +32,32 @@ only see and change user memories, its project's memories and its chat's short-t
   kept). Close but different memories are returned as `similar` so the agent can update or replace them (`replaces`).
 - **Cleanup.** Expired short-term memories, and memories of deleted chats or projects, are swept at start and hourly.
 
+## Project knowledge base (synced with git)
+
+Each project has a knowledge base: short documents on one topic each (overview, module map, build / test / release,
+conventions, gotchas, decisions, glossary) that Flash Master writes and the team reviews and edits in git.
+
+- **Where it lives.** In the app, entries are project memories with a slug (`memories.kb_slug`), so recall, search and the
+  Memory page work on them like on any memory. In the repo, each entry is `.flashmaster/knowledge/<slug>.md` (front
+  matter: `tags`, `kind`, `importance`, `pinned`; then Markdown starting with `# Title`), plus a generated `README.md`
+  index. `.flashmaster/.gitignore` keeps attachments out of git but lets the knowledge folder in (older projects' bare `*`
+  is upgraded).
+- **Checkpoint.** `.flashmaster/knowledge/manifest.json` holds `indexedCommit`: the commit the knowledge base was last
+  built or updated from. The agent sets it with `knowledge_checkpoint` when it finishes.
+- **Build / update.** The **Build** / **Update** button on the Memory page (pick a project), the palette command
+  *Knowledge base · Build or update*, or `/kb [focus]` in a project chat. The button runs in the project's
+  "📚 Knowledge base" chat so the work stays visible. Without a checkpoint it is a full build; with one, Flash Master gets
+  the commits and files changed since (`git diff --name-only <checkpoint> HEAD`) and only updates the entries they affect.
+- **Sync.** The **Sync** button, *Knowledge base · Sync with the repo*, or `/kb-sync`; also automatic at start and every
+  `memory.knowledgeSyncMinutes` (`memory.knowledgeSync`). It is a three-way merge per entry between the database, the file,
+  and the hash both had at the last sync (`knowledge_sync` table): only the file changed (a teammate's edit, a pull) →
+  imported; only the app changed (an agent or you on the Memory page) → written to the file; deletions follow the same
+  rule. Both changed → a conflict: nothing is overwritten and the Memory page offers *Use repo version* / *Keep mine*.
+  Files with git merge markers or that can't be read are reported, never imported. Line endings (CRLF checkouts on
+  Windows) and a BOM don't count as changes.
+- **Agent tools.** `knowledge_list`, `knowledge_read`, `knowledge_write`, `knowledge_delete`, `knowledge_checkpoint`.
+- **Committing** stays with you: the Memory page shows how many knowledge files are not committed yet.
+
 ## Design notes (state of the art, November 2026)
 
 The design borrows the parts of current agent-memory systems that fit a local desktop app:

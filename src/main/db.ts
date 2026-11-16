@@ -59,6 +59,11 @@ export const MIGRATIONS: string[] = [
      pinned INTEGER NOT NULL DEFAULT 0, source_agent_id TEXT, source_role TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
      last_accessed_at INTEGER NOT NULL, access_count INTEGER NOT NULL DEFAULT 0, expires_at INTEGER);
    CREATE INDEX memories_scope ON memories(scope, project_id, chat_id);`,
+  // v11: project knowledge base — entries are project memories with a slug, synced with <project>/.flashmaster/knowledge/<slug>.md;
+  // knowledge_sync keeps each entry's hash at the last sync (the common base of the three-way sync)
+  `ALTER TABLE memories ADD COLUMN kb_slug TEXT;
+   CREATE UNIQUE INDEX memories_kb ON memories(project_id, kb_slug) WHERE kb_slug IS NOT NULL;
+   CREATE TABLE knowledge_sync(project_id TEXT NOT NULL, slug TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(project_id, slug));`,
 ];
 
 type Row = Record<string, any>;

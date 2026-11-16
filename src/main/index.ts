@@ -15,6 +15,7 @@ import { Orchestrator } from "./orchestrator";
 import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
 import { MemoryStore } from "./memory";
+import { KnowledgeBase, ensureFlashmasterIgnore } from "./knowledge";
 import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
@@ -91,6 +92,15 @@ db.applyRetention(settings.get().data.retentionDays);
 const memory = new MemoryStore(db);
 memory.shortTermDays = () => settings.get().memory.shortTermDays;
 log("info", `memory search index: ${memory.index}`);
+// Project knowledge base: project memories synced with <project>/.flashmaster/knowledge (git) both ways.
+const knowledge = new KnowledgeBase(db, memory, undefined, Date.now, () => emit({ type: "memory.changed" }));
+const syncAllKnowledge = () => {
+  if (!settings.get().memory.enabled || !settings.get().memory.knowledgeSync) return;
+  for (const p of db.listProjects()) {
+    if (!existsSync(p.path)) continue;
+    try { knowledge.sync(p.id); } catch (e) { log("warn", `knowledge sync ${p.name}: ${String(e)}`); }
+  }
+};
 const sweepMemory = () => { try { if (memory.sweep()) emit({ type: "memory.changed" }); } catch (e) { log("warn", `memory sweep: ${String(e)}`); } };
 
 let roles: RoleDef[] = [];
@@ -147,7 +157,7 @@ const mcp = new McpBootstrap({
 }, () => settings.get(), (servers) => emit({ type: "mcp.status", servers }));
 
 const orch = new Orchestrator({
-  db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory,
+  db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory, knowledge,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   extraRules: () => marketplace.instructions(),
   harnessEnv: (h) => harnessEnv(h),
@@ -178,6 +188,17 @@ setInterval(() => { try { cleanTasks(); } catch (e) { log("warn", `task cleanup:
 // Expired short-term memories, and memories of deleted chats / projects.
 sweepMemory();
 setInterval(sweepMemory, 3_600_000).unref();
+// Knowledge bases follow the repo: teammates' changes come in after a pull, agents' updates go out to the folder.
+syncAllKnowledge();
+{
+  let last = 0;
+  setInterval(() => {
+    const every = Math.max(1, settings.get().memory.knowledgeSyncMinutes || 2) * 60_000;
+    if (Date.now() - last < every) return;
+    last = Date.now();
+    syncAllKnowledge();
+  }, 30_000).unref();
+}
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {
@@ -326,7 +347,7 @@ const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
-  memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }) }));
+  memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge }));
 
 // ---------------- chat attachments ----------------
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
@@ -342,8 +363,7 @@ function attachDir(chatId: string): string {
   if (!project) return appAttachDir;
   const dir = join(project.path, ".flashmaster", "attachments");
   mkdirSync(dir, { recursive: true });
-  const ignore = join(project.path, ".flashmaster", ".gitignore");
-  if (!existsSync(ignore)) writeFileSync(ignore, "*\n");
+  ensureFlashmasterIgnore(project.path);
   return dir;
 }
 function storeAttachment(chatId: string, name: string, mime: string, write: (target: string) => void): Attachment {
@@ -696,6 +716,23 @@ const api: FlashApi = {
     }
     emit({ type: "memory.changed" });
     return m;
+  },
+  knowledgeStatus: async (projectId) => knowledge.status(projectId),
+  syncKnowledge: async (projectId) => knowledge.sync(projectId),
+  resolveKnowledgeConflict: async (projectId, slug, keep) => knowledge.resolve(projectId, slug, keep),
+  buildKnowledge: async (projectId, focus) => {
+    if (!db.getProject(projectId)) throw new Error("project not found");
+    // A dedicated chat, so the build shows its progress like any agent work without filling up the user's chats.
+    const title = "📚 Knowledge base";
+    const chat = db.listChats(projectId).find((c) => c.title === title && !c.archived)
+      ?? db.createChat({ projectId, title, kind: "project", agentRole: "flashmaster" });
+    await orch.sendUserMessage(chat.id, `/kb${focus?.trim() ? ` ${focus.trim()}` : ""}`, null, {});
+    return db.getChat(chat.id)!;
+  },
+  openKnowledgeFolder: async (projectId) => {
+    const dir = knowledge.folder(projectId);
+    mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
   },
   deleteMemory: async (id) => { memory.delete(Number(id)); emit({ type: "memory.changed" }); },
   promoteMemory: async (id, to) => {

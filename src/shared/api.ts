@@ -1,6 +1,6 @@
 import type {
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
-  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope,
+  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
 import type { ReviewComment } from "./review";
@@ -119,6 +119,16 @@ export interface FlashApi {
   deleteMemory(id: number): Promise<void>;
   /** Short-term → project / user, or project → user; it stops expiring. */
   promoteMemory(id: number, to: "project" | "user"): Promise<Memory>;
+  /** Project knowledge base (entries in the database and in <project>/.flashmaster/knowledge): checkpoint, commits since, conflicts. */
+  knowledgeStatus(projectId: string): Promise<KnowledgeStatus>;
+  /** Sync the knowledge base with the repo folder both ways now. */
+  syncKnowledge(projectId: string): Promise<KnowledgeSyncResult>;
+  /** Settle a conflicting entry by keeping the repo's or the app's version. */
+  resolveKnowledgeConflict(projectId: string, slug: string, keep: "repo" | "local"): Promise<KnowledgeSyncResult>;
+  /** Ask Flash Master to build or update the knowledge base (incremental from the checkpoint), in the project's "Knowledge base" chat. */
+  buildKnowledge(projectId: string, focus?: string): Promise<Chat>;
+  /** Show the knowledge folder in Explorer / Finder (created if missing). */
+  openKnowledgeFolder(projectId: string): Promise<void>;
 
   getArtifact(id: string): Promise<Artifact | null>;
   /** Files changed by agents in this chat, saved artifacts, and the project folder. */
@@ -224,7 +234,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "openChatWindow", "toggleReaction", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",

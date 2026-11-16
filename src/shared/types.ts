@@ -390,6 +390,48 @@ export interface Memory {
   accessCount: number;
   /** Short-term memories expire unless promoted; null = long-term. */
   expiresAt: number | null;
+  /** Project knowledge base entry: its slug (file `.flashmaster/knowledge/<slug>.md` in the project's repo); null = a plain memory. */
+  kbSlug?: string | null;
+}
+
+/** Why an entry of the project knowledge base could not be synced between the repo folder and the app's database. */
+export interface KnowledgeConflict {
+  slug: string;
+  /** both-changed: you and the repo (a teammate, a pull) changed it since the last sync; merge-markers: an unresolved git merge in the file; invalid: the file can't be read as an entry. */
+  reason: "both-changed" | "merge-markers" | "invalid";
+  detail?: string;
+}
+
+export interface KnowledgeSyncResult {
+  projectId: string;
+  at: number;
+  /** Repo → app (teammates' changes, a pull). */
+  imported: string[];
+  /** App → repo (agents' or your edits). */
+  exported: string[];
+  deletedLocal: string[];
+  deletedRepo: string[];
+  conflicts: KnowledgeConflict[];
+  entries: number;
+}
+
+export interface KnowledgeStatus {
+  projectId: string;
+  /** Absolute path of the knowledge folder in the project. */
+  folder: string;
+  entries: number;
+  /** The commit the knowledge base was last built or updated from (manifest.json in the folder). */
+  checkpoint: { commit: string; at: string | null } | null;
+  head: string | null;
+  /** Commits since the checkpoint (null: no checkpoint, not a git repo, or the checkpoint commit is not in this clone). */
+  behind: number | null;
+  /** Files changed since the checkpoint (outside .flashmaster), what an incremental update looks at. */
+  changedFiles: string[];
+  repo: boolean;
+  /** Knowledge files not committed yet (git status). */
+  uncommitted: number;
+  conflicts: KnowledgeConflict[];
+  lastSync: KnowledgeSyncResult | null;
 }
 
 export interface MemoryHit extends Memory {
