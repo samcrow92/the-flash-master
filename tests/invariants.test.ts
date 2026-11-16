@@ -92,14 +92,17 @@ describe("repo layout", () => {
 });
 
 describe("window chrome", () => {
-  // The bolt icon has gone missing twice: once from the taskbar (no AppUserModelID / .ico) and once from the window
+  // The bolt icon has gone missing three times: twice from the taskbar (no AppUserModelID / .ico, then no relaunch icon) and once from the window
   // when the native title bar was removed. Keep both in place.
   it("every BrowserWindow carries the app icon", () => {
     const src = read("src/main/index.ts");
     const windows = [...src.matchAll(/new BrowserWindow\(\{([\s\S]*?)webPreferences/g)].map((m) => m[1]!);
     expect(windows.length).toBeGreaterThan(2);
     expect(windows.filter((w) => !/icon: appIcon/.test(w)), "BrowserWindow without icon: appIcon").toEqual([]);
-    expect(src).toMatch(/setAppUserModelId\(/);
+    expect(src).toMatch(/setAppUserModelId\(winDetails\.appId\)/);
+    // Third regression: the window had the bolt but the taskbar button showed electron.exe's atom. Every window must
+    // carry the bolt as its relaunch icon too.
+    expect(src).toMatch(/app\.on\("browser-window-created", \(_e, w\) => w\.setAppDetails\(winDetails\)\)/);
   });
   it("the Windows .ico has the taskbar sizes, small frames as BMP, and ships with the app", () => {
     // An all-PNG .ico left the taskbar without the bolt; scripts/make-ico.py rebuilds it in this layout.

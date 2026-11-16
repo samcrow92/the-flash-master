@@ -34,7 +34,7 @@ import { makeLogger } from "./log";
 import { guardWebContents } from "./crash-guard";
 import { Marketplace, normaliseUrl } from "./marketplace";
 import { runSmoke } from "./smoke";
-import { iconCandidates } from "./app-icon";
+import { iconCandidates, windowsAppDetails } from "./app-icon";
 import { Terminals } from "./terminal";
 import { runTaskCleanup } from "./task-cleanup";
 
@@ -50,12 +50,11 @@ const dataDir = app.getPath("userData");
 mkdirSync(dataDir, { recursive: true });
 const resources = app.isPackaged ? process.resourcesPath : app.getAppPath();
 /**
- * The lightning-bolt app icon for every window. Windows takes the taskbar icon from the app ID's executable unless the app
- * sets its own ID; without it, running from source shows Electron's icon. The .ico carries all sizes (16–256 px, small
- * frames as BMP). It is loaded once as an image, falling back to the PNG when the .ico can't be read, so a bad path or file
- * shows in the log (and fails the smoke test) instead of silently leaving the taskbar without an icon.
+ * The lightning-bolt app icon for every window. The .ico carries all sizes (16–256 px, small frames as BMP). It is loaded
+ * once as an image, falling back to the PNG when the .ico can't be read, so a bad path or file shows in the log (and fails
+ * the smoke test) instead of silently leaving the taskbar without an icon. On Windows the taskbar button also needs the
+ * app ID and the per-window relaunch icon (windowsAppDetails explains why), set on every window as it is created.
  */
-if (process.platform === "win32") app.setAppUserModelId("com.theflashmaster.app");
 const appIcon = (() => {
   const files = iconCandidates({ platform: process.platform, dirs: [app.isPackaged ? process.resourcesPath : undefined, app.getAppPath(), join(here, "..", ".."), process.cwd()] });
   for (const file of files.filter((f) => existsSync(f))) {
@@ -64,6 +63,13 @@ const appIcon = (() => {
   }
   return Object.assign(nativeImage.createEmpty(), { file: "" });
 })();
+const winDetails = process.platform === "win32"
+  ? windowsAppDetails({ packaged: app.isPackaged, execPath: process.execPath, appPath: app.getAppPath(), iconFile: appIcon.file.endsWith(".ico") ? appIcon.file : "", portableExe: process.env.PORTABLE_EXECUTABLE_FILE })
+  : null;
+if (winDetails) {
+  app.setAppUserModelId(winDetails.appId);
+  app.on("browser-window-created", (_e, w) => w.setAppDetails(winDetails));
+}
 const userRolesDir = join(dataDir, "agents");
 mkdirSync(userRolesDir, { recursive: true });
 const userSkillsDir = join(dataDir, "skills"); // workflows installed from marketplaces
@@ -74,7 +80,7 @@ const settings = new SettingsStore(join(dataDir, "settings.json"), policyFile);
 const log = makeLogger(join(dataDir, "logs"), () => settings.get().advanced.logLevel);
 log("info", `starting TheFlashMaster ${app.getVersion()}`);
 if (appIcon.isEmpty()) log("error", "app icon not found or unreadable: windows and the taskbar fall back to the default icon");
-else log("info", `app icon: ${appIcon.file} (${appIcon.getSize().width} px)`);
+else log("info", `app icon: ${appIcon.file} (${appIcon.getSize().width} px)${winDetails ? `, taskbar id ${winDetails.appId}` : ""}`);
 const db = new Db(join(dataDir, "flashmaster.db"));
 log("info", `message search index: ${db.searchIndex}`);
 db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
