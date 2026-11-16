@@ -160,6 +160,14 @@ export interface Settings {
     caBundlePath: string;
     offline: boolean;
   };
+  /** Agent memory (Memory page): what agents save and get reminded of. */
+  memory: {
+    enabled: boolean; // memory tools for agents + reminders
+    autoInject: boolean; // put relevant memories in front of agents before they work
+    maxInjected: number; // memories per reminder
+    shortTermDays: number; // a chat's short-term memories expire after this many days unless promoted
+    captureResults: boolean; // save each specialist's result summary as a short-term memory of the chat
+  };
   data: {
     retentionDays: number; // 0 = keep forever
   };
@@ -229,6 +237,7 @@ export const DEFAULT_SETTINGS: Settings = {
     pluginPackage: "", autoSetup: true },
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
+  memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true },
   data: { retentionDays: 0 },
   advanced: { logLevel: "info", devTools: false, showMockHarness: true },
 };

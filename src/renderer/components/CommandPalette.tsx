@@ -6,7 +6,7 @@ import { TABS as SETTINGS_TABS } from "../views/SettingsView";
 import { useMenu } from "./ContextMenu";
 import { toggleTerminal } from "./TerminalPanel";
 import {
-  BookOpen, Bot, ClipboardList, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
+  BookOpen, Bot, Brain, ClipboardList, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
 } from "./icons";
 
 export const usePalette = create<{ open: boolean; setOpen(v: boolean): void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
@@ -134,6 +134,7 @@ function PaletteBox({ onClose }: { onClose: () => void }) {
       { id: "p:review", group: "Go to", label: "Review changes", keywords: "diff merge discard branch worktree", icon: <GitBranch size={16} />, run: go({ kind: "review" }) },
       { id: "p:dash", group: "Go to", label: "Dashboard", icon: <LayoutDashboard size={16} />, run: go({ kind: "dashboard" }) },
       { id: "p:tasks", group: "Go to", label: "Tasks", icon: <SquareKanban size={16} />, run: go({ kind: "tasks" }) },
+      { id: "p:memory", group: "Go to", label: "Memory", icon: <Brain size={16} />, run: go({ kind: "memory" }) },
       { id: "p:jazz", group: "Go to", label: "IBM Jazz", keywords: "requirements", icon: <ClipboardList size={16} />, run: go({ kind: "jazz" }) },
       { id: "p:market", group: "Go to", label: "Marketplace", keywords: "plugins skills", icon: <Puzzle size={16} />, run: go({ kind: "marketplace" }) },
       { id: "p:docs", group: "Go to", label: "Documentation", keywords: "help docs", icon: <BookOpen size={16} />, run: go({ kind: "docs" }) },

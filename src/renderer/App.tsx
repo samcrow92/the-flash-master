@@ -7,6 +7,7 @@ import { AgentsView } from "./views/AgentsView";
 import { ReviewView } from "./views/ReviewView";
 import { DashboardView } from "./views/DashboardView";
 import { TasksView } from "./views/TasksView";
+import { MemoryView } from "./views/MemoryView";
 import { JazzView } from "./views/JazzView";
 import { SettingsView } from "./views/SettingsView";
 import { FlowPage } from "./views/FlowView";
@@ -64,6 +65,7 @@ export function App() {
         {view.kind === "review" && <ReviewView agentId={view.agentId} />}
         {view.kind === "dashboard" && <DashboardView />}
         {view.kind === "tasks" && <TasksView />}
+        {view.kind === "memory" && <MemoryView />}
         {view.kind === "jazz" && <JazzView />}
         {view.kind === "settings" && <SettingsView initialTab={view.tab} />}
         {view.kind === "flow" && <FlowPage key={view.agentId} agentId={view.agentId} />}

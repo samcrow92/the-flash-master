@@ -53,6 +53,12 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE agents ADD COLUMN name TEXT;`,
   // v9: Copilot credits each agent used, counted from Copilot's own /usage after each turn
   `ALTER TABLE agents ADD COLUMN credits REAL NOT NULL DEFAULT 0;`,
+  // v10: agent memory (user / project / short-term session scopes); the FTS index is created by MemoryStore
+  `CREATE TABLE memories(id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, project_id TEXT, chat_id TEXT,
+     kind TEXT NOT NULL DEFAULT 'fact', content TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '', importance INTEGER NOT NULL DEFAULT 3,
+     pinned INTEGER NOT NULL DEFAULT 0, source_agent_id TEXT, source_role TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+     last_accessed_at INTEGER NOT NULL, access_count INTEGER NOT NULL DEFAULT 0, expires_at INTEGER);
+   CREATE INDEX memories_scope ON memories(scope, project_id, chat_id);`,
 ];
 
 type Row = Record<string, any>;

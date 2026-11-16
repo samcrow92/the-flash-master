@@ -1,6 +1,6 @@
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, useStore } from "../store";
-import {
+import { Brain,
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
   KeyRound, LifeBuoy, ListChecks, Package, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
   CornerDownRight, Leaf, Users, Lightbulb, FileText, FlaskConical, ScanSearch, ShieldCheck, Bug, Swords,
@@ -314,6 +314,7 @@ function Use() {
       <Item icon={<Package size={18} />} title="Artifacts & diffs">The <b>Artifacts</b> button in a chat lists every file the agents changed (with a side-by-side or unified diff), the project’s uncommitted git changes, saved reports and code blocks. Download single files, patches or everything as one .patch.</Item>
       <Item icon={<Compass size={18} />} title="Progress">The Progress panel shows each agent’s plan, delegations and approvals as a flow chart.</Item>
       <Item icon={<Bot size={18} />} title="Agents overview">See every running agent, pause, resume or stop it. Click an agent card, or <b>Chat</b> on a row, to open its chat.</Item>
+      <Item icon={<Brain size={18} />} title="Memory">Agents remember across chats: facts <b>about you</b> (every project), knowledge <b>shared by a project’s agents</b>, and <b>short-term</b> notes of one chat that expire unless promoted. Relevant memories are added to an agent’s prompt automatically. View, search, edit, pin or delete them on the <b>Memory</b> page (Settings → Agents → Memory).</Item>
       <Item icon={<SquareKanban size={18} />} title="Tasks">A simple board; “Run with agent” hands a task to its assigned specialist.</Item>
       <Item icon={<ClipboardList size={18} />} title="Jazz work items">Search, read and comment on IBM Jazz items and send them to an agent for analysis (Settings → Integrations).</Item>
       <Item icon={<ListChecks size={18} />} title="Requirements (DOORS Next)">IBM Jazz → Requirements: pick a project and module, read it by section, search it, select requirements and click <b>Analyse</b>. Agents search modules themselves with <code>rm_search</code> and read details with <code>rm_get</code>, so only relevant requirements enter their context.</Item>

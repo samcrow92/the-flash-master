@@ -73,6 +73,8 @@ export interface PromptParts {
   firstTurn: boolean;
   clean?: boolean;
   houseRules?: string;
+  /** "## Relevant memory" block for this turn (empty = none). */
+  memory?: string;
 }
 
 /**
@@ -90,6 +92,7 @@ export function buildTurnPrompt(p: PromptParts): string {
       out.push("## Recent turns\n" + p.recent.map((m) => `${m.author === "user" ? "User" : (m.role ?? "Agent")}: ${m.content}`).join("\n\n"));
     }
   }
+  if (p.memory?.trim()) out.push(p.memory.trim());
   for (const s of p.skills) out.push(`## Workflow: ${s.name} (activated on demand)\n${s.body}`);
   out.push(p.firstTurn ? `## Request\n${p.input}` : p.input);
   return out.join("\n\n");

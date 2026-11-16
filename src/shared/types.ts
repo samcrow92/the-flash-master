@@ -362,6 +362,43 @@ export interface JazzSearch {
 }
 
 // ---- Events pushed main → renderer ----
+/** Agent memory scopes: global user memory, memory shared by a project's agents, short-term memory of one chat. */
+export const MEMORY_SCOPES = ["user", "project", "session"] as const;
+export type MemoryScope = (typeof MEMORY_SCOPES)[number];
+export const MEMORY_KINDS = ["fact", "preference", "decision", "procedure", "episode"] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
+export interface Memory {
+  id: number;
+  scope: MemoryScope;
+  /** project scope: the project (null = the master chat's workspace); session scope: the chat's project. */
+  projectId: string | null;
+  /** session scope only: the chat it belongs to. */
+  chatId: string | null;
+  kind: MemoryKind;
+  content: string;
+  tags: string[];
+  /** 1 (trivia) … 5 (critical). */
+  importance: number;
+  /** Always shown to agents, whatever they work on. */
+  pinned: boolean;
+  sourceAgentId: string | null;
+  sourceRole: string | null;
+  createdAt: number;
+  updatedAt: number;
+  lastAccessedAt: number;
+  accessCount: number;
+  /** Short-term memories expire unless promoted; null = long-term. */
+  expiresAt: number | null;
+}
+
+export interface MemoryHit extends Memory {
+  /** Final rank: relevance blended with recency and importance (0…~1). */
+  score: number;
+  /** Fused lexical + fuzzy relevance to the query (0…1). */
+  relevance: number;
+}
+
 export type AppEvent =
   | { type: "message.created"; message: Message }
   | { type: "message.delta"; messageId: string; chatId: string; delta: string }
@@ -379,6 +416,7 @@ export type AppEvent =
   | { type: "models.updated"; models: HarnessModels }
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "artifacts.changed"; chatId: string }
+  | { type: "memory.changed" }
   | { type: "update.state"; state: UpdateState }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "window.state"; state: WindowState }
