@@ -265,6 +265,19 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       const toolOut = await js<string>(`document.querySelector('.tool-run.open .tool-run-pre')?.textContent ?? ""`);
       log("info", `smoke-tool-output: ${JSON.stringify(toolOut.slice(0, 60))}`);
       await shot(join(demo, "31-command-output.png"));
+      // A hung tool call: ■ on its row stops that call only; the agent is told and carries on.
+      await send("Flash the ECU and wait for the build server [hang]");
+      await sleep(1500);
+      const hung = await js<{ x: number; y: number } | null>(`(()=>{const r=[...document.querySelectorAll('.tool-run.stoppable')].pop();if(!r)return null;r.scrollIntoView({block:'center'});const b=r.getBoundingClientRect();return {x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}})()`);
+      if (hung) { win.webContents.sendInputEvent({ type: "mouseMove", x: hung.x, y: hung.y }); await sleep(300); }
+      await shot(join(demo, "31b-tool-call-stop.png"));
+      await js(`[...document.querySelectorAll('.tool-run-stop')].pop()?.click()`);
+      await sleep(3500);
+      const stoppedRows = await js<number>(`document.querySelectorAll('.tool-run.stopped').length`);
+      log("info", `smoke-tool-stop: stopped=${stoppedRows}`);
+      await js(`(()=>{const r=[...document.querySelectorAll('.tool-run.stopped')].pop();r?.scrollIntoView({block:'center'});r?.querySelector('.tool-run-head')?.click();})()`);
+      await sleep(400);
+      await shot(join(demo, "31c-tool-call-stopped.png"));
       // Updates (FLASH_UPDATE_URL points at a local feed in the demo)
       if (process.env.FLASH_UPDATE_URL) {
         await js(`window.flash.api.updateCheck().then(()=>{})`);

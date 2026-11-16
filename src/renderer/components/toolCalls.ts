@@ -14,10 +14,11 @@ export function toolArgsPreview(run: Pick<ToolRun, "title" | "input">, max = 140
 }
 
 /** Header for a group of calls: "Tool call" / "3 tool calls", plus how many are still running or failed. */
-export function toolCallsSummary(tools: Pick<ToolRun, "status">[]): { label: string; detail: string } {
+export function toolCallsSummary(tools: Pick<ToolRun, "status" | "stopped">[]): { label: string; detail: string } {
   const n = tools.length;
   const running = tools.filter((t) => t.status === "pending" || t.status === "in_progress").length;
-  const failed = tools.filter((t) => t.status === "failed").length;
-  const detail = [running && `${running} running`, failed && `${failed} failed`].filter(Boolean).join(" · ");
+  const stopped = tools.filter((t) => t.stopped).length;
+  const failed = tools.filter((t) => t.status === "failed" && !t.stopped).length;
+  const detail = [running && `${running} running`, stopped && `${stopped} stopped`, failed && `${failed} failed`].filter(Boolean).join(" · ");
   return { label: n === 1 ? "Tool call" : `${n} tool calls`, detail };
 }

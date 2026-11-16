@@ -75,7 +75,8 @@ interface Live {
   queue: { input: string; attachments: Attachment[]; msgIds?: string[] }[];
   /** Delivered steering/queued messages waiting to be seen: native = wait for the harness ack, else first model output. */
   awaiting: { id: string; native: boolean }[];
-  redirect: { input: string; attachments: Attachment[]; msgIds: string[] } | null; // steering by interrupt: next turn input
+  /** Steering by interrupt: next turn input. `toolStop` = the title of a hung tool call that was stopped (input says so as is). */
+  redirect: { input: string; attachments: Attachment[]; msgIds: string[]; toolStop?: string } | null;
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
   warnedTools?: boolean;
   /** The coordinator's `delegate` tool didn't load: it delegates by writing DELEGATE lines, which the app carries out. */
@@ -527,6 +528,67 @@ export class Orchestrator {
   }
 
   /**
+   * Stop one hung tool call of a running reply. ACP has no per-call cancel, so the turn is cancelled (the agent ends the
+   * call and keeps its session) and the next turn starts at once, telling the agent the call was stopped so it carries on
+   * without it. An agent that ignores the cancel for `toolStopGraceMs` is restarted and resumed, like after a crash.
+   */
+  async stopToolCall(messageId: string, toolId: string, reason: "user" | "timeout" = "user", now = Date.now()): Promise<void> {
+    const l = [...this.live.values()].find((x) => x.busy && x.currentMessageId === messageId);
+    if (!l) throw new Error("That reply has finished; there is nothing left to stop.");
+    const entry = [...(l.tools?.entries() ?? [])].find(([, r]) => r.id === toolId);
+    if (!entry) throw new Error("That tool call is not part of the running reply.");
+    const [key, run] = entry;
+    if (run.status === "completed" || run.status === "failed") return;
+    const mins = Math.max(1, Math.round((now - run.startedAt) / 60_000));
+    const why = reason === "timeout" ? `Stopped after ${mins} min (tool call timeout)` : "Stopped by you";
+    l.tools!.set(key, { ...run, status: "failed", stopped: why, endedAt: now });
+    this.flushTools(l, messageId, l.chatId);
+    const what = `"${run.title}"${run.input ? ` (${run.input.trim().slice(0, 300)})` : ""}`;
+    const input = (reason === "timeout"
+      ? `Your tool call ${what} ran for ${mins} min without finishing, so TheFlashMaster stopped it (tool call timeout).`
+      : `The user stopped your tool call ${what}: it hung, waiting without finishing.`)
+      + " Don't run it again the same way, it would hang again. Continue the task without it, or use a way that can't block"
+      + " (a timeout, running it in the background, no interactive prompts), and say briefly what you did instead.";
+    l.redirect = l.redirect && !l.redirect.toolStop
+      ? { input: `${input}\n\nThe user also says:\n${l.redirect.input}`, attachments: l.redirect.attachments, msgIds: l.redirect.msgIds, toolStop: run.title }
+      : { input: l.redirect ? `${l.redirect.input}\n\n${input}` : input, attachments: l.redirect?.attachments ?? [], msgIds: l.redirect?.msgIds ?? [], toolStop: run.title };
+    this.flow(l.agentId, { kind: "tool", label: `${why.toLowerCase()}: ${run.title}`.slice(0, 160), status: "stopped" });
+    this.setStatus(l, "running", `⏹ Stopped ${run.title} — continuing without it…`);
+    const session = l.session;
+    await session?.cancel();
+    // Some agents keep waiting on a hung tool even after a cancel: restart the CLI; the turn resumes its session.
+    const t = setTimeout(() => {
+      if (!l.busy || l.stopped || l.session !== session || !session?.alive || l.currentMessageId !== messageId || !l.redirect?.toolStop) return;
+      this.d.log?.("warn", `${l.role.name} ignored the cancel of a hung tool call; restarting its harness`);
+      this.flow(l.agentId, { kind: "status", label: "agent kept waiting — restarting it", status: "retry" });
+      session.close();
+    }, this.toolStopGraceMs);
+    (t as { unref?: () => void }).unref?.();
+  }
+
+  /** How long an agent may keep waiting on a stopped tool call before its CLI is restarted. */
+  toolStopGraceMs = 15_000;
+
+  /**
+   * Tool call timeout, called every 30 s by the app: a single tool call running longer than `agents.toolTimeoutMinutes`
+   * is stopped as if the user pressed ■ on it. Calls waiting for an approval or for a busy specialist are left alone.
+   */
+  checkToolTimeouts(now = Date.now()): string[] {
+    const mins = this.d.settings().agents.toolTimeoutMinutes;
+    if (!mins || mins <= 0) return [];
+    const stopped: string[] = [];
+    for (const l of this.live.values()) {
+      if (!l.busy || l.paused || l.stopped || l.awaitingApproval || l.redirect?.toolStop || !l.currentMessageId || !l.tools?.size) continue;
+      if ([...this.live.values()].some((c) => c.busy && c.key.startsWith(`${l.agentId}>`))) continue;
+      const run = [...l.tools.values()].find((r) => (r.status === "pending" || r.status === "in_progress") && r.kind !== "think" && now - r.startedAt >= mins * 60_000);
+      if (!run) continue;
+      stopped.push(run.id);
+      void this.stopToolCall(l.currentMessageId, run.id, "timeout", now).catch(() => undefined);
+    }
+    return stopped;
+  }
+
+  /**
    * Idle-specialist cleanup, called every minute by the app. A delegated specialist that finished and has been idle for
    * `agents.closeIdleAfterMinutes` is closed: its CLI process ends and it leaves the agent chips (it stays in the Agents
    * page history). Never closed: the coordinator or any agent the user opened directly, a working, paused or queued agent,
@@ -670,7 +732,7 @@ export class Orchestrator {
       this.markDelivered(l, [msgId], true);
       return;
     }
-    l.redirect = l.redirect ? { input: `${l.redirect.input}\n${text}`, attachments: [...l.redirect.attachments, ...attachments], msgIds: [...l.redirect.msgIds, msgId] }
+    l.redirect = l.redirect ? { ...l.redirect, input: `${l.redirect.input}\n${l.redirect.toolStop ? `\nThe user also says:\n` : ""}${text}`, attachments: [...l.redirect.attachments, ...attachments], msgIds: [...l.redirect.msgIds, msgId] }
       : { input: text, attachments, msgIds: [msgId] };
     this.flow(l.agentId, { kind: "status", label: `redirected: ${text.slice(0, 120)}`, status: "steer" });
     this.setStatus(l, "running", "Redirecting with your steering message…");
@@ -980,6 +1042,9 @@ export class Orchestrator {
       // and carry on instead of failing the turn. A second exit fails the turn and offers another harness.
       if (res.stopReason === "error" && !live.stopped && live.session && !live.session.alive) {
         const label = this.d.harnesses.get(live.harness).label;
+        // Restarted on purpose because it kept waiting on a stopped tool call: continue with that news, not "you crashed".
+        const toolStop = live.redirect?.toolStop ? live.redirect : null;
+        if (toolStop) live.redirect = null;
         const prev = live.session.sessionId;
         const crash = res.error ?? "exited";
         this.d.log?.("warn", `${label} exited during a turn (${live.role.name}): ${crash}`);
@@ -996,12 +1061,15 @@ export class Orchestrator {
           const resumed = !!prev && !!live.session.resumed && live.session.sessionId === prev;
           const wrote = text.slice(base).trim();
           // Resumed: the agent still has the conversation, so ask it to continue. New session: send history + request again.
-          const again = resumed
-            ? (wrote ? CRASH_CONTINUE : promptText)
-            : buildPrompt(true) + (wrote ? `\n\n${CRASH_CONTINUE}\n\nWhat you had written:\n${wrote.slice(-2000)}` : "");
+          const again = toolStop
+            ? (resumed ? toolStop.input : buildPrompt(true) + (wrote ? `\n\nWhat you had written:\n${wrote.slice(-2000)}` : "") + `\n\n${toolStop.input}`)
+            : resumed
+              ? (wrote ? CRASH_CONTINUE : promptText)
+              : buildPrompt(true) + (wrote ? `\n\n${CRASH_CONTINUE}\n\nWhat you had written:\n${wrote.slice(-2000)}` : "");
+          if (toolStop) { live.textBreak = true; live.sink?.(`_⏹ Stopped the hung tool call **${toolStop.toolStop}** and restarted ${label} — continuing without it._`); live.textBreak = true; }
           this.setStatus(live, "running", resumed ? `Resumed ${label} session — continuing…` : `Restarted ${label} — continuing…`);
-          res = await live.session.prompt(again, resumed && wrote ? [] : atts);
-          if (res.stopReason !== "error") {
+          res = await live.session.prompt(again, toolStop || (resumed && wrote) ? [] : atts);
+          if (res.stopReason !== "error" && !toolStop) {
             this.flow(live.agentId, { kind: "status", label: resumed ? `${label} restarted, session resumed` : `${label} restarted in a new session`, status: "retry" });
             this.system(t.chat.id, t.threadRoot, `↻ **${label}** exited unexpectedly during ${t.role.title}'s turn; TheFlashMaster restarted it`
               + (resumed ? " and resumed the session." : " in a new session with the chat history."));
@@ -1035,7 +1103,7 @@ export class Orchestrator {
       const redirected = !!live.redirect && !live.stopped;
       const status = live.stopped ? "stopped" : redirected ? "done" : res.stopReason === "error" ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
       finalStatus = redirected ? "redirected" : status;
-      if (redirected) text += "\n\n_↪ Redirected by your steering message._";
+      if (redirected) text += live.redirect!.toolStop ? `\n\n_⏹ Stopped the hung tool call **${live.redirect!.toolStop}** — continuing without it._` : "\n\n_↪ Redirected by your steering message._";
       else if (res.error) text += `\n\n⚠️ ${res.error}`;
       // Text-mode TOOL lines show in the reply's tool-call panel; don't repeat them in the prose.
       const shown = live.textTools && status === "done" && !redirected && !switchedToText && !live.queue.length
@@ -1109,7 +1177,7 @@ export class Orchestrator {
     if (live.redirect && !live.stopped) {
       const r = live.redirect;
       live.redirect = null;
-      void this.turn({ ...t, retry: false, input: `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
+      void this.turn({ ...t, retry: false, input: r.toolStop ? r.input : `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
         attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false, textRound: 0 });
       return;
     }
@@ -1423,13 +1491,13 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
       key = open?.[0] ?? `${e.title}#${tools.size}`;
     }
     const prev = tools.get(key);
-    const status = (["pending", "in_progress", "completed", "failed"].includes(e.status) ? e.status : prev?.status ?? "in_progress") as ToolRun["status"];
+    const status = (prev?.stopped ? "failed" : ["pending", "in_progress", "completed", "failed"].includes(e.status) ? e.status : prev?.status ?? "in_progress") as ToolRun["status"];
     const capped = e.output !== undefined ? capOutput(e.output) : null;
     const run: ToolRun = {
       id: prev?.id ?? `${msgId}:${tools.size}`, title: e.title || prev?.title || "tool", kind: (e.kind && e.kind !== "other" ? e.kind : prev?.kind) || e.kind || "other", status,
       input: e.input ?? prev?.input, output: capped ? capped.text : prev?.output, truncated: capped ? capped.truncated : prev?.truncated,
       startedAt: prev?.startedAt ?? Date.now(), endedAt: status === "completed" || status === "failed" ? prev?.endedAt ?? Date.now() : undefined,
-      at: prev ? prev.at : this.liveText.get(msgId)?.length ?? 0,
+      at: prev ? prev.at : this.liveText.get(msgId)?.length ?? 0, stopped: prev?.stopped,
     };
     if (tools.size >= MAX_TOOLS_PER_REPLY && !prev) return false;
     tools.set(key, run);

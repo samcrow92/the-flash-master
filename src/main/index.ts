@@ -158,7 +158,7 @@ const orch = new Orchestrator({
 // Agents that were working when the app last closed: tell their chats they can be resumed.
 orch.announceInterrupted(interruptedAtStart);
 // Stuck-agent watchdog: warns (once per silence) about working agents that have sent nothing for a while.
-setInterval(() => orch.checkStuck(), 30_000).unref();
+setInterval(() => { orch.checkStuck(); orch.checkToolTimeouts(); }, 30_000).unref();
 // Closes delegated specialists that finished and stayed idle (Settings → Agents); work waiting for review is kept.
 setInterval(() => { void orch.closeIdle(); }, 60_000).unref();
 // Deletes finished, stopped and stale tasks (Settings → Agents → Tasks); Review tasks and tasks with a working agent stay.
@@ -616,6 +616,7 @@ const api: FlashApi = {
   agentWorkFileDiff: async (id, path) => orch.workFileDiff(id, String(path)),
   requestAgentFixes: async (id, comments, note) => orch.requestWorkFixes(id, Array.isArray(comments) ? comments : [], typeof note === "string" ? note : ""),
   stopAgent: async (id) => orch.stop(id),
+  stopToolCall: async (messageId, toolId) => orch.stopToolCall(String(messageId), String(toolId)),
   stopAll: async () => orch.stopAll(),
   getAgentFlow: async (agentId) => {
     const agent = db.getAgent(agentId);

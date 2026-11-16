@@ -7,12 +7,12 @@ import { ToolRuns } from "./ToolRuns";
 import { Brain, ChevronDown, ChevronUp } from "./icons";
 
 /** An agent reply in the order it happened: paragraphs, the commands run between them, and the model's reasoning. */
-export function ReplyBody({ content, tools }: { content: string; tools?: ToolRun[] }) {
+export function ReplyBody({ content, tools, messageId, live }: { content: string; tools?: ToolRun[]; messageId?: string; live?: boolean }) {
   const segs = replySegments(content, tools);
   return (
     <div className="reply-body">
       {segs.map((s, i) => s.kind === "text" ? <Markdown key={`t${i}`} text={s.text} />
-        : s.kind === "tools" ? <ToolRuns key={s.tools[0]!.id} tools={s.tools} />
+        : s.kind === "tools" ? <ToolRuns key={s.tools[0]!.id} tools={s.tools} messageId={messageId} live={live} />
         : <Thought key={s.run.id} run={s.run} />)}
     </div>
   );
