@@ -316,7 +316,8 @@ const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => se
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
-  onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }) }));
+  onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
+  deleteTask: (taskId) => emit({ type: "task.deleted", taskId }) }));
 
 // ---------------- chat attachments ----------------
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
