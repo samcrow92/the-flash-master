@@ -119,6 +119,14 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await click(label, ".sidebar button");
         await sleep(1200);
         await shot(join(demo, `${name}.png`));
+        if (name === "5-tasks") {
+          // Right-click menu on a task card (move, run, delete).
+          await js(`(()=>{const c=document.querySelector('.task-card');const r=c.getBoundingClientRect();c.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.left+r.width/2,clientY:r.top+r.height/2}))})()`);
+          await sleep(400);
+          await shot(join(demo, "5b-tasks-menu.png"));
+          await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
+          await sleep(200);
+        }
       }
       const mpUrl = process.env.FLASH_SMOKE_MARKET_URL;
       if (mpUrl) {

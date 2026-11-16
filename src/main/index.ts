@@ -36,6 +36,7 @@ import { Marketplace, normaliseUrl } from "./marketplace";
 import { runSmoke } from "./smoke";
 import { iconCandidates } from "./app-icon";
 import { Terminals } from "./terminal";
+import { runTaskCleanup } from "./task-cleanup";
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName("TheFlashMaster");
@@ -160,6 +161,9 @@ orch.announceInterrupted(interruptedAtStart);
 setInterval(() => orch.checkStuck(), 30_000).unref();
 // Closes delegated specialists that finished and stayed idle (Settings → Agents); work waiting for review is kept.
 setInterval(() => { void orch.closeIdle(); }, 60_000).unref();
+// Deletes finished, stopped and stale tasks (Settings → Agents → Tasks); Review tasks and tasks with a working agent stay.
+const cleanTasks = () => runTaskCleanup(db, settings.get().tasks, (taskId) => emit({ type: "task.deleted", taskId }));
+setInterval(() => { try { cleanTasks(); } catch (e) { log("warn", `task cleanup: ${String(e)}`); } }, 60_000).unref();
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {
@@ -655,6 +659,7 @@ const api: FlashApi = {
   createTask: async (i) => { const t = db.createTask(i); emit({ type: "task.updated", task: t }); return t; },
   updateTask: async (id, patch) => { const t = db.updateTask(id, patch); emit({ type: "task.updated", task: t }); return t; },
   deleteTask: async (id) => { db.deleteTask(id); emit({ type: "task.deleted", taskId: id }); },
+  cleanupTasks: async () => cleanTasks().length,
   runTask: async (id, role) => {
     const t = db.getTask(id);
     if (!t) throw new Error("task not found");
