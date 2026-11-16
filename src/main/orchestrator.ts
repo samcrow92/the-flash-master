@@ -27,6 +27,17 @@ import {
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
+/** Outcome of closing one agent through the close_agent / close_idle_agents tools. */
+export interface CloseResult {
+  agentId: string;
+  name: string;
+  closed: boolean;
+  /** Why it was kept. */
+  reason?: string;
+  /** What happened to its worktree, when it had one. */
+  worktree?: string;
+}
+
 export interface OrchestratorDeps {
   /** Git runner for agent worktrees (tests inject a fake). */
   git?: Git;
@@ -633,6 +644,96 @@ export class Orchestrator {
       }
     }
     return closed;
+  }
+
+  /**
+   * Close one agent on behalf of another (the `close_agent` tool, used by Flash Master to clean up). Only specialists of
+   * the caller's project, never the caller itself, one of its parents, or a chat's own agent. Without `force`, an agent
+   * that is working, paused, queued, waiting for approval or has working specialists stays, and so does one whose
+   * worktree holds uncommitted changes or unmerged commits. With `force`, a working agent is stopped; a worktree with
+   * work in it is always kept (only a clean, merged one is removed), so closing never throws work away.
+   */
+  async closeAgent(callerId: string, agentId: string, opts: { force?: boolean } = {}): Promise<CloseResult> {
+    const a = this.d.db.getAgent(agentId);
+    const caller = this.d.db.getAgent(callerId);
+    if (!a || !caller || a.projectId !== caller.projectId) throw new Error("unknown agentId: use an id from list_agents (this project only)");
+    const label = agentLabel(a, this.d.roles().find((r) => r.name === a.role)?.title ?? a.role);
+    const keep = (reason: string): CloseResult => ({ agentId, name: label, closed: false, reason });
+    if (agentId === callerId) return keep("that is you");
+    for (let p = caller.parentAgentId, n = 0; p && n < 20; p = this.d.db.getAgent(p)?.parentAgentId ?? null, n++)
+      if (p === agentId) return keep("it is one of your parent agents");
+    if (!a.parentAgentId) return keep("it is a chat's own agent; the user closes it");
+    // A specialist may only close the specialists it started (directly or below them); a chat's agent any in the project.
+    if (caller.parentAgentId) {
+      let p: string | null = a.parentAgentId;
+      for (let n = 0; p && p !== callerId && n < 20; n++) p = this.d.db.getAgent(p)?.parentAgentId ?? null;
+      if (p !== callerId) return keep("you did not start it");
+    }
+    const l = this.byAgent.get(agentId);
+    const active = ["idle", "running", "paused", "interrupted"].includes(a.status) && a.endedAt == null;
+    if (!l && !active) return keep(`already ${a.status}`);
+    if (l?.closing) return keep("it is being closed already");
+    const force = !!opts.force;
+    if (!force && l) {
+      if (l.busy) return keep("it is working (pass force: true only if the user asked to stop it)");
+      if (l.paused) return keep("it is paused");
+      if (l.awaitingApproval) return keep("it is waiting for the user's approval");
+      if (l.queue.length || l.redirect) return keep("it has messages queued");
+      if ([...this.live.values()].some((c) => c !== l && c.key.startsWith(`${agentId}>`) && (c.busy || c.paused || c.queue.length)))
+        return keep("its own specialists are still working");
+    }
+    if (!force && !l && a.status === "running") return keep("it is working");
+    if (l) l.closing = true;
+    try {
+      let worktree: CloseResult["worktree"];
+      const w = l?.worktree && l.branch ? { dir: l.worktree, branch: l.branch } : a.worktree && a.branch ? { dir: a.worktree, branch: a.branch } : null;
+      const repo = a.projectId ? this.d.db.getProject(a.projectId)?.path ?? null : null;
+      if (w && repo) {
+        const st = await worktreeState(repo, w.dir, w.branch, this.git);
+        if (st.dirty.length || st.unmerged) {
+          const what = [st.unmerged ? `${st.unmerged} unmerged commit(s)` : "", st.dirty.length ? `${st.dirty.length} uncommitted change(s)` : ""].filter(Boolean).join(" and ");
+          if (!force) return keep(`its worktree (branch ${w.branch}) holds ${what} waiting for review; merge or discard it first`);
+          worktree = `kept: branch ${w.branch} holds ${what}`;
+        } else {
+          const r = await removeWorktree(repo, w.dir, w.branch, false, this.git);
+          if (r.ok) { this.d.db.setAgentWorktree(agentId, null, null); worktree = "removed (clean)"; } else worktree = `kept: ${r.message}`;
+        }
+      }
+      // Re-check: a message may have reached it while git ran.
+      if (l && !force && (l.busy || l.queue.length || l.stopped || this.byAgent.get(agentId) !== l)) return keep("it got new work meanwhile");
+      const by = this.byAgent.get(callerId);
+      const why = `Closed by ${by ? agentLabel(by, by.role.title) : caller.role}`;
+      if (l) {
+        l.queue = [];
+        l.stopped = true;
+        if (l.busy) await l.session?.cancel();
+        l.session?.close();
+        l.session = null;
+        this.live.delete(l.key);
+        this.byAgent.delete(agentId);
+        this.finishWaiters(l, `closed by ${caller.role}`);
+        this.flow(agentId, { kind: "status", label: why.toLowerCase(), status: "closed" });
+      }
+      this.emitAgent(this.d.db.updateAgent(agentId, { status: "done", ended: true, lastActivity: why }));
+      return { agentId, name: label, closed: true, ...(worktree ? { worktree } : {}) };
+    } finally {
+      if (l) l.closing = false;
+    }
+  }
+
+  /** Close every specialist of the caller's project that can be closed safely now (the `close_idle_agents` tool). */
+  async closeIdleAgents(callerId: string): Promise<{ closed: CloseResult[]; kept: CloseResult[] }> {
+    const projectId = this.agentProject(callerId);
+    const ids = new Set(this.d.db.listAgents({ projectId, activeOnly: true }).filter((x) => x.parentAgentId).map((x) => x.id));
+    for (const l of this.live.values()) if (this.d.db.getAgent(l.agentId)?.projectId === projectId && l.agentId !== callerId) ids.add(l.agentId);
+    const closed: CloseResult[] = [], kept: CloseResult[] = [];
+    for (const id of ids) {
+      if (id === callerId) continue;
+      const r = await this.closeAgent(callerId, id).catch((e): CloseResult => ({ agentId: id, name: id, closed: false, reason: String(e?.message ?? e) }));
+      (r.closed ? closed : kept).push(r);
+    }
+    // A chat's own agents and the caller's parents are not candidates; leave them out of the report.
+    return { closed, kept: kept.filter((k) => !/chat's own agent|parent agents|that is you/.test(k.reason ?? "")) };
   }
 
   private noteOutput(l: Live): void {

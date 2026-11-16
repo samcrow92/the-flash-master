@@ -12,7 +12,7 @@ const s = (description: string) => ({ type: "string", description });
 
 /** Tools exposed to agents through the flashmaster-core and jazz MCP servers. Results are kept compact on purpose. */
 export function buildTools(d: {
-  db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void;
+  db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
 }): ToolDef[] {
   const rm = () => {
@@ -69,7 +69,24 @@ export function buildTools(d: {
       set: "core", name: "list_agents", description: "List agents of the current project with status.",
       inputSchema: obj({ activeOnly: { type: "boolean" } }),
       handler: async (a, c) => d.db.listAgents({ projectId: d.orch.agentProject(c.agentId), activeOnly: a.activeOnly ?? true })
-        .map((x) => ({ id: x.id, role: x.role, status: x.status, activity: x.lastActivity })),
+        .map((x) => ({ id: x.id, name: x.name, role: x.role, status: x.status, activity: x.lastActivity, specialist: !!x.parentAgentId,
+          ...(x.branch ? { branch: x.branch } : {}) })),
+    },
+    {
+      set: "core", name: "close_agent",
+      description: "Close (stop) a specialist agent of this project: its CLI session ends and it leaves the agent chips (history stays). "
+        + "Refused for an agent that is working, paused, waiting for approval or has queued messages, and for one whose worktree holds "
+        + "uncommitted or unmerged work (it waits for review). force: true stops a working agent too; only use it when the user asked. "
+        + "A worktree with work in it is always kept. Returns closed: true, or closed: false with the reason it was kept.",
+      inputSchema: obj({ agentId: s("agent id from list_agents or delegate"), force: { type: "boolean", description: "stop it even if it is working (only when the user asked)" } }, ["agentId"]),
+      handler: async (a, c) => d.orch.closeAgent(c.agentId, String(a.agentId ?? ""), { force: a.force === true }),
+    },
+    {
+      set: "core", name: "close_idle_agents",
+      description: "Clean up: close every specialist of this project that is idle and safe to close. Working agents and agents with "
+        + "unmerged or uncommitted worktree work are kept. Returns the closed agents and the kept ones with the reason.",
+      inputSchema: obj({}),
+      handler: async (_a, c) => d.orch.closeIdleAgents(c.agentId),
     },
     {
       set: "core", name: "report_progress",
@@ -99,6 +116,23 @@ export function buildTools(d: {
         const t = d.db.updateTask(id, patch);
         d.emitTask(t);
         return brief(t);
+      },
+    },
+    {
+      set: "core", name: "delete_task",
+      description: "Delete a task of this project's task board. Refused for a task in review or one whose agent is still active, unless force: true (only when the user asked).",
+      inputSchema: obj({ id: s("task id"), force: { type: "boolean", description: "delete even if in review or its agent is active" } }, ["id"]),
+      handler: async (a, c) => {
+        const t = d.db.getTask(String(a.id ?? ""));
+        if (!t || t.projectId !== d.orch.agentProject(c.agentId)) throw new Error("unknown task id: use an id from list_tasks (this project only)");
+        if (a.force !== true) {
+          if (t.status === "review") return { id: t.id, deleted: false, reason: "it is in review (work waiting for the user)" };
+          const ag = t.agentId ? d.db.getAgent(t.agentId) : null;
+          if (ag && ag.endedAt == null && ["idle", "running", "paused", "interrupted"].includes(ag.status)) return { id: t.id, deleted: false, reason: "its agent is still active; close the agent first" };
+        }
+        d.db.deleteTask(t.id);
+        d.deleteTask?.(t.id);
+        return { id: t.id, deleted: true };
       },
     },
     {
