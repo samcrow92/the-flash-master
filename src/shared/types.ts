@@ -100,6 +100,8 @@ export interface ToolRun {
   endedAt?: number;
   /** Where in the reply text the call started (characters), so the chat shows it between the paragraphs around it. */
   at?: number;
+  /** Set when the call was stopped while it hung (by the user or the tool call timeout): why, shown on the row. */
+  stopped?: string;
 }
 
 export type StepStatus = "pending" | "in_progress" | "completed" | "failed";

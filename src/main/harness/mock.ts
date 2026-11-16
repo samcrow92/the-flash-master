@@ -62,6 +62,16 @@ export class MockSession implements HarnessSession {
     this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "completed", kind: "execute",
       output: "src/brake_light.c\nsrc/brake_light.h\nsrc/can_signals.c\nsrc/can_signals.h\ntests/test_brake_light.c" });
     this.o.onEvent({ type: "plan", entries: plan(1) });
+    // "[hang]" in a request starts a tool call that never finishes until the turn is cancelled, to try (and test)
+    // stopping a hung tool call; "[hang-hard]" ignores the cancel too, like an agent stuck on its own tool.
+    const hard = request.includes("[hang-hard]");
+    const told = /stopped (?:your tool call|it \(tool call timeout\))/.test(text); // after a stop, don't repeat the hung call
+    if (!told && (hard || request.includes("[hang]"))) {
+      this.o.onEvent({ type: "tool", id: `wait-${this.turn}`, title: "Waiting for the build server", status: "in_progress", kind: "execute", input: "make flash --wait" });
+      while (!this.closed && (hard || !this.cancelled)) await new Promise((r) => setTimeout(r, 10));
+      if (this.closed) return { stopReason: "error", error: "harness exited (null)." };
+      return { stopReason: "cancelled", usage: { tokensIn: estimateTokens(text), tokensOut: 0 } };
+    }
     const words = reply.split(/(?<=\s)/);
     let k = 0;
     for (const word of words) {

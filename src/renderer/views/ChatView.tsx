@@ -261,7 +261,7 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
         <div className="msg-content">
           {(m.steer || m.delivery) && <DeliveryBadge steer={m.steer} state={m.delivery} />}
           {m.author === "user" ? (editing ? <EditBox m={m} onDone={() => setEditing(false)} /> : <div className="plain">{m.content}</div>)
-            : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} />
+            : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} messageId={m.id} live={m.status === "streaming"} />
             : <>{!!m.tools?.length && <ToolRuns tools={m.tools} />}<Markdown text={m.content} /></>}
           {m.attachments.length > 0 && (
             <div className="msg-atts">

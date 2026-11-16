@@ -21,6 +21,9 @@ describe("tool calls stand apart from reply prose", () => {
     expect(toolCallsSummary([{ status: "completed" }])).toEqual({ label: "Tool call", detail: "" });
     expect(toolCallsSummary([{ status: "completed" }, { status: "in_progress" }, { status: "failed" }]))
       .toEqual({ label: "3 tool calls", detail: "1 running · 1 failed" });
+    // A call the user (or the timeout) stopped counts as stopped, not failed.
+    expect(toolCallsSummary([{ status: "failed", stopped: "Stopped by you" }, { status: "failed" }]))
+      .toEqual({ label: "2 tool calls", detail: "1 stopped · 1 failed" });
   });
   it("renders as a labelled, tinted section, not as another line of text", () => {
     const tsx = readFileSync("src/renderer/components/ToolRuns.tsx", "utf8");

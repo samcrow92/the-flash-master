@@ -232,3 +232,13 @@ describe("quiet UI", () => {
     expect(css).toMatch(/^\.ctl > span:first-child:not\(\.model-input-wrap\) \{/m);
   });
 });
+
+describe("hung tool calls", () => {
+  // Running tool calls in a streaming reply offer ■, which stops that call only (not the whole agent).
+  it("the chat passes a reply's id and live state down to its tool calls, and the watchdog checks timeouts", () => {
+    expect(read("src/renderer/views/ChatView.tsx")).toMatch(/<ReplyBody [^>]*messageId=\{m\.id\} live=\{m\.status === "streaming"\}/);
+    expect(read("src/renderer/components/ReplyBody.tsx")).toMatch(/<ToolRuns [^>]*messageId=\{messageId\} live=\{live\}/);
+    expect(read("src/renderer/components/ToolRuns.tsx")).toContain("api().stopToolCall(");
+    expect(read("src/main/index.ts")).toMatch(/setInterval\(\(\) => \{[^}]*orch\.checkToolTimeouts\(\)/);
+  });
+});
