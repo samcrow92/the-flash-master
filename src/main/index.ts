@@ -11,6 +11,7 @@ import type { AppEvent, RoleDef, SkillDef, WindowState } from "@shared/types";
 import { Db } from "./db";
 import { SettingsStore } from "./settings-store";
 import { HarnessRegistry } from "./harness/registry";
+import { DuoAdapter } from "./harness/duo";
 import { Orchestrator } from "./orchestrator";
 import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
@@ -145,7 +146,7 @@ const emit = (e: AppEvent) => {
   }
 };
 
-const harnesses = new HarnessRegistry();
+const harnesses = new HarnessRegistry([new DuoAdapter(() => settings.get().duo)]);
 const bridge = new Bridge();
 const mainDir = join(app.getAppPath(), "out", "main").replace("app.asar", "app.asar.unpacked");
 const mcp = new McpBootstrap({

@@ -267,6 +267,7 @@ function Harnesses() {
         <tr><td>GitLab Duo</td><td><code>duo run</code> (headless)</td><td>Yes</td><td>Partial</td></tr>
       </tbody>
     </table>
+    <p className="muted small">GitLab Duo needs a GitLab project as its context. In GitHub repos and plain folders, set the project it should use in <button className="link" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}>Settings → Harnesses → GitLab Duo</button>; Flash Master passes it with Duo’s own <code>GITLAB_PROJECT_PATH</code> and leaves your git remotes alone.</p>
 
     <h3>Cursor Agent</h3>
     <Status id="cursor" />

@@ -32,6 +32,12 @@ export interface Settings {
   profile: { name: string; avatar: string; hue: number };
   harnesses: Record<HarnessId, HarnessSettings>;
   modes: Record<DriveMode, ModeProfile>;
+  /** GitLab Duo outside GitLab projects: the project Duo uses as its context when the folder has no GitLab remote. */
+  duo: {
+    project: string; // "group/project" or its full URL; empty = only Duo's own detection (git remote, then your default Duo namespace)
+    instanceUrl: string; // empty = the instance Duo is signed in to (or the one in a full project URL)
+    always: boolean; // use the project even in folders that are GitLab projects themselves
+  };
   chat: {
     maxAttachmentMB: number;
     defaultSendWhileBusy: "queue" | "steer"; // what Enter does while an agent is still working
@@ -200,6 +206,7 @@ export const DEFAULT_SETTINGS: Settings = {
     comfort: { harness: "", model: "sol", thinking: "low" },
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
+  duo: { project: "", instanceUrl: "", always: false },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
