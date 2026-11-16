@@ -1,6 +1,8 @@
 // Fake `pi --mode rpc` for tests (protocol per Pi docs/rpc.md).
 let buf = "";
-const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+// A prompt containing QUICK answers with its response and the whole run in one write (one stdout chunk), like a fast Pi reply.
+let burst = null;
+const out = (o) => { if (burst) burst.push(JSON.stringify(o) + "\n"); else process.stdout.write(JSON.stringify(o) + "\n"); };
 const args = process.argv.slice(2);
 let aborted = false;
 let steered = null;
@@ -23,6 +25,7 @@ process.stdin.on("data", async (d) => {
     } else if (cmd.type === "prompt") {
       processing = !!linger;
       aborted = false;
+      if (cmd.message.includes("QUICK")) burst = [];
       out({ id: cmd.id, type: "response", command: "prompt", success: true });
       out({ type: "agent_start" });
       out({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "src/a.c" } });
@@ -32,13 +35,17 @@ process.stdin.on("data", async (d) => {
       for (const w of words) {
         if (aborted) break;
         out({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: w } });
-        await new Promise((r) => setTimeout(r, cmd.message.includes("SLOW") ? 120 : 1));
+        if (!burst) await new Promise((r) => setTimeout(r, cmd.message.includes("SLOW") ? 120 : 1));
       }
-      if (steered) out({ type: "turn_start" });
-      if (steered) out({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: ` [steered: ${steered}]` } });
-      steered = null;
+      // LATESTEER: the run ends before it takes a steering message; real Pi keeps it and injects it at the start of the next run.
+      if (steered && !cmd.message.includes("LATESTEER")) {
+        out({ type: "turn_start" });
+        out({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: ` [steered: ${steered}]` } });
+        steered = null;
+      }
       out({ type: "message_end", message: { role: "assistant", stopReason: aborted ? "aborted" : "stop", usage: { input: 200, output: 40, cacheRead: 50, cacheWrite: 0 } } });
       out({ type: "agent_end", messages: [] });
+      if (burst) { process.stdout.write(burst.join("")); burst = null; }
       if (linger) setTimeout(() => { processing = false; }, linger);
     } else out({ id: cmd.id, type: "response", command: cmd.type, success: false, error: "unknown" });
   }
