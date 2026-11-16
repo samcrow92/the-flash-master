@@ -202,6 +202,12 @@ function Agents(f: F) {
     <Row label="Create a task per delegation" hint="Shows delegated work on the task board."><Bool f={f} path="agents.autoTaskFromDelegation" /></Row>
     <Row label="Delete finished tasks after (minutes)" hint="Tasks that are done, or whose agent stopped, failed or ended, are deleted from the task board this long after they finished. Tasks in Review and tasks with a working agent are kept. Right-click a task to delete it right away. 0 = never."><Num f={f} path="tasks.deleteFinishedAfterMinutes" min={0} /></Row>
     <Row label="Delete stale tasks after (days)" hint="Open tasks (to do, in progress, blocked) that nobody touched for this many days are deleted. Tasks with a working agent are kept. 0 = never."><Num f={f} path="tasks.deleteStaleAfterDays" min={0} /></Row>
+    <h4>Memory</h4>
+    <Row label="Agent memory" hint="Agents can save, search, update and delete memories: about you (every project), shared by a project's agents, and short-term per chat. Manage them on the Memory page."><Bool f={f} path="memory.enabled" /></Row>
+    <Row label="Remind agents of relevant memories" hint="Before an agent works, the pinned memories and the ones most relevant to the request are added to its prompt; later turns only add new relevant ones."><Bool f={f} path="memory.autoInject" /></Row>
+    <Row label="Memories per reminder"><Num f={f} path="memory.maxInjected" min={0} /></Row>
+    <Row label="Short-term memories expire after (days)" hint="A chat's short-term memories are deleted after this long unless an agent or you promote them to a long-term scope. Using one again restarts its clock."><Num f={f} path="memory.shortTermDays" min={1} /></Row>
+    <Row label="Remember specialists' results" hint="Each delegated specialist's result summary is saved as a short-term memory of the chat, so the other agents there know what was done."><Bool f={f} path="memory.captureResults" /></Row>
     <InstructionSettings f={f} />
     <div className="row between">
       <h4>Agents</h4>

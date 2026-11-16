@@ -14,6 +14,7 @@ import { HarnessRegistry } from "./harness/registry";
 import { Orchestrator } from "./orchestrator";
 import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
+import { MemoryStore } from "./memory";
 import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
@@ -87,6 +88,10 @@ db.defaultAutopilot = settings.get().general.autopilotDefault !== false;
 settings.onChange((st) => { db.defaultAutopilot = st.general.autopilotDefault !== false; });
 const interruptedAtStart = db.interruptOrphans();
 db.applyRetention(settings.get().data.retentionDays);
+const memory = new MemoryStore(db);
+memory.shortTermDays = () => settings.get().memory.shortTermDays;
+log("info", `memory search index: ${memory.index}`);
+const sweepMemory = () => { try { if (memory.sweep()) emit({ type: "memory.changed" }); } catch (e) { log("warn", `memory sweep: ${String(e)}`); } };
 
 let roles: RoleDef[] = [];
 let skills: SkillDef[] = [];
@@ -142,7 +147,7 @@ const mcp = new McpBootstrap({
 }, () => settings.get(), (servers) => emit({ type: "mcp.status", servers }));
 
 const orch = new Orchestrator({
-  db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit,
+  db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   extraRules: () => marketplace.instructions(),
   harnessEnv: (h) => harnessEnv(h),
@@ -170,6 +175,9 @@ setInterval(() => { void orch.closeIdle(); }, 60_000).unref();
 // Deletes finished, stopped and stale tasks (Settings → Agents → Tasks); Review tasks and tasks with a working agent stay.
 const cleanTasks = () => runTaskCleanup(db, settings.get().tasks, (taskId) => emit({ type: "task.deleted", taskId }));
 setInterval(() => { try { cleanTasks(); } catch (e) { log("warn", `task cleanup: ${String(e)}`); } }, 60_000).unref();
+// Expired short-term memories, and memories of deleted chats / projects.
+sweepMemory();
+setInterval(sweepMemory, 3_600_000).unref();
 
 // ---------------- git helpers (read-only, for the diff viewer) ----------------
 const chatProject = (chatId: string): string | null => {
@@ -317,7 +325,8 @@ const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not 
 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
-  deleteTask: (taskId) => emit({ type: "task.deleted", taskId }) }));
+  deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
+  memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }) }));
 
 // ---------------- chat attachments ----------------
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
@@ -670,6 +679,31 @@ const api: FlashApi = {
   updateTask: async (id, patch) => { const t = db.updateTask(id, patch); emit({ type: "task.updated", task: t }); return t; },
   deleteTask: async (id) => { db.deleteTask(id); emit({ type: "task.deleted", taskId: id }); },
   cleanupTasks: async () => cleanTasks().length,
+  listMemories: async (f) => {
+    const scopes = f?.scope ? [f.scope] : undefined;
+    const q = String(f?.query ?? "").trim();
+    return q ? memory.search(q, null, { scopes, projectId: f?.projectId, limit: 50, touch: false })
+      : memory.list(null, { scopes, projectId: f?.projectId, limit: 1000 });
+  },
+  saveMemory: async (i) => {
+    let m;
+    if (i.id != null) {
+      const cur = memory.require(i.id, null);
+      m = memory.update(cur.id, { content: i.content, kind: i.kind, tags: i.tags, importance: i.importance, pinned: i.pinned });
+      if (i.scope && i.scope !== cur.scope && i.scope !== "session") m = memory.promote(cur.id, i.scope, { projectId: cur.projectId, chatId: cur.chatId }).memory;
+    } else {
+      m = memory.save({ ...i, scope: i.scope === "session" ? undefined : i.scope }, { projectId: i.projectId ?? null, chatId: null }).memory;
+    }
+    emit({ type: "memory.changed" });
+    return m;
+  },
+  deleteMemory: async (id) => { memory.delete(Number(id)); emit({ type: "memory.changed" }); },
+  promoteMemory: async (id, to) => {
+    const cur = memory.require(id, null);
+    const m = memory.promote(cur.id, to, { projectId: cur.projectId, chatId: cur.chatId }).memory;
+    emit({ type: "memory.changed" });
+    return m;
+  },
   runTask: async (id, role) => {
     const t = db.getTask(id);
     if (!t) throw new Error("task not found");

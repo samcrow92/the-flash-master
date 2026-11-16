@@ -6,6 +6,9 @@ import type { ToolDef } from "./bridge";
 import type { JazzClient } from "./jazz";
 import type { Requirements } from "./requirements";
 import type { RoleDef } from "@shared/types";
+import { MEMORY_KINDS, MEMORY_SCOPES } from "@shared/types";
+import type { Memory } from "@shared/types";
+import type { MemoryContext, MemoryStore } from "./memory";
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
 const s = (description: string) => ({ type: "string", description });
@@ -14,6 +17,7 @@ const s = (description: string) => ({ type: "string", description });
 export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
+  memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -24,6 +28,18 @@ export function buildTools(d: {
     if (!j) throw new Error("Jazz integration is not configured (Settings → Integrations → IBM Jazz)");
     return j;
   };
+  const mem = () => {
+    if (!d.memory || d.memoryEnabled?.() === false) throw new Error("Memory is turned off (Settings → Memory)");
+    return d.memory;
+  };
+  const memCtx = (agentId: string): MemoryContext => {
+    const a = agentId ? d.db.getAgent(agentId) : null;
+    return { projectId: a?.projectId ?? null, chatId: a?.chatId ?? null, agentId: a?.id ?? null, role: a?.role ?? null };
+  };
+  const changed = <T>(x: T): T => { d.onMemory?.(); return x; };
+  const memBrief = (m: Memory) => ({ id: m.id, scope: m.scope, kind: m.kind, content: m.content, ...(m.tags.length ? { tags: m.tags } : {}),
+    importance: m.importance, ...(m.pinned ? { pinned: true } : {}), ...(m.expiresAt ? { expires: new Date(m.expiresAt).toISOString().slice(0, 10) } : {}) });
+  const scopeProp = (what: string) => ({ type: "string", enum: [...MEMORY_SCOPES], description: what });
   const brief = (t: Task) => ({ id: t.id, title: t.title, status: t.status, priority: t.priority, assignee: t.assigneeRole, jazz: t.jazzId });
   return [
     {
@@ -158,6 +174,78 @@ export function buildTools(d: {
         const off = a.offset ?? 0;
         const len = a.length ?? 4000;
         return { title: art.title, total: art.content.length, offset: off, content: art.content.slice(off, off + len) };
+      },
+    },
+    // ---------------- Memory (user / project / short-term) ----------------
+    {
+      set: "core", name: "memory_save",
+      description: "Remember something for later turns and other agents. One self-contained fact per call, written so it makes sense without this chat "
+        + "(who/what/why, no 'this' or 'above'). scope: user = about the user, for every project (preferences, conventions, who they are); "
+        + "project = shared with every agent of this project (decisions, architecture facts, procedures, gotchas); "
+        + "session = short-term notes for this chat only (expires). A near-duplicate is merged automatically; similar memories are returned so you can update or replace them. "
+        + "Save when the user says 'remember', states a preference, or a decision is made. Never save secrets or tokens.",
+      inputSchema: obj({
+        content: s("the fact, one or two sentences"), scope: scopeProp("user | project | session (default session)"),
+        kind: { type: "string", enum: [...MEMORY_KINDS], description: "fact (default) | preference | decision | procedure | episode" },
+        tags: { type: "array", items: { type: "string" }, description: "a few keywords (optional)" },
+        importance: { type: "number", description: "1 trivia … 5 critical (default 3)" },
+        pinned: { type: "boolean", description: "always show to agents, whatever they work on (use rarely)" },
+        replaces: { type: "array", items: { type: "number" }, description: "ids of memories this one corrects (they are deleted)" },
+      }, ["content"]),
+      handler: async (a, c) => {
+        const r = mem().save(a, memCtx(c.agentId));
+        return changed({ id: r.memory.id, scope: r.memory.scope, status: r.status, ...(r.replaced.length ? { replaced: r.replaced } : {}),
+          ...(r.similar.length ? { similar: r.similar, hint: "similar memories exist: update or delete them if this one supersedes them" } : {}) });
+      },
+    },
+    {
+      set: "core", name: "memory_search",
+      description: "Find saved memories relevant to a question (hybrid keyword + fuzzy search, ranked by relevance, recency and importance). "
+        + "Searches user, this project's and this chat's memories unless scope narrows it. Search before asking the user something they may have told you already.",
+      inputSchema: obj({
+        query: s("what you want to know, in words"), scope: scopeProp("only this scope (optional)"),
+        kind: { type: "string", enum: [...MEMORY_KINDS] }, tag: s("only memories with this tag (optional)"), limit: { type: "number", description: "default 8, max 30" },
+      }, ["query"]),
+      handler: async (a, c) => mem().search(String(a.query ?? ""), memCtx(c.agentId), { scopes: a.scope ? [a.scope] : undefined, kind: a.kind, tag: a.tag,
+        limit: Math.min(Number(a.limit) || 8, 30) }).map((h) => ({ ...memBrief(h), score: h.score })),
+    },
+    {
+      set: "core", name: "memory_list",
+      description: "List memories you can see (pinned first, then newest), optionally by scope, kind or tag. Use memory_search to find something specific.",
+      inputSchema: obj({ scope: scopeProp("only this scope (optional)"), kind: { type: "string", enum: [...MEMORY_KINDS] }, tag: s("tag (optional)"),
+        limit: { type: "number", description: "default 30, max 100" } }),
+      handler: async (a, c) => mem().list(memCtx(c.agentId), { scopes: a.scope ? [a.scope] : undefined, kind: a.kind, tag: a.tag,
+        limit: Math.min(Number(a.limit) || 30, 100) }).map(memBrief),
+    },
+    {
+      set: "core", name: "memory_update",
+      description: "Correct or refine a memory (content, kind, tags, importance, pinned). Use when a fact changed instead of saving a contradicting one.",
+      inputSchema: obj({ id: { type: "number", description: "memory id" }, content: s("new text (optional)"), kind: { type: "string", enum: [...MEMORY_KINDS] },
+        tags: { type: "array", items: { type: "string" } }, importance: { type: "number" }, pinned: { type: "boolean" } }, ["id"]),
+      handler: async (a, c) => {
+        const m = mem().require(a.id, memCtx(c.agentId));
+        return changed(memBrief(mem().update(m.id, { content: a.content, kind: a.kind, tags: a.tags, importance: a.importance, pinned: a.pinned })));
+      },
+    },
+    {
+      set: "core", name: "memory_delete",
+      description: "Forget a memory that is wrong, outdated or no longer useful.",
+      inputSchema: obj({ id: { type: "number", description: "memory id" } }, ["id"]),
+      handler: async (a, c) => {
+        const m = mem().require(a.id, memCtx(c.agentId));
+        return changed({ id: m.id, deleted: mem().delete(m.id) });
+      },
+    },
+    {
+      set: "core", name: "memory_promote",
+      description: "Keep a short-term memory for good: move it to project (shared with this project's agents) or user (every project) scope. "
+        + "Also moves a project memory to user scope. Promoted memories no longer expire; a duplicate in the target is merged.",
+      inputSchema: obj({ id: { type: "number", description: "memory id" }, to: { type: "string", enum: ["project", "user"], description: "target scope" } }, ["id", "to"]),
+      handler: async (a, c) => {
+        const ctx = memCtx(c.agentId);
+        const m = mem().require(a.id, ctx);
+        const r = mem().promote(m.id, a.to, ctx);
+        return changed({ ...memBrief(r.memory), status: r.status });
       },
     },
     // ---------------- Jazz ----------------

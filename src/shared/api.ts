@@ -1,6 +1,6 @@
 import type {
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
-  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState,
+  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
 import type { ReviewComment } from "./review";
@@ -112,6 +112,14 @@ export interface FlashApi {
   runTask(id: string, role?: string): Promise<AgentRun>;
 
   // artifacts / usage
+  /** Agent memory. projectId narrows to user memories + that project's (null = master chat workspace); query ranks by relevance. */
+  listMemories(filter?: { projectId?: string | null; scope?: MemoryScope; query?: string }): Promise<Memory[]>;
+  /** Create (no id) or edit a memory. Short-term memories belong to a chat, so new ones from the UI are user or project scope. */
+  saveMemory(input: { id?: number; content: string; scope?: MemoryScope; projectId?: string | null; kind?: MemoryKind; tags?: string[]; importance?: number; pinned?: boolean }): Promise<Memory>;
+  deleteMemory(id: number): Promise<void>;
+  /** Short-term → project / user, or project → user; it stops expiring. */
+  promoteMemory(id: number, to: "project" | "user"): Promise<Memory>;
+
   getArtifact(id: string): Promise<Artifact | null>;
   /** Files changed by agents in this chat, saved artifacts, and the project folder. */
   chatArtifacts(chatId: string): Promise<ChatArtifacts>;
@@ -216,7 +224,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "openThreadWindow", "openChatWindow", "toggleReaction", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",

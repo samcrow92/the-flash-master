@@ -16,6 +16,7 @@ import { paragraphBreak } from "@shared/replySegments";
 import { agentLabel, pickInstanceName } from "@shared/instances";
 import { planEdit, planRetry, type RewindPlan } from "@shared/rewind";
 import type { Db } from "./db";
+import type { MemoryStore } from "./memory";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
 import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
@@ -56,6 +57,8 @@ export interface OrchestratorDeps {
   onCopilotUsage?: (r: { sessionId: string; text: string | null; commands: string[]; agentId: string }) => void;
   log?: (level: "error" | "warn" | "info" | "debug", msg: string) => void;
   db: Db;
+  /** Agent memory: relevant memories are put in front of agents, and specialists' results become short-term memories. */
+  memory?: MemoryStore;
   harnesses: HarnessRegistry;
   settings: () => Settings;
   roles: () => RoleDef[];
@@ -86,6 +89,8 @@ interface Live {
   queue: { input: string; attachments: Attachment[]; msgIds?: string[] }[];
   /** Delivered steering/queued messages waiting to be seen: native = wait for the harness ack, else first model output. */
   awaiting: { id: string; native: boolean }[];
+  /** Memory ids already shown to this harness session (reminders on later turns only add new ones). */
+  memoryShown?: Set<number>;
   /** Steering by interrupt: next turn input. `toolStop` = the title of a hung tool call that was stopped (input says so as is). */
   redirect: { input: string; attachments: Attachment[]; msgIds: string[]; toolStop?: string } | null;
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
@@ -1117,9 +1122,9 @@ export class Orchestrator {
         // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
         const roleSkills = first ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
         return buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
-          brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean",
+          brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
@@ -1215,6 +1220,7 @@ export class Orchestrator {
       const compact = resultForParent(text, t.role.maxResultTokens) + (live.branch ? `\nbranch: ${live.branch} (isolated copy; the user merges it)` : "");
       live.lastResult = compact;
       const resultLine = /summary:\s*(.+)/.exec(compact)?.[1] ?? compact.replace(/\s+/g, " ");
+      if (status === "done" && !redirected) this.captureResult(live, t.chat, t.role, resultLine);
       // What the agent itself says about how it ended (status line of its <result> block).
       const said = status === "done" ? (parseResult(text).status ?? "done") : "done";
       const asks = said !== "done" ? (parseResult(text).question ?? resultLine) : null;
@@ -1705,6 +1711,43 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     this.slotWaiters.shift()?.();
   }
 
+  private memoryOn(): boolean {
+    return !!this.d.memory && this.d.settings().memory?.enabled !== false;
+  }
+
+  /**
+   * Memories to put in front of the agent for this turn: on a new session the pinned ones and the best matches for the
+   * request; on later turns only relevant ones it has not been shown yet (so a long chat is not re-sent the same lines).
+   */
+  private recallMemory(live: Live, chat: Chat, query: string, first: boolean): string {
+    const ms = this.d.settings().memory;
+    if (!this.memoryOn() || !ms?.autoInject) return "";
+    if (first || !live.memoryShown) live.memoryShown = new Set();
+    try {
+      const r = this.d.memory!.recall(query.slice(0, 4000), { projectId: chat.projectId, chatId: chat.id },
+        { max: first ? ms.maxInjected : Math.ceil(ms.maxInjected / 2), exclude: live.memoryShown, minRelevance: first ? 0.25 : 0.4 });
+      for (const id of r.ids) live.memoryShown.add(id);
+      return r.text;
+    } catch (e) {
+      this.d.log?.("warn", `memory recall: ${String(e)}`);
+      return "";
+    }
+  }
+
+  /** A delegated specialist's result becomes a short-term memory of the chat, so the other agents there know what it did. */
+  private captureResult(live: Live, chat: Chat, role: RoleDef, summary: string): void {
+    if (!live.name || !this.memoryOn() || !this.d.settings().memory?.captureResults) return;
+    const text = summary.replace(/\s+/g, " ").trim();
+    if (text.length < 20) return;
+    try {
+      this.d.memory!.save({ content: `${live.name} (${role.title}) finished: ${text.slice(0, 600)}`, scope: "session", kind: "episode", importance: 2, tags: [role.name] },
+        { projectId: chat.projectId, chatId: chat.id, agentId: live.agentId, role: role.name });
+      this.d.emit({ type: "memory.changed" });
+    } catch (e) {
+      this.d.log?.("warn", `memory capture: ${String(e)}`);
+    }
+  }
+
   /** Used by the bridge: tasks created by agents get the agent's project. */
   agentProject(agentId: string): string | null {
     return this.d.db.getAgent(agentId)?.projectId ?? null;
@@ -1724,6 +1767,13 @@ const FALLBACK_ROLE: RoleDef = {
 export function isTransientNetworkError(e: string | undefined): boolean {
   return !!e && /connection error|UND_ERR_SOCKET|other side closed|ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|\b50[234]\b|stream (closed|ended)|network/i.test(e);
 }
+
+/** How agents use the shared memory (sent once per session when memory is on). */
+export const MEMORY_RULES = "Memory: you share a memory with the user's other agents (memory_search, memory_save, memory_update, memory_delete, memory_promote, memory_list). "
+  + "Search it before asking the user something they may have told an agent before. Save durable knowledge as one self-contained fact per call: "
+  + "the user's preferences and conventions → scope user; this project's decisions, facts, procedures and gotchas → scope project (shared with every specialist); "
+  + "working notes for this chat → scope session (short-term, expires; promote what turns out to matter). "
+  + "When a memory is wrong or outdated, update or delete it instead of saving a contradicting one. Never store secrets, tokens or passwords.";
 
 /** Sent after a crash restart that resumed the session (or with the partial reply, when it could not). */
 const CRASH_CONTINUE = "Your previous response was interrupted because the agent process exited. Continue exactly where you stopped; do not repeat what you already wrote.";

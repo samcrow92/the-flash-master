@@ -12,6 +12,7 @@ export type View =
   | { kind: "review"; agentId?: string }
   | { kind: "dashboard" }
   | { kind: "tasks" }
+  | { kind: "memory" }
   | { kind: "jazz" }
   | { kind: "settings"; tab?: string }
   | { kind: "flow"; agentId: string }
@@ -48,6 +49,8 @@ interface State {
   flowPanel: { chatId: string; agentId: string | null } | null;
   artifactsPanel: string | null; // chat id whose artifacts panel is open
   artifactsRev: Record<string, number>;
+  /** Bumped on every memory change (Memory page reloads). */
+  memoryRev: number;
   openFlow(chatId: string, agentId: string | null): void;
   agents: Record<string, AgentRun>;
   tasks: Record<string, Task>;
@@ -154,6 +157,7 @@ export const useStore = create<State>((set, get) => ({
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
+  memoryRev: 0,
   agents: {},
   tasks: {},
   roles: [],
@@ -417,6 +421,9 @@ export const useStore = create<State>((set, get) => ({
         break;
       case "update.state":
         set({ update: e.state });
+        break;
+      case "memory.changed":
+        set((s2) => ({ memoryRev: s2.memoryRev + 1 }));
         break;
       case "artifacts.changed":
         set((s2) => ({ artifactsRev: { ...s2.artifactsRev, [e.chatId]: (s2.artifactsRev[e.chatId] ?? 0) + 1 } }));

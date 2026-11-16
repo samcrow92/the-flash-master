@@ -115,7 +115,12 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(300);
       await js(`(async()=>window.flash.api.createTask({ title: "Verify BrakeLightReq timing on HIL", priority: 1, assigneeRole: "tester", status: "todo", projectId: (await window.flash.api.listProjects())[0]?.id ?? null }))()`);
       await js(`(async()=>window.flash.api.createTask({ title: "Review CAPL test module for brake light", priority: 2, assigneeRole: "autosar-vector", status: "in_progress", jazzId: "48213", projectId: (await window.flash.api.listProjects())[0]?.id ?? null }))()`);
-      for (const [label, name] of [["Agents", "3-agents"], ["Dashboard", "4-dashboard"], ["Tasks", "5-tasks"], ["Settings", "6-settings"]] as const) {
+      await js(`(async()=>{const a=window.flash.api;const p=(await a.listProjects())[0]?.id ?? null;
+        await a.saveMemory({ content: "Mari prefers a minimal glass UI and Windows-style window controls", scope: "user", kind: "preference", importance: 4, pinned: true, tags: ["ui"] });
+        await a.saveMemory({ content: "Merge PRs once CI is green on Windows, macOS and Linux", scope: "user", kind: "procedure", tags: ["ci"] });
+        await a.saveMemory({ content: "Brake light debounce must stay at 20 ms (BCM requirement 1240)", scope: "project", projectId: p, kind: "decision", importance: 5, tags: ["brake", "timing"] });
+        await a.saveMemory({ content: "HIL bench 3 cannot reach -20 °C; cold-start tests run in the climate chamber", scope: "project", projectId: p, tags: ["hil"] });})()`);
+      for (const [label, name] of [["Agents", "3-agents"], ["Dashboard", "4-dashboard"], ["Tasks", "5-tasks"], ["Memory", "5m-memory"], ["Settings", "6-settings"]] as const) {
         await click(label, ".sidebar button");
         await sleep(1200);
         await shot(join(demo, `${name}.png`));
@@ -377,6 +382,10 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     const search = await js<string>("window.flash.api.searchMessages('brake').then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
     log(search === "ok" ? "info" : "error", `smoke-search: ${search}`);
     if (search !== "ok") { app.exit(1); return; }
+    // Agent memory answers through IPC (the main log says whether FTS5 or the LIKE fallback is in use).
+    const memory = await js<string>("window.flash.api.listMemories({ query: 'brake' }).then((r) => Array.isArray(r) ? 'ok' : 'bad', (e) => String(e))");
+    log(memory === "ok" ? "info" : "error", `smoke-memory: ${memory}`);
+    if (memory !== "ok") { app.exit(1); return; }
     // The integrated terminal: open it from the title bar, run a command in the real shell and see its output rendered.
     const term = ok && !demo ? await smokeTerminal(js) : "skipped";
     const termOk = term === "ok" || term === "skipped";
