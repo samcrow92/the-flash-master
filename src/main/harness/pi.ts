@@ -13,6 +13,12 @@ import { readFileSync } from "node:fs";
 
 type Json = Record<string, any>;
 
+type PiTurn = { resolve: (r: TurnResult) => void; tokensIn: number; tokensOut: number; stop: string; error?: string; accepted: boolean; cmd: Json };
+/** Pi's refusal of a prompt sent while it is still running (its error asks for a streamingBehavior). */
+export const PI_STILL_RUNNING = /already processing|streamingBehavior/i;
+/** Waits before re-sending a refused prompt (~10 s in all); after the last one it goes as a follow-up. */
+const PROMPT_RETRY_DELAYS = [25, 50, 100, 200, 400, 800, 1000, 1500, 2000, 2000, 2000];
+
 const TOOL_KIND: Record<string, ToolKind> = { bash: "execute", read: "read", write: "edit", edit: "edit", grep: "search", find: "search", ls: "search" };
 
 export class PiSession implements HarnessSession {
@@ -27,7 +33,7 @@ export class PiSession implements HarnessSession {
   private pending = new Map<string, (r: Json) => void>();
   private pendingSteers = 0;
   private userMsgsThisTurn = 0;
-  private turn: { resolve: (r: TurnResult) => void; tokensIn: number; tokensOut: number; stop: string; error?: string } | null = null;
+  private turn: PiTurn | null = null;
 
   constructor(exe: string, args: string[], private o: SessionOptions) {
     this.child = spawnTool(exe, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ["pipe", "pipe", "pipe"] });
@@ -79,21 +85,55 @@ export class PiSession implements HarnessSession {
     }
     const message = files.length ? `${text}\n\nAttached files (read only what you need):\n${files.join("\n")}` : text;
     return new Promise((resolve) => {
-      this.turn = { resolve, tokensIn: 0, tokensOut: 0, stop: "end_turn" };
+      const turn: PiTurn = { resolve, tokensIn: 0, tokensOut: 0, stop: "end_turn", accepted: false, cmd: { type: "prompt", message, ...(images.length ? { images } : {}) } };
+      this.turn = turn;
       this.userMsgsThisTurn = 0;
-      void this.command({ type: "prompt", message, ...(images.length ? { images } : {}) }).then((r) => {
-        if (!r.success && this.turn) { this.turn.resolve({ stopReason: "error", error: r.error ?? "prompt rejected" }); this.turn = null; }
-      });
+      void this.sendPrompt(turn, 0);
     });
   }
 
+  /**
+   * Pi emits agent_end a moment before it is ready for the next prompt, so a prompt sent right away (queued message,
+   * steering redirect, stopped tool call) is refused with "Agent is already processing. Specify streamingBehavior…".
+   * Wait and try again; if Pi is still running after that, hand it over as a follow-up so it runs next instead of failing.
+   */
+  private async sendPrompt(turn: PiTurn, attempt: number): Promise<void> {
+    const followUp = attempt >= PROMPT_RETRY_DELAYS.length;
+    const sent = turn.cmd;
+    const r = await this.command(followUp ? { ...sent, streamingBehavior: "followUp" } : sent);
+    if (this.turn !== turn) return;
+    if (r.success) {
+      turn.accepted = true;
+      // A steering message joined the prompt while this attempt was on its way: deliver it the normal way.
+      const extra = String(turn.cmd.message).slice(String(sent.message).length).trim();
+      if (extra) void this.command({ type: "steer", message: extra });
+      return;
+    }
+    if (!followUp && !this.exited && PI_STILL_RUNNING.test(String(r.error ?? ""))) {
+      await new Promise((ok) => setTimeout(ok, PROMPT_RETRY_DELAYS[attempt]));
+      if (this.turn === turn) await this.sendPrompt(turn, attempt + 1);
+      return;
+    }
+    turn.resolve({ stopReason: "error", error: r.error ?? "prompt rejected" });
+    this.turn = null;
+  }
+
   async cancel(): Promise<void> {
+    // Still waiting for Pi to take the prompt: nothing runs yet, so the turn ends here.
+    const t = this.turn;
+    if (t && !t.accepted) { this.turn = null; t.resolve({ stopReason: "cancelled" }); return; }
     if (!this.exited) this.write({ type: "abort" });
   }
 
   /** Native steering: Pi delivers it after the current tool calls, before the next model call. */
   async steer(text: string): Promise<boolean> {
     if (this.exited || !this.turn) return false;
+    // Pi has not taken this turn's prompt yet (it was still finishing the last one): the message joins that prompt.
+    if (!this.turn.accepted) {
+      this.turn.cmd = { ...this.turn.cmd, message: `${this.turn.cmd.message}\n\n${text}` };
+      queueMicrotask(() => this.o.onEvent({ type: "steer_ack" }));
+      return true;
+    }
     const r = await this.command({ type: "steer", message: text });
     if (r.success) this.pendingSteers++;
     return !!r.success;
@@ -157,7 +197,7 @@ export class PiSession implements HarnessSession {
       }
       case "message_end": {
         const msg = m.message ?? {};
-        if (msg.role === "assistant" && t) {
+        if (msg.role === "assistant" && t?.accepted) {
           const u = msg.usage ?? {};
           t.tokensIn += Number(u.input ?? 0) + Number(u.cacheRead ?? 0) + Number(u.cacheWrite ?? 0);
           t.tokensOut += Number(u.output ?? 0);
@@ -191,7 +231,8 @@ export class PiSession implements HarnessSession {
         void this.onUiRequest(m);
         break;
       case "agent_end":
-        if (t) {
+        // Not yet accepted = the end of the run before ours, which Pi was still finishing.
+        if (t?.accepted) {
           this.turn = null;
           t.resolve({ stopReason: t.stop, error: t.error, usage: t.tokensIn || t.tokensOut ? { tokensIn: t.tokensIn, tokensOut: t.tokensOut } : undefined });
         }

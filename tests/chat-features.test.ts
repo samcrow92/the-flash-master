@@ -85,6 +85,50 @@ describe("steering", () => {
     s.close();
   });
 
+  it("a prompt sent while Pi is still finishing its last run waits for it instead of failing", async () => {
+    const events: HarnessEvent[] = [];
+    const o = { cwd: process.cwd(), model: null, extraArgs: "", executable: null, mcpServers: [], env: {}, resumeSessionId: null,
+      policy: { approval: "auto-all", readOnly: false, blocked: [], projectRoot: null }, onEvent: (e: HarnessEvent) => events.push(e), askPermission: async () => true } as SessionOptions;
+    const s = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc", "--linger", "300"], o);
+    await s.init();
+    expect((await s.prompt("first")).stopReason).toBe("end_turn");
+    // Right after agent_end Pi refuses "Agent is already processing. Specify streamingBehavior…"
+    const second = s.prompt("second");
+    expect(await s.steer("and keep it short")).toBe(true); // joins the prompt Pi has not taken yet
+    const r = await second;
+    expect(r.error).toBeUndefined();
+    expect(r.stopReason).toBe("end_turn");
+    // Cancelling a prompt Pi has not taken yet ends the turn at once.
+    await s.prompt("third");
+    const fourth = s.prompt("fourth");
+    await s.cancel();
+    expect((await fourth).stopReason).toBe("cancelled");
+    s.close();
+  });
+
+  it("a queued message for Pi runs after the busy turn instead of failing with streamingBehavior", async () => {
+    const { db, orch, chat } = setup();
+    const harnesses = (orch as any).d.harnesses as HarnessRegistry;
+    const { PiAdapter } = await import("../src/main/harness/pi");
+    class FakePi extends PiAdapter {
+      override async start(o: SessionOptions) {
+        const sess = new PiSession(process.execPath, [FAKE_PI, "--mode", "rpc", "--linger", "300"], o);
+        await sess.init();
+        return sess;
+      }
+    }
+    (harnesses as any).adapters.set("pi", new FakePi());
+    (harnesses as any).status.set("pi", { id: "pi", available: true, path: process.execPath });
+    db.updateChat(chat.id, { harness: "pi" });
+    await orch.sendUserMessage(chat.id, "SLOW", null);
+    await until(() => db.listMessages(chat.id, null).some((m) => m.author === "agent" && m.status === "streaming"));
+    const q = await orch.sendUserMessage(chat.id, "and then summarise", null, { whileBusy: "queue" });
+    expect(q.delivery).toBe("queued");
+    await until(() => agentMsgs(db, chat.id).length === 2 && agentMsgs(db, chat.id).every((x) => x.status !== "streaming"), 10000);
+    for (const m of agentMsgs(db, chat.id)) { expect(m.status).toBe("done"); expect(m.content).not.toContain("streamingBehavior"); }
+    await orch.stopAll();
+  }, 20000);
+
   it("other harnesses are interrupted and redirected; queue mode waits for the turn", async () => {
     const { db, orch, chat, events } = setup();
     db.updateChat(chat.id, { harness: "opencode" });

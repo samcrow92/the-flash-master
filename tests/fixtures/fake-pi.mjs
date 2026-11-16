@@ -4,6 +4,9 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const args = process.argv.slice(2);
 let aborted = false;
 let steered = null;
+// --linger <ms>: like real Pi, stay "processing" for a moment after agent_end and refuse a prompt without streamingBehavior.
+const linger = args.includes("--linger") ? Number(args[args.indexOf("--linger") + 1]) : 0;
+let processing = false;
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", async (d) => {
   buf += d;
@@ -15,7 +18,10 @@ process.stdin.on("data", async (d) => {
       { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", contextWindow: 200000 }, { id: "gpt-5", name: "GPT-5", provider: "openai" }] } });
     else if (cmd.type === "steer") { steered = cmd.message; out({ id: cmd.id, type: "response", command: "steer", success: true }); }
     else if (cmd.type === "abort") { aborted = true; out({ id: cmd.id, type: "response", command: "abort", success: true }); }
-    else if (cmd.type === "prompt") {
+    else if (cmd.type === "prompt" && processing && !cmd.streamingBehavior) {
+      out({ id: cmd.id, type: "response", command: "prompt", success: false, error: "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message." });
+    } else if (cmd.type === "prompt") {
+      processing = !!linger;
       aborted = false;
       out({ id: cmd.id, type: "response", command: "prompt", success: true });
       out({ type: "agent_start" });
@@ -33,6 +39,7 @@ process.stdin.on("data", async (d) => {
       steered = null;
       out({ type: "message_end", message: { role: "assistant", stopReason: aborted ? "aborted" : "stop", usage: { input: 200, output: 40, cacheRead: 50, cacheWrite: 0 } } });
       out({ type: "agent_end", messages: [] });
+      if (linger) setTimeout(() => { processing = false; }, linger);
     } else out({ id: cmd.id, type: "response", command: cmd.type, success: false, error: "unknown" });
   }
 });
