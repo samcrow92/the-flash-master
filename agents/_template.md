@@ -29,6 +29,11 @@ tools: [flashmaster-core]
 # worktree and branch, so agents running in parallel don't overwrite each other (Settings → Agents).
 # isolate: true
 
+# Optional: set to true if this agent must only run on a local model (local inference, nothing sent to a hosted model).
+# It then runs on Pi or OpenCode with its own local model, or Settings → Modes → LOCAL, and never on a hosted harness
+# such as GitLab Duo. Instructions that demand local inference turn this on by themselves; `local: false` turns it off.
+# local: true
+
 # Upper bound for the summary this agent returns to whoever delegated to it (token efficiency).
 maxResultTokens: 400
 

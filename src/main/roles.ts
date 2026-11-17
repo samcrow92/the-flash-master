@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { HarnessId, RoleDef, SkillDef } from "@shared/types";
+import { needsLocalInference } from "./locality";
 
 /** Tiny frontmatter parser: `key: value`, `key: [a, b]`. Enough for role/skill files; no YAML dependency. */
 export function parseFrontmatter(src: string): { meta: Record<string, string | string[]>; body: string } {
@@ -37,6 +38,8 @@ export function parseRole(src: string, fallbackName: string, source: RoleDef["so
     source,
     ...(str(meta.isolate) === "true" ? { isolate: true } : {}),
     ...(arr(meta.requires).length ? { requires: arr(meta.requires).map((x) => x.toLowerCase()) } : {}),
+    // `local: false` opts out of the instruction check; `local: true` (or instructions that demand local inference) opts in.
+    ...((str(meta.local) ? str(meta.local) === "true" : needsLocalInference(body)) ? { local: true } : {}),
   };
 }
 
@@ -99,7 +102,7 @@ export function validateRole(src: string, knownTools: string[], builtinNames: st
 /** A role an agent defines at run time (coordinator's `create_agent` / text-mode AGENT block). */
 export interface AgentSpec {
   name: string; title?: string; description?: string; icon?: string; instructions: string;
-  tools?: string[]; harness?: string; model?: string; skills?: string[]; maxResultTokens?: number;
+  tools?: string[]; harness?: string; model?: string; skills?: string[]; maxResultTokens?: number; local?: boolean;
 }
 
 export const slugRole = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
@@ -113,6 +116,7 @@ export function roleMarkdown(spec: AgentSpec, createdBy: string): string {
     `description: ${(spec.description || title).replace(/\n/g, " ").slice(0, 200)}`,
     `tools: [${["flashmaster-core", ...(spec.tools ?? []).filter((t) => t !== "flashmaster-core")].join(", ")}]`,
     ...(spec.harness ? [`harness: ${spec.harness}`] : []), ...(spec.model ? [`model: ${spec.model}`] : []),
+    ...(spec.local ? ["local: true"] : []),
     ...(spec.skills?.length ? [`skills: [${spec.skills.join(", ")}]`] : []),
     `maxResultTokens: ${spec.maxResultTokens ?? 400}`, `createdBy: ${createdBy}`, "---",
     spec.instructions.trim(), "",

@@ -71,6 +71,8 @@ export class MockSession implements HarnessSession {
         "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
       "<result>",
       // "[needs-decision]" in a request makes the mock ask back, to try (and test) decision routing.
+      // "[blocked-local]": a specialist refusing hosted inference (locality routing tests).
+      ...(request.includes("[blocked-local]") ? ["status: blocked", "question: The brief requires verified local inference before any repository read; this session runs on a hosted model."] : []),
       ...(request.includes("[needs-decision]") ? ["status: needs_decision", "question: Use calibration set A or B? I recommend A (mock).", "options: Set A | Set B"] : []),
       `summary: Mock run for "${request.trim().slice(0, 60)}" completed.`,
       "findings:",
