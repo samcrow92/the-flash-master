@@ -117,6 +117,17 @@ export const REPLY_STYLE = "Reply style: the user reads your replies in a chat. 
   + "Use a bullet list for steps or several findings, a heading when a reply has distinct parts, and code blocks for code and commands. "
   + "Before and after tool calls, say briefly what you are checking and what you found, each as its own paragraph.";
 
+/**
+ * pstack's unslop skill as a standing writing rule. It covers what the agent writes through tools too (the user asked for
+ * it "for all tool interactions"), but never code, quotes or output passed along verbatim.
+ */
+export function unslopRules(skill: Pick<SkillDef, "body"> | undefined): string {
+  if (!skill?.body.trim()) return "";
+  return "## Writing style (unslop)\nApply these rules to everything you write: replies, results, briefs for other agents, and text you write through tools "
+    + "(commit messages, PR descriptions, issue and review comments, docs, reports). Leave code, identifiers, quoted text and tool output you pass along verbatim as they are.\n\n"
+    + skill.body.trim();
+}
+
 /** Byte-stable prefix: never put timestamps or counters here, so provider prompt caches stay warm. */
 export function rolePrefix(role: RoleDef, projectPath: string | null, o: { clean?: boolean; houseRules?: string } = {}): string {
   return [
@@ -201,13 +212,16 @@ export function resultForParent(text: string, maxTokens: number): string {
   return body.length > maxChars ? body.slice(0, maxChars) + "\n…[truncated to result budget]" : body;
 }
 
-export function buildBrief(i: { goal: string; context?: string; files?: string[]; acceptance?: string; parentRole?: string }): string {
+export function buildBrief(i: { goal: string; context?: string; files?: string[]; acceptance?: string; parentRole?: string; helperLevels?: number }): string {
   return [
     `Goal: ${i.goal.trim()}`,
     i.context ? `Context: ${i.context.trim()}` : "",
     i.files?.length ? `Relevant files: ${i.files.join(", ")}` : "",
     i.acceptance ? `Done when: ${i.acceptance.trim()}` : "",
     i.parentRole ? `Delegated by: ${i.parentRole}. Report back with the result block only — they do not see your working.` : "",
+    i.parentRole && i.helperLevels !== undefined ? (i.helperLevels > 0
+      ? "Need a hand? You may hand a focused sub-task to a helper with delegate (it waits for the result). To get another agent's earlier report, call read_report instead of delegating or redoing it."
+      : "You can't delegate further (delegation depth). To get another agent's earlier report, call read_report.") : "",
   ].filter(Boolean).join("\n");
 }
 

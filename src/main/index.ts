@@ -111,7 +111,7 @@ const tempRoles = new Map<string, RoleDef>();
 const reloadRoles = () => {
   roles = loadRoles(join(resources, "agents"), userRolesDir);
   for (const r of tempRoles.values()) if (!roles.some((x) => x.name === r.name)) roles.push(r);
-  const builtinSkills = loadSkills(join(resources, "skills", "superpowers"));
+  const builtinSkills = [...loadSkills(join(resources, "skills", "superpowers")), ...loadSkills(join(resources, "skills", "pstack"))];
   const userSkills = loadSkills(userSkillsDir);
   skills = [...builtinSkills.filter((b) => !userSkills.some((u) => u.command === b.command)), ...userSkills];
 };

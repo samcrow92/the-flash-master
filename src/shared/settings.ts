@@ -45,7 +45,7 @@ export interface Settings {
     /** Specialists one coordinator may have working at once (0 = no limit); further delegations wait for one to finish. */
     maxParallelSpecialists: number;
     roleOverrides: Record<string, { harness?: HarnessId; model?: string; maxResultTokens?: number }>;
-    delegationDepth: number; // how deep sub-agents may delegate further
+    delegationDepth: number; // levels of delegation: 1 = only the coordinator, 2 = specialists start helpers, 3 = helpers start helpers
     /**
      * How agents reach TheFlashMaster's own tools (delegate, create_agent, tasks, artifacts, Jazz, DOORS Next):
      * "text" = plain-text DELEGATE / AGENT / TOOL lines the app carries out (works everywhere, also where MCP is blocked);
@@ -66,6 +66,8 @@ export interface Settings {
     closeIdleAfterMinutes: number;
     /** Code-writing specialists (roles with `isolate: true`) work in their own git worktree and branch when delegated. */
     isolateWriters: boolean;
+    /** Send pstack's unslop writing rules (skills/pstack/unslop.md) to every agent, for replies and for text written through tools. */
+    unslop: boolean;
   };
   /** Task board auto-cleanup; Review tasks and tasks with a working agent are always kept. */
   tasks: {
@@ -210,7 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "" },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true, unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },
