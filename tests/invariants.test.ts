@@ -11,6 +11,7 @@ import { MIGRATIONS } from "../src/main/db";
 import { PY_SERVERS } from "../src/main/mcp";
 import { MCP_CATALOG } from "../src/shared/mcp-catalog";
 import { loadRoles, loadSkills, parseFrontmatter } from "../src/main/roles";
+import { DEFAULT_SETTINGS } from "../src/shared/settings";
 
 const root = join(__dirname, "..");
 const read = (p: string) => readFileSync(join(root, p), "utf8");
@@ -80,8 +81,16 @@ describe("agent roles", () => {
 
 describe("skills", () => {
   it("have distinct slash commands", () => {
-    const cmds = loadSkills(join(root, "skills", "superpowers")).map((s) => s.command);
+    const cmds = ["superpowers", "pstack"].flatMap((d) => loadSkills(join(root, "skills", d))).map((s) => s.command);
     expect(cmds.filter((c, i) => cmds.indexOf(c) !== i)).toEqual([]);
+  });
+
+  it("bundle pstack's unslop with its MIT license, loaded by the app and on by default", () => {
+    // Mari asked for unslop as the default writing rule for every agent; the license must ship with the copied text.
+    expect(loadSkills(join(root, "skills", "pstack")).map((s) => s.command)).toContain("unslop");
+    expect(read("skills/pstack/LICENSE")).toMatch(/MIT License[\s\S]*Lauren Tan/);
+    expect(read("src/main/index.ts")).toContain('join(resources, "skills", "pstack")');
+    expect(DEFAULT_SETTINGS.agents.unslop).toBe(true);
   });
 });
 
