@@ -9,13 +9,18 @@ let steered = null;
 // --linger <ms>: like real Pi, stay "processing" for a moment after agent_end and refuse a prompt without streamingBehavior.
 const linger = args.includes("--linger") ? Number(args[args.indexOf("--linger") + 1]) : 0;
 let processing = false;
+// --provider/--model pick the model get_state reports; FAKE_PI_KNOWN (comma list of provider/id): like Pi, fall back to the default for an unknown model.
+const argOf = (f) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
+const asked = { provider: argOf("--provider") ?? "anthropic", id: argOf("--model") ?? "claude-sonnet-4-5" };
+const model = process.env.FAKE_PI_KNOWN && !process.env.FAKE_PI_KNOWN.split(",").includes(`${asked.provider}/${asked.id}`)
+  ? { provider: "github-copilot", id: "gpt-6.1-sol" } : asked;
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", async (d) => {
   buf += d;
   let i;
   while ((i = buf.indexOf("\n")) >= 0) {
     const cmd = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
-    if (cmd.type === "get_state") out({ id: cmd.id, type: "response", command: "get_state", success: true, data: { sessionFile: "/tmp/s.jsonl", sessionId: "abc", isStreaming: false, args, model: { provider: "anthropic", id: "claude-sonnet-4-5" } } });
+    if (cmd.type === "get_state") out({ id: cmd.id, type: "response", command: "get_state", success: true, data: { sessionFile: "/tmp/s.jsonl", sessionId: "abc", isStreaming: false, args, model } });
     else if (cmd.type === "get_available_models") out({ id: cmd.id, type: "response", command: "get_available_models", success: true, data: { models: [
       { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", contextWindow: 200000 }, { id: "gpt-5", name: "GPT-5", provider: "openai" }] } });
     else if (cmd.type === "steer") { steered = cmd.message; out({ id: cmd.id, type: "response", command: "steer", success: true }); }

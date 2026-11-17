@@ -154,6 +154,8 @@ export interface AgentRun {
   credits: number;
   /** Folder the coordinator started this specialist in, instead of the project folder (null = the project folder). */
   folder?: string | null;
+  /** Extra command-line arguments the coordinator started this specialist's agent CLI with (null = none). */
+  launchArgs?: string | null;
 }
 
 export interface Task {

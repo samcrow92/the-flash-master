@@ -114,6 +114,8 @@ interface Live {
   branch?: string | null;
   /** Folder the coordinator started this specialist in instead of the project folder (delegate `folder`). */
   folder?: string | null;
+  /** Extra launch arguments the coordinator started this specialist's agent CLI with (delegate `args`). */
+  launchArgs?: string | null;
   /** Last time the harness sent anything (text, tool update, plan…) during a turn; drives the stuck-agent watchdog. */
   lastOutputAt?: number;
   /** The watchdog already warned about this silence (cleared when output resumes). */
@@ -318,8 +320,8 @@ export class Orchestrator {
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
-    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; agentId?: string; folder?: string }):
-    Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string }> {
+    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; provider?: string; args?: string; agentId?: string; folder?: string }):
+    Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string; model?: string | null }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
     const s = this.d.settings();
@@ -334,6 +336,8 @@ export class Orchestrator {
     const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
     const projectPath = chat.projectId ? this.d.db.getProject(chat.projectId)?.path ?? null : null;
     const folder = a.folder?.trim() && !a.agentId ? this.resolveFolder(a.folder.trim(), projectPath) : null;
+    const model = delegateModel(a.model, a.provider);
+    const launchArgs = checkLaunchArgs(a.args);
     // GitLab Duo only works in GitLab repos: say so now, before an agent is created that could never start.
     if (want === "duo" && !a.agentId && this.d.harnesses.resolve("duo", s) === "duo") {
       const problem = await gitlabRepoProblem(folder ?? projectPath ?? this.d.homeDir, duoGitlabHosts(s.duo));
@@ -354,10 +358,19 @@ export class Orchestrator {
         throw new Error("unknown agentId: pass an id an earlier delegate returned to you, or leave it out to start a new specialist");
       if (prev.busy) throw new Error(`${agentLabel(prev, prev.role.title)} is still working on its current task: call get_result, or leave agentId out to start another instance`);
       live = prev;
+      // A follow-up that asks for another model or launch arguments restarts the agent CLI with them (Pi and ACP agents resume the conversation).
+      if ((model && model !== live.model) || (launchArgs && launchArgs !== live.launchArgs)) {
+        if (model) { live.model = model; this.d.db.updateAgent(live.agentId, { model }); }
+        if (launchArgs) { live.launchArgs = launchArgs; this.d.db.setAgentLaunchArgs(live.agentId, launchArgs); }
+        live.session?.close();
+        live.session = null;
+      }
     } else {
+      // A model (or provider) from the coordinator applies to the harness it asked for, or to the role's harness when it named none.
       live = this.ensureLive(chat, threadRoot, this.role(a.role), parent.depth + 1, `${parentAgentId}>${a.role}#${++this.instanceSeq}`, parentAgentId, brief,
-        want ? { harness: want, model: a.model || null } : undefined);
+        want || model ? { harness: want, model } : undefined);
       if (folder) { live.folder = folder; this.d.db.setAgentFolder(live.agentId, folder); }
+      if (launchArgs) { live.launchArgs = launchArgs; this.d.db.setAgentLaunchArgs(live.agentId, launchArgs); }
     }
     const role = live.role;
     if (want && live.harness !== want)
@@ -376,15 +389,15 @@ export class Orchestrator {
     void this.turn({ chat, threadRoot, role, input: a.goal, skills: [], depth: live.depth, brief, taskId, liveKey: live.key, borrowSlot })
       .catch((e) => this.finishWaiters(live, `error: ${String(e?.message ?? e)}`));
     const name = live.name ?? null;
-    if (a.wait === false) return { agentId: live.agentId, name, status: "running", harness: live.harness };
+    if (a.wait === false) return { agentId: live.agentId, name, status: "running", harness: live.harness, model: live.model };
     const timeout = Math.min(Math.max(a.timeoutSec ?? 600, 10), 1800) * 1000;
     const result = await Promise.race([done, new Promise<null>((r) => setTimeout(() => r(null), timeout))]);
     if (result === null) return { agentId: live.agentId, name, status: "running", result: "Still running. Call get_result later." };
-    return { agentId: live.agentId, name, status: this.d.db.getAgent(live.agentId)?.status ?? "done", result };
+    return { agentId: live.agentId, name, status: this.d.db.getAgent(live.agentId)?.status ?? "done", result, harness: live.harness, model: live.model };
   }
 
   /** Called by the coordinator's `create_agent` tool (and text-mode AGENT blocks): define a new agent, optionally run it. */
-  async createAgent(parentAgentId: string, a: AgentSpec & { keep?: boolean; goal?: string; context?: string; files?: string[]; acceptance?: string; wait?: boolean }):
+  async createAgent(parentAgentId: string, a: AgentSpec & { provider?: string; args?: string; keep?: boolean; goal?: string; context?: string; files?: string[]; acceptance?: string; wait?: boolean }):
     Promise<{ role: string; created: string; agentId?: string; status?: string; result?: string }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
@@ -399,7 +412,7 @@ export class Orchestrator {
     const created = a.keep === false ? "temporary (until restart)" : "saved to the agents folder";
     if (!a.goal) return { role: role.name, created };
     const r = await this.delegate(parentAgentId, { role: role.name, goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, wait: a.wait,
-      harness: a.harness, model: a.model });
+      harness: a.harness, model: a.model, provider: a.provider, args: a.args });
     return { role: role.name, created, agentId: r.agentId, status: r.status, result: r.result };
   }
 
@@ -843,7 +856,7 @@ export class Orchestrator {
     const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
     const l: Live = { key, agentId: a.id, name: a.name, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
-      worktree: a.worktree, branch: a.branch, folder: a.folder ?? null };
+      worktree: a.worktree, branch: a.branch, folder: a.folder ?? null, launchArgs: a.launchArgs ?? null };
     this.live.set(key, l);
     this.byAgent.set(a.id, l);
     return l;
@@ -1388,7 +1401,7 @@ export class Orchestrator {
       cwd: projectPath ?? this.d.homeDir,
       model,
       thinking: mode?.thinking || null,
-      extraArgs: [ins.args.join(" "), hs?.args ?? ""].filter(Boolean).join(" "),
+      extraArgs: [ins.args.join(" "), hs?.args ?? "", live.launchArgs ?? ""].filter(Boolean).join(" "),
       executable: status?.path ?? (hs?.path || null),
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
       env: { ...networkEnv(s), ...ins.env, ...(this.d.harnessEnv?.(live.harness) ?? {}), ...(this.d.roleEnv?.(live.role) ?? {}) },
@@ -1477,7 +1490,7 @@ export class Orchestrator {
   // ------------------------------------------------------------------ helpers
 
   private ensureLive(chat: Chat, threadRoot: string | null, role: RoleDef, depth: number, keyOverride?: string,
-    parentAgentId?: string, brief?: string, pick?: { harness: HarnessId; model: string | null }): Live {
+    parentAgentId?: string, brief?: string, pick?: { harness?: HarnessId; model: string | null }): Live {
     const key = keyOverride ?? `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
     const existing = this.live.get(key);
     if (existing) return existing;
@@ -1489,7 +1502,10 @@ export class Orchestrator {
     const economy = !!parentAgentId && s.tokens.economyForDelegated && !!s.tokens.economyHarness;
     // An explicit harness from the coordinator (the user asked for "the Pi agent") wins over economy routing.
     const harness = this.d.harnesses.resolve(pick?.harness ?? (economy ? (s.tokens.economyHarness as HarnessId) : requested), s);
-    const model = pick && harness === pick.harness ? pick.model : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
+    // The coordinator's model goes with its harness (or with whatever harness runs the role when it named none);
+    // a harness it asked for that isn't available drops the model, which belongs to that harness.
+    const model = pick?.model && (!pick.harness || harness === pick.harness) ? pick.model
+      : pick?.harness && harness === pick.harness ? null : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
     // Delegated specialists get a given name, unique in the chat, so parallel copies of one role can be told apart.
     const name = parentAgentId ? pickInstanceName(this.d.db.agentNamesInChat(chat.id)) : null;
     const agent = this.d.db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: role.name, harness, model,
@@ -1565,13 +1581,13 @@ export class Orchestrator {
     }
     const known = new Set(this.d.roles().map((r) => r.name));
     const runnable = reqs.filter((r) => known.has(r.role) && r.role !== live.role.name);
-    if (runnable.length) this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}${r.folder ? ` in ${r.folder}` : ""}`).join(", ")}`);
+    if (runnable.length) this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}${r.model ? ` (${r.model})` : ""}${r.folder ? ` in ${r.folder}` : ""}`).join(", ")}`);
     const results = created.concat(await Promise.all(reqs.map(async (r) => {
       if (!known.has(r.role) || r.role === live.role.name) return `### ${r.role}
 Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.name).join(", ")}.`;
       try {
-        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, wait: true, timeoutSec: 1800 });
-        return `### ${r.role}${x.harness ? ` (${x.harness})` : ""}
+        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, model: r.model, args: r.args, wait: true, timeoutSec: 1800 });
+        return `### ${r.role}${x.harness ? ` (${x.harness}${x.model ? ` · ${x.model}` : ""})` : ""}
 ${x.result ?? `status: ${x.status}`}`;
       } catch (e) { return `### ${r.role}
 Failed: ${String((e as Error)?.message ?? e)}`; }
@@ -1820,6 +1836,26 @@ export const MEMORY_RULES = "Memory: you share a memory with the user's other ag
 
 /** Sent after a crash restart that resumed the session (or with the partial reply, when it could not). */
 const CRASH_CONTINUE = "Your previous response was interrupted because the agent process exited. Continue exactly where you stopped; do not repeat what you already wrote.";
+/** The model a delegation asks for: `provider/model` when a provider is given separately (Pi, OpenCode), else the model as is. */
+export function delegateModel(model?: string | null, provider?: string | null): string | null {
+  const m = model?.trim() || "";
+  const p = provider?.trim().replace(/\/+$/, "") || "";
+  if (!m) return null;
+  return p && !m.toLowerCase().startsWith(`${p.toLowerCase()}/`) ? `${p}/${m}` : m;
+}
+
+/** Launch flags the app sets itself (protocol, session, read-only tools, permission bypasses): a delegation can't override them. */
+const RESERVED_LAUNCH_FLAGS = /^--?(mode|session|no-session|tools|no-tools|acp|stdio|resume|continue|yolo|allow-all-tools|allow-all|dangerously[\w-]*|permission-mode)(=|$)/i;
+
+/** Extra launch arguments from a delegation, or an error naming a flag the app owns. */
+export function checkLaunchArgs(args?: string | null): string | null {
+  const a = args?.trim();
+  if (!a) return null;
+  const bad = a.split(/\s+/).map((x) => x.replace(/^["']/, "")).filter((x) => RESERVED_LAUNCH_FLAGS.test(x));
+  if (bad.length) throw new Error(`args can't set ${bad.join(", ")}: TheFlashMaster sets those itself. Pass only model options such as --provider, --model or --thinking.`);
+  return a;
+}
+
 /** Errors that mean the harness process itself is gone (not a model or protocol error). */
 const HARNESS_EXIT = /harness exited|failed to start|exited again after a restart/i;
 

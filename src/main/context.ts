@@ -206,7 +206,7 @@ export function budgetState(used: number, limit: number, warnPct: number): Budge
   return "ok";
 }
 
-export interface TextDelegation { role: string; harness?: string; folder?: string; goal: string }
+export interface TextDelegation { role: string; harness?: string; folder?: string; model?: string; args?: string; goal: string }
 
 /** Instructions for a coordinator whose `delegate` tool didn't load (MCP blocked by policy, Pi without MCP…). */
 export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
@@ -215,6 +215,10 @@ starting at the beginning of a line:
 DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
 DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, cursor, claude, pi or duo, only when the user asked for one)
 DELEGATE <role>@<harness> in "<folder>": <brief>   (run it in that folder instead of the project, e.g. GitLab Duo, which only runs in GitLab repos)
+DELEGATE <role>@<harness> model "<model>": <brief>   (run it on that model; for Pi write provider/model, e.g. DELEGATE scout@pi model "qwen-local-8800/qwen3.8:27b": …)
+DELEGATE <role>@<harness> args "<extra launch arguments>": <brief>   (rarely needed, e.g. args "--thinking high" for Pi)
+in, model and args can be combined in any order. Always use model "…" when the user or brief names a model or provider:
+a model named only in the brief text is not applied.
 A brief may continue on the following lines until a blank line.
 To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
 AGENT <name>[@<harness>]: <one-line description>
@@ -232,8 +236,15 @@ export function parseTextDelegations(text: string): TextDelegation[] {
   for (const raw of text.split(/\r?\n/)) {
     if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
     if (fence) continue;
-    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?(?:\s+in\s+["`]([^"`]+)["`])?\s*:\s*(.*)$/.exec(raw);
-    if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(m[3] ? { folder: m[3].trim() } : {}), goal: m[4]!.trim() }; out.push(cur); continue; }
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?((?:\s+(?:in|model|args)\s+(?:"[^"]*"|`[^`]*`))*)\s*:\s*(.*)$/.exec(raw);
+    if (m) {
+      const opt: Record<string, string> = {};
+      for (const o of m[3]!.matchAll(/(in|model|args)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
+      cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(opt.in ? { folder: opt.in } : {}),
+        ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), goal: m[4]!.trim() };
+      out.push(cur);
+      continue;
+    }
     if (/^\s*(?:\*\*)?(?:AGENT|END)\b/.test(raw)) { cur = null; continue; }
     if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
     if (cur) cur.goal = `${cur.goal}\n${raw.trim()}`.trim();
