@@ -9,23 +9,12 @@ import type { Settings } from "@shared/settings";
 import { detectExecutable, killTree, runCapture, spawnTool, splitArgs } from "./process";
 import type { HarnessAdapter, HarnessSession, PromptAttachment, SessionOptions, TurnResult } from "./types";
 
-export type DuoContext = Settings["duo"];
-
 /**
- * Duo finds its GitLab project from the folder's git remote, else falls back to your default Duo namespace
- * (GitLab → Preferences). With neither it cannot start a session. Duo's own `--gitlab-project-path` /
- * GITLAB_PROJECT_PATH (and GITLAB_BASE_URL for the instance) name the project directly, so we pass those:
- * no fake remotes, nothing written to the user's repo.
+ * Duo works on the GitLab project behind the folder's git remote, so Duo agents only start in GitLab repos:
+ * a folder whose remote is gitlab.com, a host named gitlab…, the instance in GITLAB_BASE_URL / GITLAB_URL, or one of
+ * the hosts in Settings → Harnesses → GitLab Duo (for self-managed GitLab on another name).
  */
-export function parseDuoProject(project: string, instanceUrl = ""): { path: string; baseUrl: string } | null {
-  let p = project.trim();
-  let baseUrl = instanceUrl.trim().replace(/\/+$/, "");
-  const url = /^(https?:\/\/[^/]+)\/(.+)$/i.exec(p);
-  if (url) { baseUrl ||= url[1]!; p = url[2]!; }
-  p = p.replace(/\/-\/.*$/, "").replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
-  if (!p.includes("/")) return null; // a project path is always namespace/project
-  return { path: p, baseUrl };
-}
+export type DuoSettings = Settings["duo"];
 
 /** Hosts of the remotes in `git remote -v` output (https, ssh:// and scp-style git@host:path). */
 export function remoteHosts(remotes: string): string[] {
@@ -39,24 +28,39 @@ export function remoteHosts(remotes: string): string[] {
   return [...hosts];
 }
 
-/** True when a remote points at the GitLab instance (or any host named gitlab), so Duo detects the project itself. */
-export function hasGitLabRemote(remotes: string, baseUrl: string): boolean {
-  const instance = /^https?:\/\/([^/:]+)/i.exec(baseUrl)?.[1]?.toLowerCase() ?? "gitlab.com";
-  return remoteHosts(remotes).some((h) => h === instance || /(^|[.-])gitlab([.-]|$)/.test(h));
+/** Host names from a comma/space/newline separated list of hosts or URLs. */
+export function hostList(text: string): string[] {
+  return text.split(/[\s,;]+/).map((h) => h.trim().toLowerCase().replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").replace(/[/:].*$/, ""))
+    .filter(Boolean);
 }
 
-/** Environment that points Duo at the configured project, or {} when none is set or the folder is a GitLab project already. */
-export function duoContextEnv(ctx: DuoContext | undefined, remotes: string): Record<string, string> {
-  const parsed = ctx?.project ? parseDuoProject(ctx.project, ctx.instanceUrl) : null;
-  if (!parsed) return {};
-  if (!ctx!.always && hasGitLabRemote(remotes, parsed.baseUrl)) return {};
-  return { GITLAB_PROJECT_PATH: parsed.path, ...(parsed.baseUrl ? { GITLAB_BASE_URL: parsed.baseUrl } : {}) };
+/** True when a remote points at GitLab: gitlab.com, any host named gitlab, or one of `extraHosts`. */
+export function hasGitLabRemote(remotes: string, extraHosts: string[] = []): boolean {
+  const extra = new Set(extraHosts.map((h) => h.toLowerCase()));
+  return remoteHosts(remotes).some((h) => extra.has(h) || /(^|[.-])gitlab([.-]|$)/.test(h));
+}
+
+/** Hosts that count as GitLab besides gitlab.com and hosts named gitlab: the configured ones and the instance in the env. */
+export function duoGitlabHosts(settings: DuoSettings | undefined, env: Record<string, string | undefined> = process.env): string[] {
+  return hostList([settings?.hosts ?? "", env.GITLAB_BASE_URL ?? "", env.GITLAB_URL ?? ""].join(" "));
+}
+
+/** Null when Duo may start in `cwd`, else the message that says why not and what to do. */
+export async function gitlabRepoProblem(cwd: string, extraHosts: string[] = []): Promise<string | null> {
+  const r = await runCapture("git", ["remote", "-v"], 5000, cwd).catch(() => ({ code: 1, out: "" }));
+  const remotes = r.code === 0 ? r.out : "";
+  if (hasGitLabRemote(remotes, extraHosts)) return null;
+  const hosts = remoteHosts(remotes);
+  const why = r.code !== 0 ? "it is not a git repository" : hosts.length ? `its remote is on ${hosts.join(", ")}, not GitLab` : "it has no git remote";
+  return `GitLab Duo only runs in GitLab repositories, and ${cwd} is not one: ${why}. ` +
+    "Open a project cloned from GitLab, or pick another harness for this agent. " +
+    "Self-managed GitLab on another host name? Add it in Settings → Harnesses → GitLab Duo.";
 }
 
 const LOG_LINE_RE = /^\s*\d{4}-\d\d-\d\dT[\d:.]+\s*\[(\w+)\]:\s*/;
 
 /** The useful part of a failed Duo run: its [error] lines (not the shutdown chatter at the end), plus what to do about it. */
-export function duoFailure(log: string, code: number | null, projectPath?: string): string {
+export function duoFailure(log: string, code: number | null): string {
   const lines = log.split(/\r?\n/);
   const errors: string[] = [];
   for (const l of lines) {
@@ -68,12 +72,8 @@ export function duoFailure(log: string, code: number | null, projectPath?: strin
   }
   const plain = lines.filter((l) => l.trim() && !LOG_LINE_RE.test(l)).join("\n").trim();
   let msg = errors.length ? errors.slice(-3).join("\n") : (plain || log.trim()).slice(-400);
-  const noContext = /workflow id not available|agentic chat is not available|default (duo )?namespace|failed to initialize workflow/i;
-  if (projectPath && /failed to fetch project details/i.test(log)) {
-    msg += `\n\nDuo could not open the GitLab project "${projectPath}". Check the path, the instance URL and that your account can see it (Settings → Harnesses → GitLab Duo).`;
-  } else if (!projectPath && noContext.test(log)) {
-    msg += "\n\nThis folder is not a GitLab project and Duo has no default namespace to fall back on. " +
-      "Set a GitLab project for Duo in Settings → Harnesses → GitLab Duo, or a default GitLab Duo namespace in your GitLab preferences.";
+  if (/workflow id not available|agentic chat is not available|failed to fetch project details/i.test(log)) {
+    msg += "\n\nDuo could not use this repository's GitLab project. Check that the duo CLI is signed in to the GitLab instance that hosts it and that GitLab Duo is on for the project.";
   }
   return `duo exited with ${code}: ${msg}`;
 }
@@ -87,36 +87,23 @@ export class DuoSession implements HarnessSession {
   private current: ChildProcess | null = null;
   private closed = false;
 
-  private context: Promise<Record<string, string>> | null = null;
-
-  constructor(private exe: string, private prefixArgs: string[], private o: SessionOptions, private getContext?: () => DuoContext | undefined) {
+  constructor(private exe: string, private prefixArgs: string[], private o: SessionOptions) {
     this.sessionId = o.resumeSessionId;
-  }
-
-  /** Worked out once per session: the folder's remotes don't change mid-chat. */
-  private contextEnv(): Promise<Record<string, string>> {
-    const ctx = this.getContext?.();
-    if (!ctx?.project) return Promise.resolve({});
-    this.context ??= runCapture("git", ["remote", "-v"], 5000, this.o.cwd)
-      .then((r) => (r.code === 0 ? r.out : ""), () => "")
-      .then((remotes) => duoContextEnv(ctx, remotes));
-    return this.context;
   }
 
   get alive(): boolean {
     return !this.closed;
   }
 
-  async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
+  prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     const goal = attachments?.length ? `${text}\n\nAttached files:\n${attachments.map((a) => `- ${a.name}: ${a.path}`).join("\n")}` : text;
     const args = [...this.prefixArgs, "run", "--goal", goal, ...splitArgs(this.o.extraArgs)];
     if (this.sessionId) args.push("--existing-session-id", this.sessionId);
     if (this.o.model) args.push("--model", this.o.model);
-    const ctxEnv = await this.contextEnv();
     return new Promise((resolve) => {
       let cancelled = false;
       let errTail = "";
-      const child = spawnTool(this.exe, args, { cwd: this.o.cwd, env: { ...process.env, ...this.o.env, ...ctxEnv }, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawnTool(this.exe, args, { cwd: this.o.cwd, env: { ...process.env, ...this.o.env }, stdio: ["ignore", "pipe", "pipe"] });
       this.current = child;
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (d: string) => {
@@ -137,7 +124,7 @@ export class DuoSession implements HarnessSession {
         this.current = null;
         if (cancelled) resolve({ stopReason: "cancelled" });
         else if (code === 0) resolve({ stopReason: "end_turn" });
-        else resolve({ stopReason: "error", error: duoFailure(errTail, code, ctxEnv.GITLAB_PROJECT_PATH) });
+        else resolve({ stopReason: "error", error: duoFailure(errTail, code) });
       });
     });
   }
@@ -160,8 +147,10 @@ export class DuoAdapter implements HarnessAdapter {
   readonly label = "GitLab Duo CLI";
   readonly protocol = "headless" as const;
 
-  /** getContext: Settings → Harnesses → GitLab Duo (read at each session start, so changes apply to the next chat). */
-  constructor(private getContext?: () => DuoContext | undefined) {}
+  /** getSettings: Settings → Harnesses → GitLab Duo, read at each start. */
+  constructor(private getSettings?: () => DuoSettings | undefined) {}
+
+
 
   detect(pathOverride: string): Promise<HarnessStatus> {
     return detectExecutable({
@@ -171,8 +160,10 @@ export class DuoAdapter implements HarnessAdapter {
   }
 
   async start(o: SessionOptions): Promise<HarnessSession> {
+    const problem = await gitlabRepoProblem(o.cwd, duoGitlabHosts(this.getSettings?.(), { ...process.env, ...o.env }));
+    if (problem) throw new Error(problem);
     const exe = o.executable ?? "duo";
     const viaGlab = /glab(\.exe)?$/i.test(exe);
-    return new DuoSession(exe, viaGlab ? ["duo", "cli"] : [], o, this.getContext);
+    return new DuoSession(exe, viaGlab ? ["duo", "cli"] : [], o);
   }
 }

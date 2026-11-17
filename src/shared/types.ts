@@ -152,6 +152,8 @@ export interface AgentRun {
   branch: string | null;
   /** Copilot credits (or premium requests) this agent used, counted from Copilot's /usage after each turn. */
   credits: number;
+  /** Folder the coordinator started this specialist in, instead of the project folder (null = the project folder). */
+  folder?: string | null;
 }
 
 export interface Task {

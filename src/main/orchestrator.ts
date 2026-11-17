@@ -6,7 +6,7 @@
  * user sees them without the coordinator's context ever containing their transcript.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
@@ -23,6 +23,7 @@ import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness
 import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
 import { buildFixRequest, type ReviewComment } from "@shared/review";
 import { prepareInstructions } from "./harness/instructions";
+import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
@@ -111,6 +112,8 @@ interface Live {
   /** Isolated git worktree the agent works in (null = the project folder); undefined = not decided yet. */
   worktree?: string | null;
   branch?: string | null;
+  /** Folder the coordinator started this specialist in instead of the project folder (delegate `folder`). */
+  folder?: string | null;
   /** Last time the harness sent anything (text, tool update, plan…) during a turn; drives the stuck-agent watchdog. */
   lastOutputAt?: number;
   /** The watchdog already warned about this silence (cleared when output resumes). */
@@ -315,7 +318,7 @@ export class Orchestrator {
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
-    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; agentId?: string }):
+    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; agentId?: string; folder?: string }):
     Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
@@ -329,6 +332,13 @@ export class Orchestrator {
     // Specialist output appears as a thread under the coordinator's current reply.
     const threadRoot = parent.threadRoot ?? parent.currentMessageId ?? parent.lastReplyId ?? null;
     const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
+    const projectPath = chat.projectId ? this.d.db.getProject(chat.projectId)?.path ?? null : null;
+    const folder = a.folder?.trim() && !a.agentId ? this.resolveFolder(a.folder.trim(), projectPath) : null;
+    // GitLab Duo only works in GitLab repos: say so now, before an agent is created that could never start.
+    if (want === "duo" && !a.agentId && this.d.harnesses.resolve("duo", s) === "duo") {
+      const problem = await gitlabRepoProblem(folder ?? projectPath ?? this.d.homeDir, duoGitlabHosts(s.duo));
+      if (problem) throw new Error(`${problem} Pass folder = a GitLab repository to run it there.`);
+    }
     // Every delegation starts a new instance (own session, worktree and task), so two Coders never share one
     // conversation. Only an explicit agentId (an instance this agent started earlier) sends a follow-up to it.
     let live: Live;
@@ -347,6 +357,7 @@ export class Orchestrator {
     } else {
       live = this.ensureLive(chat, threadRoot, this.role(a.role), parent.depth + 1, `${parentAgentId}>${a.role}#${++this.instanceSeq}`, parentAgentId, brief,
         want ? { harness: want, model: a.model || null } : undefined);
+      if (folder) { live.folder = folder; this.d.db.setAgentFolder(live.agentId, folder); }
     }
     const role = live.role;
     if (want && live.harness !== want)
@@ -445,8 +456,19 @@ export class Orchestrator {
   private get git(): Git { return this.d.git ?? defaultGit; }
 
   /** A delegated code-writing specialist in a git project gets its own worktree and branch; anyone else works in the project folder. */
+  /** A delegate `folder`: absolute, ~/…, or relative to the project. It must exist. */
+  private resolveFolder(folder: string, projectPath: string | null): string {
+    const f = folder.replace(/^["']|["']$/g, "");
+    const dir = /^~([\\/]|$)/.test(f) ? join(this.d.homeDir, f.slice(1)) : isAbsolute(f) ? f : resolvePath(projectPath ?? this.d.homeDir, f);
+    let ok = false;
+    try { ok = statSync(dir).isDirectory(); } catch { /* missing */ }
+    if (!ok) throw new Error(`folder not found: ${dir}`);
+    return dir;
+  }
+
   private async prepareWorktree(l: Live, projectPath: string | null, chatId: string, threadRoot: string | null): Promise<void> {
     l.worktree = null;
+    if (l.folder) return; // started in a folder of its own: it works right there
     if (!projectPath || l.depth === 0 || !l.role.isolate || !this.d.settings().agents.isolateWriters) return;
     if (!(await canIsolate(projectPath, this.git))) return;
     const short = l.agentId.slice(0, 8);
@@ -821,7 +843,7 @@ export class Orchestrator {
     const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
     const l: Live = { key, agentId: a.id, name: a.name, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
-      worktree: a.worktree, branch: a.branch };
+      worktree: a.worktree, branch: a.branch, folder: a.folder ?? null };
     this.live.set(key, l);
     this.byAgent.set(a.id, l);
     return l;
@@ -1089,7 +1111,7 @@ export class Orchestrator {
         this.d.emit({ type: "message.created", message: reply });
       };
       if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
-      const workDir = live.worktree ?? project?.path ?? null;
+      const workDir = live.worktree ?? live.folder ?? project?.path ?? null;
       if (firstTurn) {
         // A CLI that dies while starting gets one more try before the turn fails.
         live.session = await this.openSession(live, workDir, t.chat).catch((e) => {
@@ -1543,12 +1565,12 @@ export class Orchestrator {
     }
     const known = new Set(this.d.roles().map((r) => r.name));
     const runnable = reqs.filter((r) => known.has(r.role) && r.role !== live.role.name);
-    if (runnable.length) this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}`).join(", ")}`);
+    if (runnable.length) this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}${r.folder ? ` in ${r.folder}` : ""}`).join(", ")}`);
     const results = created.concat(await Promise.all(reqs.map(async (r) => {
       if (!known.has(r.role) || r.role === live.role.name) return `### ${r.role}
 Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.name).join(", ")}.`;
       try {
-        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, wait: true, timeoutSec: 1800 });
+        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, wait: true, timeoutSec: 1800 });
         return `### ${r.role}${x.harness ? ` (${x.harness})` : ""}
 ${x.result ?? `status: ${x.status}`}`;
       } catch (e) { return `### ${r.role}
