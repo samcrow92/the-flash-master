@@ -92,16 +92,31 @@ export function buildTools(d: {
       handler: async (a) => d.orch.getResult(a.agentId),
     },
     {
+      set: "core", name: "read_report",
+      description: "Read another agent's full report (its last finished reply), not just the short result delegate returns. Works for any agent of this project, "
+        + "finished or working, at any depth: use it to pick up an earlier specialist's accepted report instead of delegating a helper or redoing the work. "
+        + "Long reports come in slices: pass offset to continue while more is true; index 1, 2… reads older reports of the same agent.",
+      inputSchema: obj({
+        agentId: s("agent id (from list_agents with activeOnly: false, delegate or a results message)"),
+        name: s("or the agent's name, e.g. Nova or \"Nova · Coder\", or a role name for its latest instance"),
+        offset: { type: "number", description: "character offset to start at (default 0)" },
+        limit: { type: "number", description: "characters to return (default 12000, max 40000)" },
+        index: { type: "number", description: "0 = latest report (default), 1 = the one before…" },
+      }),
+      handler: async (a, c) => d.orch.readReport(c.agentId, a),
+    },
+    {
       set: "core", name: "list_roles", description: "List available specialist roles.",
       inputSchema: obj({}),
       handler: async () => d.roles().map((r) => ({ name: r.name, title: r.title, description: r.description })),
     },
     {
-      set: "core", name: "list_agents", description: "List agents of the current project with status.",
-      inputSchema: obj({ activeOnly: { type: "boolean" } }),
+      set: "core", name: "list_agents", description: "List agents of the current project with status. activeOnly: false also lists finished agents (with a one-line result), whose full report read_report returns.",
+      inputSchema: obj({ activeOnly: { type: "boolean", description: "default true; false includes finished and closed agents" } }),
       handler: async (a, c) => d.db.listAgents({ projectId: d.orch.agentProject(c.agentId), activeOnly: a.activeOnly ?? true })
         .map((x) => ({ id: x.id, name: x.name, role: x.role, status: x.status, activity: x.lastActivity, specialist: !!x.parentAgentId,
-          ...(x.branch ? { branch: x.branch } : {}) })),
+          ...(x.branch ? { branch: x.branch } : {}),
+          ...(a.activeOnly === false && x.resultSummary ? { result: (/summary:\s*(.+)/.exec(x.resultSummary)?.[1] ?? x.resultSummary).replace(/\s+/g, " ").slice(0, 160) } : {}) })),
     },
     {
       set: "core", name: "close_agent",

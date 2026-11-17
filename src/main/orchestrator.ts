@@ -345,9 +345,11 @@ export class Orchestrator {
     if (parent.depth + 1 > s.agents.delegationDepth)
       throw new Error(parent.depth === 0
         ? "delegation is turned off (Settings → Agents → delegation depth is 0) — tell the user; don't do the work yourself"
-        : `delegation depth limit (${s.agents.delegationDepth}) reached — do it yourself or ask the user`);
+        : `delegation depth limit (${s.agents.delegationDepth} levels, Settings → Agents) reached: you can't start a helper from here. `
+          + "To get an earlier agent's report or result, call read_report (no delegation needed). Otherwise do it yourself, or end with status blocked and say what you need from the agent that delegated to you");
     const chat = this.mustChat(parent.chatId);
-    const brief = buildBrief({ goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, parentRole: parent.role.name });
+    const brief = buildBrief({ goal: a.goal, context: a.context, files: a.files, acceptance: a.acceptance, parentRole: parent.role.name,
+      helperLevels: Math.max(0, s.agents.delegationDepth - (parent.depth + 1)) });
     // Specialist output appears as a thread under the coordinator's current reply.
     const threadRoot = parent.threadRoot ?? parent.currentMessageId ?? parent.lastReplyId ?? null;
     const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
@@ -363,7 +365,7 @@ export class Orchestrator {
     // Every delegation starts a new instance (own session, worktree and task), so two Coders never share one
     // conversation. Only an explicit agentId (an instance this agent started earlier) sends a follow-up to it.
     let live: Live;
-    let reserved = false;
+    let reserved: string | null = null;
     let waiter: ((r: string) => void) | null = null;
     let done: Promise<string> | null;
     try {
@@ -415,7 +417,7 @@ export class Orchestrator {
         .catch((e) => this.finishDelegated(live, `error: ${String(e?.message ?? e)}`));
     } finally {
       // The specialist is busy now (turn() marks it synchronously), so it counts as working instead.
-      if (reserved) this.unreserveTeamSlot(parentAgentId);
+      if (reserved) this.unreserveTeamSlot(reserved);
     }
     const name = live.name ?? null;
     if (!done) return { agentId: live.agentId, name, status: "running", harness: live.harness, model: live.model,
@@ -458,6 +460,35 @@ export class Orchestrator {
     const l = this.byAgent.get(agentId);
     if (l && !l.busy) l.resultTaken = true;
     return { status: a.status, result: l?.lastResult ?? a.resultSummary };
+  }
+
+  /**
+   * The `read_report` tool: the full final reply (report) of another agent of the caller's project, not only the capped
+   * result a delegation returns. Any agent may read any agent of its project (or of its chat, without a project), at any
+   * depth, so a specialist that needs an earlier report reads it instead of delegating a helper to fetch it.
+   */
+  readReport(callerId: string, a: { agentId?: string; name?: string; offset?: number; limit?: number; index?: number }): {
+    agentId: string; name: string | null; role: string; status: string; brief: string; report: string; chars: number; offset: number; more: boolean;
+    olderReports: number } {
+    const me = this.d.db.getAgent(callerId);
+    if (!me) throw new Error("unknown agent");
+    const pool = me.projectId ? this.d.db.listAgents({ projectId: me.projectId })
+      : this.d.db.listAgents({ projectId: null }).filter((x) => x.chatId === me.chatId);
+    const want = (a.name ?? "").trim().toLowerCase();
+    const target = a.agentId ? pool.find((x) => x.id === a.agentId)
+      : want ? pool.find((x) => x.id !== callerId && (x.name?.toLowerCase() === want || agentLabel(x, x.role).toLowerCase() === want))
+        ?? pool.find((x) => x.id !== callerId && x.role.toLowerCase() === want) : undefined;
+    if (!target) throw new Error(a.agentId || want
+      ? "no such agent in this project: call list_agents with activeOnly: false to see every agent, finished ones too, with their ids"
+      : "pass agentId (from list_agents or delegate) or the agent's name");
+    const replies = this.d.db.agentReplies(target.id, 20);
+    const idx = Math.max(0, Math.floor(a.index ?? 0));
+    const full = replies[idx]?.content ?? (idx === 0 ? target.resultSummary ?? "" : "");
+    const offset = Math.max(0, Math.floor(a.offset ?? 0));
+    const limit = Math.min(40000, Math.max(500, Math.floor(a.limit ?? 12000)));
+    const report = full ? full.slice(offset, offset + limit) : "(this agent has not reported anything yet)";
+    return { agentId: target.id, name: target.name, role: target.role, status: target.status, brief: target.brief.slice(0, 600),
+      report, chars: full.length, offset, more: offset + limit < full.length, olderReports: Math.max(0, replies.length - idx - 1) };
   }
 
   pause(agentId: string): void {
@@ -1631,7 +1662,7 @@ export class Orchestrator {
     const runnable = reqs.filter((r) => known.has(r.role) && r.role !== live.role.name);
     if (runnable.length) {
       const cap = this.d.settings().agents.maxParallelSpecialists;
-      const free = cap > 0 ? Math.max(0, cap - this.teamWorking(live.agentId).length) : runnable.length;
+      const free = cap > 0 ? Math.max(0, cap - this.teamWorking(this.teamRoot(live.agentId)).length) : runnable.length;
       const later = runnable.length - free;
       this.system(t.chat.id, live.lastReplyId ?? t.threadRoot, `↪ Delegating: ${runnable.map((r) => `**${r.role}**${r.harness ? ` on ${r.harness}` : ""}${r.model ? ` (${r.model})` : ""}${r.folder ? ` in ${r.folder}` : ""}`).join(", ")}`
         + (later > 0 ? ` · ${cap} at a time, ${later} wait${later === 1 ? "s" : ""} for a free specialist` : ""));
@@ -1750,8 +1781,31 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     this.d.emit({ type: "flow.updated", agentId });
   }
 
-  /** This coordinator's specialists that are working or waiting to (busy, or with queued input). */
-  private teamWorking(parentAgentId: string): Live[] {
+  /** The coordinator at the top of an agent's delegation tree (the agent itself when nobody delegated to it). */
+  private teamRoot(agentId: string): string {
+    let id = agentId;
+    for (let i = 0; i < 12; i++) {
+      const up = this.byAgent.get(id)?.parentAgentId ?? this.d.db.getAgent(id)?.parentAgentId ?? null;
+      if (!up) break;
+      id = up;
+    }
+    return id;
+  }
+
+  /**
+   * Agents of one coordinator's tree that are working or waiting to (busy, or with queued input): its specialists and
+   * their helpers, at any depth. A specialist that is waiting for its own helper (delegate with wait) hands its place
+   * to that helper, so a chain specialist → helper counts once and nested delegation can never wait on itself.
+   */
+  private teamWorking(rootAgentId: string): Live[] {
+    const all = [...this.byAgent.values()];
+    const working = (l: Live) => !l.stopped && (l.busy || l.queue.length > 0);
+    const handedOff = (l: Live) => all.some((c) => c.parentAgentId === l.agentId && c.waiters.length > 0 && working(c));
+    return all.filter((l) => l.agentId !== rootAgentId && working(l) && !handedOff(l) && this.teamRoot(l.agentId) === rootAgentId);
+  }
+
+  /** The specialists this agent itself started that are still working (for its own messages). */
+  private ownWorking(parentAgentId: string): Live[] {
     return [...this.byAgent.values()].filter((l) => l.parentAgentId === parentAgentId && !l.stopped && (l.busy || l.queue.length > 0));
   }
 
@@ -1759,12 +1813,15 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
    * Wait until the coordinator has fewer than maxParallelSpecialists specialists working. A background delegation
    * (wait: false) is refused instead, with the names of the working ones and of finished ones it can reuse.
    */
-  private async waitForTeamSlot(parent: Live, background: boolean): Promise<boolean> {
+  private async waitForTeamSlot(parent: Live, background: boolean): Promise<string | null> {
     const cap = this.d.settings().agents.maxParallelSpecialists;
-    if (!(cap > 0)) return false;
-    const taken = () => this.teamWorking(parent.agentId).length + (this.teamReserved.get(parent.agentId) ?? 0);
-    const reserve = () => { this.teamReserved.set(parent.agentId, (this.teamReserved.get(parent.agentId) ?? 0) + 1); return true; };
-    const working = this.teamWorking(parent.agentId);
+    if (!(cap > 0)) return null;
+    // A specialist that waits for its helper lends it its own place in the team (see teamWorking): no queueing, no deadlock.
+    if (parent.depth > 0 && !background) return null;
+    const root = this.teamRoot(parent.agentId);
+    const taken = () => this.teamWorking(root).length + (this.teamReserved.get(root) ?? 0);
+    const reserve = () => { this.teamReserved.set(root, (this.teamReserved.get(root) ?? 0) + 1); return root; };
+    const working = this.teamWorking(root);
     if (taken() < cap) return reserve();
     if (background) {
       const idle = [...this.byAgent.values()].filter((l) => l.parentAgentId === parent.agentId && !l.stopped && !l.busy && !l.queue.length);
@@ -1774,23 +1831,24 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     }
     if (parent.busy) this.setStatus(parent, "running", `⏳ ${working.length}/${cap} specialists working; the next one starts when one finishes`);
     while (taken() >= cap) {
-      await new Promise<void>((r) => { const list = this.teamWaiters.get(parent.agentId) ?? []; list.push(r); this.teamWaiters.set(parent.agentId, list); });
+      await new Promise<void>((r) => { const list = this.teamWaiters.get(root) ?? []; list.push(r); this.teamWaiters.set(root, list); });
       if (parent.stopped) throw new Error("stopped by user");
     }
     return reserve();
   }
 
-  private unreserveTeamSlot(parentAgentId: string): void {
-    const n = (this.teamReserved.get(parentAgentId) ?? 1) - 1;
-    if (n > 0) this.teamReserved.set(parentAgentId, n); else this.teamReserved.delete(parentAgentId);
-    this.teamSlotFreed(parentAgentId);
+  private unreserveTeamSlot(rootAgentId: string): void {
+    const n = (this.teamReserved.get(rootAgentId) ?? 1) - 1;
+    if (n > 0) this.teamReserved.set(rootAgentId, n); else this.teamReserved.delete(rootAgentId);
+    this.teamSlotFreed(rootAgentId);
   }
 
-  /** One of this coordinator's specialists finished a turn: let one waiting delegation re-check. */
-  private teamSlotFreed(parentAgentId: string): void {
-    const list = this.teamWaiters.get(parentAgentId);
+  /** An agent of this coordinator's tree finished a turn: let one waiting delegation re-check. */
+  private teamSlotFreed(fromAgentId: string): void {
+    const rootAgentId = this.teamRoot(fromAgentId);
+    const list = this.teamWaiters.get(rootAgentId);
     const next = list?.shift();
-    if (list && !list.length) this.teamWaiters.delete(parentAgentId);
+    if (list && !list.length) this.teamWaiters.delete(rootAgentId);
     if (next) queueMicrotask(next);
   }
 
@@ -1833,7 +1891,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     if (!items.length) return;
     const chat = this.d.db.getChat(parent.chatId);
     if (!chat) return;
-    const still = this.teamWorking(parentAgentId).map((l) => agentLabel(l, l.role.title));
+    const still = this.ownWorking(parentAgentId).map((l) => agentLabel(l, l.role.title));
     const names = items.map((x) => agentLabel(x.l, x.l.role.title));
     this.flow(parentAgentId, { kind: "status", label: `woken: ${names.join(", ")} finished`, status: "running" });
     const input = [`## Specialist results`, ...items.map((x) => `### ${agentLabel(x.l, x.l.role.title)} (${x.l.role.name}, agentId ${x.l.agentId})\n${x.result}`),
