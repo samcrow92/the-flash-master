@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **The coordinator runs the crew; you only hear about real blockers.** A specialist's question, blocker or failed recovery now goes to the coordinator, not to you. The coordinator answers it itself (from the brief, the project and memory), gives the specialist the missing context or a narrower task, retries it, or hands the work to another specialist, and tells you which call it made. It raises a **Needs you** card only for missing access or credentials, a choice that changes what you asked for, or a step that can't be undone. The specialist's thread shows each question and where it went. Text-mode coordinators can follow up with a specialist through `DELEGATE <role> agent "<agentId>": …`.
 - **The flow always goes end to end, and you always get feedback.**
   - **Fix: specialists finished without delivering anything.** With text-mode tools (the default), a specialist whose first reply was only `TOOL` lines had that reply sent to the coordinator as its result, and its real report afterwards was dropped. Now only the task's last turn reports back.
   - **Silent specialists are recovered.** One that ends without a report, fails or crashes is first asked to deliver, then restarted on its task. One that sends nothing for twice the stuck-agent time (no tool call running) is interrupted and told to deliver what it has. The chat shows each attempt. Settings → Agents → *Recover a specialist that delivers nothing* (default 2; 0 = ask you right away).

@@ -9,9 +9,9 @@ import { MockAdapter } from "../src/main/harness/mock";
 import { HarnessRegistry } from "../src/main/harness/registry";
 import type { HarnessAdapter, HarnessSession, SessionOptions, TurnResult } from "../src/main/harness/types";
 import { Db } from "../src/main/db";
-import { ASK_RESTART, ASK_SKIP, Orchestrator } from "../src/main/orchestrator";
+import { Orchestrator } from "../src/main/orchestrator";
 import { loadRoles, loadSkills } from "../src/main/roles";
-import { isSilentReply, parseResult } from "../src/main/context";
+import { isSilentReply, parseResult, parseTextDelegations } from "../src/main/context";
 import { DEFAULT_SETTINGS, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
 import type { AppEvent, Message } from "../src/shared/types";
 import { isNoticeLine } from "../src/shared/replyParts";
@@ -57,6 +57,9 @@ describe("silent replies", () => {
     expect(isSilentReply("<result>\nsummary: done\n</result>")).toBe(false);
     expect(isSilentReply("The brake light flickers because the debounce counter overflows at cold start.")).toBe(false);
   });
+  it("text-mode DELEGATE lines can follow up with a specialist by agentId", () => {
+    expect(parseTextDelegations('DELEGATE tester agent "a-1": Use set A.')).toEqual([{ role: "tester", agentId: "a-1", goal: "Use set A." }]);
+  });
   it("result blocks carry quick-answer options", () => {
     const r = parseResult("<result>\nstatus: needs_decision\nquestion: A or B?\noptions: Set A | Set B; none\nsummary: two sets\n</result>");
     expect(r).toMatchObject({ status: "needs_decision", question: "A or B?", options: ["Set A", "Set B"] });
@@ -78,40 +81,20 @@ describe("specialists that don't deliver are recovered", () => {
     expect(cards(db, chat.id)).toEqual([]);
   });
 
-  it("after the reminder and a restart, the user gets a card, and the coordinator a failed result", async () => {
-    const { db, orch, chat } = setup();
+  it("after the reminder and a restart, the coordinator gets a failed result to untangle, and the user no card", async () => {
+    const { db, orch, chat, events } = setup();
     cleanup = () => orch.stopAll();
     const parentId = await idleCoordinator(db, orch, chat.id);
     const r = await orch.delegate(parentId, { role: "tester", goal: "Check the brake light [silent-always]" });
     expect(r.result).toMatch(/^status: failed\nsummary: .* ended without a report and delivered no result after 2 recovery attempts/);
+    expect(r.result).toMatch(/Untangle this yourself: .*another specialist.*Ask the user \(ask_user\) only if/s);
+    expect(r.result).toContain(`DELEGATE tester agent "${r.agentId}"`);
     const labels = db.listEvents(r.agentId).map((e) => e.label);
     expect(labels.some((l) => /asking it to deliver \(1\/2\)/.test(l))).toBe(true);
     expect(labels.some((l) => /restarting it \(2\/2\)/.test(l))).toBe(true);
-    const [card] = cards(db, chat.id);
-    expect(card!.ask).toMatchObject({ kind: "no_report", agentId: r.agentId, options: [ASK_RESTART, ASK_SKIP], recommended: 0 });
-    expect(card!.ask!.why).toMatch(/Its task: Check the brake light/);
-    expect(card!.parentId).toBeNull(); // in the coordinator's timeline, not buried in the specialist's thread
-    expect(isNoticeLine(card!)).toBe(false);
-    expect(db.getAgent(r.agentId)!.lastActivity).toMatch(/^❓ Needs you/);
-
-    // "Continue without it": the coordinator is told and replies.
-    const before = coordReplies(db, chat.id).length;
-    await orch.answerAsk(card!.id, ASK_SKIP);
-    expect(db.getMessage(card!.id)!.ask!.answer!.text).toBe(ASK_SKIP);
-    await expect(orch.answerAsk(card!.id, ASK_SKIP)).rejects.toThrow(/already answered/);
-    await until(() => coordReplies(db, chat.id).length > before && coordReplies(db, chat.id).at(-1)!.status === "done");
-    expect(db.listMessages(chat.id, null).some((m) => m.author === "user" && /^Continue without .*'s result\.$/.test(m.content))).toBe(true);
-  });
-
-  it("\"Restart it\" runs the task again, and the new outcome comes back (here: another card)", async () => {
-    const { db, orch, chat } = setup({ agents: { recoveryAttempts: 0 } });
-    cleanup = () => orch.stopAll();
-    const parentId = await idleCoordinator(db, orch, chat.id);
-    const r = await orch.delegate(parentId, { role: "tester", goal: "Check the brake light [silent-always]" });
-    expect(r.result).toMatch(/^status: failed/);
-    await orch.answerAsk(cards(db, chat.id)[0]!.id, ASK_RESTART);
-    await until(() => cards(db, chat.id).length === 2);
-    expect(db.listEvents(r.agentId).some((e) => e.label === "restarted by you")).toBe(true);
+    expect(cards(db, chat.id)).toEqual([]);
+    expect(events.some((e) => e.type === "notice" && /Needs you/.test(e.text))).toBe(false);
+    expect(allMessages(db, chat.id).some((m) => m.author === "system" && /delivered no result .*to decide what's next/.test(m.content))).toBe(true);
   });
 
   it("a specialist silent past the watchdog is interrupted and asked to deliver", async () => {
@@ -133,24 +116,29 @@ describe("needs-you cards", () => {
   let cleanup: (() => Promise<void>) | null = null;
   afterEach(async () => { await cleanup?.(); cleanup = null; });
 
-  it("a specialist's question is a card; the answer resumes it and its new result wakes the coordinator", async () => {
-    const { db, orch, chat } = setup();
+  it("a specialist's question goes to the coordinator, not to the user; its follow-up answer resumes the specialist", async () => {
+    const { db, orch, chat, events } = setup();
     cleanup = () => orch.stopAll();
     const parentId = await idleCoordinator(db, orch, chat.id);
     const r = await orch.delegate(parentId, { role: "tester", goal: "Calibrate the brake model [needs-decision]" });
-    expect(r.result).toMatch(/status: needs_decision[\s\S]*options: Set A \| Set B[\s\S]*Don't ask the user the same thing again/);
-    const [card] = cards(db, chat.id);
-    expect(card!.ask).toMatchObject({ kind: "question", agentId: r.agentId, options: ["Set A", "Set B"], recommended: 0 });
-    expect(card!.ask!.question).toMatch(/^Use calibration set A or B/);
-    const before = coordReplies(db, chat.id).length;
-    await orch.answerAsk(card!.id, "Set A");
-    // The answer shows in the specialist's thread and it continues with it…
-    const thread = db.getAgent(r.agentId)!;
-    await until(() => db.listMessages(chat.id, null).length > 0 && allMessages(db, chat.id).some((m) => m.author === "user" && m.content === "Set A" && m.parentId !== null));
-    // …and its new result comes back to the coordinator by itself.
-    await until(() => coordReplies(db, chat.id).length > before && coordReplies(db, chat.id).at(-1)!.status === "done");
-    expect(coordReplies(db, chat.id).at(-1)!.content).toContain("Specialist results");
-    expect(thread.id).toBe(r.agentId);
+    expect(r.result).toMatch(/status: needs_decision[\s\S]*options: Set A \| Set B[\s\S]*Handle it yourself if you can/);
+    expect(cards(db, chat.id)).toEqual([]);
+    expect(events.some((e) => e.type === "notice" && /Needs you|needs your decision/i.test(e.text))).toBe(false);
+    expect(allMessages(db, chat.id).some((m) => m.author === "system" && /needs your decision: Use calibration set A or B.*Sent to .* to handle/.test(m.content))).toBe(true);
+    // The coordinator answers it itself, with a follow-up to the same specialist.
+    const f = await orch.delegate(parentId, { role: "tester", agentId: r.agentId, goal: "Use set A: it matches the cold-start data." });
+    expect(f.agentId).toBe(r.agentId);
+    expect(f.result).toMatch(/summary: Mock run for "Use set A/);
+  });
+
+  it("ask_user from a specialist goes to its coordinator, not to a card", async () => {
+    const { db, orch, chat } = setup();
+    cleanup = () => orch.stopAll();
+    const parentId = await idleCoordinator(db, orch, chat.id);
+    const r = await orch.delegate(parentId, { role: "tester", goal: "Write tests" });
+    const out = orch.askUser(r.agentId, { question: "Which ECU variant?", options: ["Front", "Rear"] });
+    expect(out.note).toMatch(/goes to .*not to the user/);
+    expect(cards(db, chat.id)).toEqual([]);
   });
 
   it("ask_user raises a card without a second one from the result, and the coordinator gets the answer", async () => {
@@ -160,6 +148,8 @@ describe("needs-you cards", () => {
     const out = orch.askUser(parentId, { question: "Which ECU variant?", why: "The two variants need different calibration.", options: ["Front", "Rear"], recommended: 1 });
     expect(out.note).toMatch(/End your turn/);
     const [card] = cards(db, chat.id);
+    expect(isNoticeLine(card!)).toBe(false);
+    expect(card!.parentId).toBeNull();
     expect(card!.ask).toMatchObject({ kind: "question", question: "Which ECU variant?", why: "The two variants need different calibration.", options: ["Front", "Rear"], recommended: 1 });
     await orch.answerAsk(card!.id, "Rear");
     await until(() => coordReplies(db, chat.id).length === 2 && coordReplies(db, chat.id)[1]!.status === "done");

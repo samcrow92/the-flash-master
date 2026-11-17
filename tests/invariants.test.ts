@@ -281,6 +281,18 @@ describe("scannable coordinator replies", () => {
     expect(read("src/renderer/views/ChatView.tsx")).toContain("<AskCard m={m} />");
     expect(read("src/renderer/components/AskCard.tsx")).toContain("api().answerAsk(");
   });
+  // Mari doesn't babysit agents: a delegated specialist's question goes to its coordinator, which untangles it first.
+  it("delegated specialists never raise a needs-you card themselves; the coordinator is told to untangle first", () => {
+    const orch = read("src/main/orchestrator.ts");
+    for (const fn of ["private surfaceSaid(", "  askUser("]) {
+      const body = orch.slice(orch.indexOf(fn), orch.indexOf("\n  }\n", orch.indexOf(fn)));
+      expect(body.indexOf("if (l.parentAgentId && l.depth > 0)"), fn).toBeGreaterThan(0);
+      expect(body.indexOf("if (l.parentAgentId && l.depth > 0)"), fn).toBeLessThan(body.indexOf("this.raiseAsk("));
+    }
+    const give = orch.slice(orch.indexOf("private recoverOrReport("), orch.indexOf("private coordinatorFeedback("));
+    expect(give).not.toContain("this.raiseAsk(");
+    expect(read("src/main/context.ts")).toMatch(/COORDINATOR_FEEDBACK_RULES = `## You run the crew/);
+  });
 });
 
 describe("EWM source control stays read-only", () => {

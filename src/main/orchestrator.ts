@@ -29,7 +29,7 @@ import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
-  unslopRules, isSilentReply, NEEDS_YOU_RULES, COORDINATOR_FEEDBACK_RULES,
+  unslopRules, isSilentReply, NEEDS_YOU_RULES, SPECIALIST_ASK_RULES, COORDINATOR_FEEDBACK_RULES,
 } from "./context";
 
 /** Outcome of closing one agent through the close_agent / close_idle_agents tools. */
@@ -145,6 +145,8 @@ interface Live {
   recoveries?: number;
   /** The agent raised a "needs you" card in this turn (ask_user): it's waiting for the user, not silent. */
   askedThisTurn?: boolean;
+  /** A delegated specialist's ask_user question this turn: it goes to its delegating agent with the result, not to the user. */
+  pendingQuestion?: string | null;
   /** The coordinator was already reminded once to tell the user something; a second silent turn raises a card. */
   coordNudged?: boolean;
   /** The stall watchdog gave up on this turn (it's ended as failed, not as stopped by the user). */
@@ -180,6 +182,9 @@ const DELIVER_NUDGE = "You ended your turn without delivering a result, so the a
   + "if you need the user, use status needs_decision with a question and options.";
 const RESTART_NOTE = (why: string) => `TheFlashMaster restarted you because the previous attempt at this task ${why}. `
   + "Do the task below and end with the result block. If something keeps failing, stop and report it (status blocked or failed) instead of retrying it.";
+const UNTANGLE_NOTE = (name: string, agentId: string) => `(${name} needs an answer before it can go on. Handle it yourself if you can: decide from the brief, `
+  + `the project and memory, give it the missing context, or narrow the task, and send that as a follow-up (delegate with agentId ${agentId}, or in text mode DELEGATE <role> agent "${agentId}": …); or `
+  + "give the work to another specialist. Ask the user (ask_user) only for missing access or credentials, a choice that changes what they asked for, or an irreversible step.)";
 const STALL_NUDGE = (mins: number) => `You have sent nothing for ${mins} min. If something is hanging, stop it. Deliver your result now `
   + "with what you have (the result block); if you're blocked, say what blocks you with status blocked.";
 const COORD_NUDGE = "Your turn ended without a reply to the user, so they don't know where things stand. Reply now: "
@@ -1209,7 +1214,7 @@ export class Orchestrator {
     live.idleSince = null;
     const turnStart = Date.now();
     let reportFix: string | null = null;
-    if (!t.textRound) live.askedThisTurn = false;
+    if (!t.textRound) { live.askedThisTurn = false; live.pendingQuestion = null; }
     const borrowed = !!t.borrowSlot;
     if (!borrowed) {
       const max = s.agents.maxConcurrent || MAX_CONCURRENT_FALLBACK;
@@ -1328,7 +1333,7 @@ export class Orchestrator {
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? NEEDS_YOU_RULES : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
@@ -1457,8 +1462,7 @@ export class Orchestrator {
       }
       const asked = said === "needs_decision" || said === "blocked" || !!live.askedThisTurn;
       outcome = {
-        result: compact + (asked && live.depth > 0 ? `\n(The user sees this as a "needs you" card in the chat; their answer goes to ${agentLabel(live, t.role.title)}, `
-          + "whose new result then comes to you. Don't ask the user the same thing again.)" : ""),
+        result: compact + (live.pendingQuestion ? `\n${live.pendingQuestion}` : "") + (asked && live.parentAgentId ? `\n${UNTANGLE_NOTE(agentLabel(live, t.role.title), live.agentId)}` : ""),
         failed: status === "error" ? (gaveUp ?? res.error ?? "error") : null,
         silent: status === "done" && !redirected && !asked && isSilentReply(text, live.depth > 0 ? 20 : 1),
       };
@@ -1557,14 +1561,12 @@ export class Orchestrator {
       const tried = cap ? ` TheFlashMaster tried ${cap === 1 ? "once" : `${cap} times`} to recover it (a reminder${cap > 1 ? ", then a restart" : ""}).` : "";
       this.flow(live.agentId, { kind: "error", label: `gave up: ${why}`.slice(0, 160) });
       if (live.task?.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(live.task.taskId, { status: "blocked" }) });
-      this.raiseAsk(live, t.chat.id, {
-        kind: o.failed ? "failed" : "no_report", agentId: live.agentId, who,
-        question: `${name} didn't deliver a result. Restart it, or let the coordinator continue without it?`,
-        why: `It ${why}.${tried} Its task: ${goal.replace(/\s+/g, " ").slice(0, 220)}`,
-        options: [ASK_RESTART, ASK_SKIP], recommended: 0,
-      });
-      return `status: failed\nsummary: ${name} ${why} and delivered no result${cap ? ` after ${cap} recovery attempt${cap === 1 ? "" : "s"}` : ""}. `
-        + "The user sees a card asking whether to restart it or continue without it; their answer comes to you. Tell the user in one line, don't ask again.";
+      // The coordinator owns the plan: it decides what happens next (restart, reassign, go on); the user hears from it.
+      this.system(t.chat.id, t.threadRoot, `⚠️ **${who}** ${why} and delivered no result${tried ? ` (${tried.trim().replace(/\.$/, "")})` : ""}. Its result went to the agent that delegated to it, to decide what's next.`);
+      return `status: failed\nsummary: ${name} ${why} and delivered no result${cap ? ` after ${cap} recovery attempt${cap === 1 ? "" : "s"}` : ""}. Its task: ${goal.replace(/\s+/g, " ").slice(0, 220)}\n`
+        + `Untangle this yourself: restart it with a narrower brief or the missing context (a follow-up: delegate with agentId ${live.agentId}, or in text mode DELEGATE ${live.role.name} agent "${live.agentId}": …), `
+        + "give the task to another specialist, or continue without it, and tell the user in one line which call you made. "
+        + "Ask the user (ask_user) only if none of that can work: missing access or credentials, a change to what they asked for, or an irreversible step.";
     }
     live.recoveries = n;
     const restart = !!o.failed || n >= 2 || !live.session?.alive;
@@ -1632,6 +1634,15 @@ export class Orchestrator {
     if (!question) throw new Error("question is required");
     const options = (Array.isArray(a.options) ? a.options : []).map((o) => String(o).trim()).filter(Boolean).slice(0, 6).map((o) => o.slice(0, 120));
     l.askedThisTurn = true;
+    // A delegated specialist's question goes to the agent that delegated to it, which answers it or takes it to the user.
+    if (l.parentAgentId && l.depth > 0) {
+      const parent = this.byAgent.get(l.parentAgentId);
+      l.pendingQuestion = [`question for you (${a.blocked ? "blocked" : "needs a decision"}): ${question.slice(0, 600)}`, a.why?.trim() ? `why: ${a.why.trim().slice(0, 800)}` : "",
+        options.length ? `options: ${options.join(" | ")}` : ""].filter(Boolean).join("\n");
+      this.flow(agentId, { kind: "status", label: `asked ${parent ? agentLabel(parent, parent.role.title) : "its delegating agent"}: ${question}`.slice(0, 160), status: "needs_decision" });
+      return { asked: true, note: `Your question goes to ${parent ? agentLabel(parent, parent.role.title) : "the agent that delegated to you"}, not to the user: it answers or decides. `
+        + "End your turn now with your result block (status needs_decision or blocked, the question and options); the answer comes to you as a new message." };
+    }
     this.raiseAsk(l, l.chatId, { kind: a.blocked ? "blocked" : "question", agentId, who: `${l.role.icon} ${agentLabel(l, l.role.title)}`,
       question: question.slice(0, 600), why: a.why?.trim().slice(0, 800) || null, options,
       recommended: typeof a.recommended === "number" && a.recommended >= 0 && a.recommended < options.length ? a.recommended : (options.length ? 0 : null) });
@@ -1938,7 +1949,7 @@ export class Orchestrator {
       if (!known.has(r.role) || r.role === live.role.name) return `### ${r.role}
 Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.name).join(", ")}.`;
       try {
-        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, model: r.model, args: r.args, wait: true, timeoutSec: 1800 });
+        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, model: r.model, args: r.args, agentId: r.agentId, wait: true, timeoutSec: 1800 });
         return `### ${r.role}${x.name ? ` · ${x.name}` : ""}${x.harness ? ` (${x.harness}${x.model ? ` · ${x.model}` : ""})` : ""}
 ${x.result ?? `status: ${x.status}`}`;
       } catch (e) { return `### ${r.role}
@@ -2162,7 +2173,8 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     this.flow(parentAgentId, { kind: "status", label: `woken: ${names.join(", ")} finished`, status: "running" });
     const input = [`## Specialist results`, ...items.map((x) => `### ${agentLabel(x.l, x.l.role.title)} (${x.l.role.name}, agentId ${x.l.agentId})\n${x.result}`),
       still.length ? `Still working: ${still.join(", ")}. Their results come in a later message.` : "All your specialists have finished.",
-      "Continue: integrate these results. If the request is complete, answer the user; otherwise delegate the next step (a follow-up with agentId when it builds on this work)."].join("\n\n");
+      "Continue: integrate these results. If the request is complete, answer the user; otherwise delegate the next step (a follow-up with agentId when it builds on this work). "
+        + "A specialist that asks, is blocked or failed is yours to untangle first; go to the user only for access, a change to their goal, or an irreversible step."].join("\n\n");
     void this.turn({ chat, threadRoot: parent.threadRoot, role: parent.role, input, skills: [], depth: parent.depth, brief: null, liveKey: parent.key, deliver: false, textRound: 0 })
       .catch((e) => this.system(chat.id, parent.threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
   }
@@ -2178,6 +2190,14 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
   private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string, options: string[] = []): void {
     const who = `${l.role.icon} ${agentLabel(l, l.role.title)}`;
     // A question or blocker is a "needs you" card (unless the agent already raised one with ask_user this turn).
+    // A delegated specialist's question, blocker or failure goes to the agent that delegated to it (in its result), which
+    // untangles it; the thread shows it, but the user isn't pinged: they hear from the coordinator when it needs them.
+    if (l.parentAgentId && l.depth > 0) {
+      const parent = this.byAgent.get(l.parentAgentId);
+      this.system(chatId, threadRoot, `${said === "failed" ? "⚠️" : "↪"} **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}. Sent to ${parent ? agentLabel(parent, parent.role.title) : "the agent that delegated to it"} to handle.`);
+      this.emitAgent(this.d.db.updateAgent(l.agentId, { lastActivity: `${SAID_LABEL[said]} (sent to ${parent ? agentLabel(parent, parent.role.title) : "its delegating agent"}): ${asks}`.slice(0, 300) }));
+      return;
+    }
     if (said === "needs_decision" || said === "blocked") {
       if (!l.askedThisTurn) this.raiseAsk(l, chatId, { kind: said === "blocked" ? "blocked" : "question", agentId: l.agentId, who, question: asks.slice(0, 600),
         why: said === "blocked" ? `${agentLabel(l, l.role.title)} is blocked and can't go on without you.` : null, options, recommended: options.length ? 0 : null });

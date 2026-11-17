@@ -233,19 +233,29 @@ export function isSilentReply(text: string, minChars = 20): boolean {
   return prose.replace(/[^\p{L}\p{N}]/gu, "").length < minChars;
 }
 
-/** Every agent: how to ask the user for something instead of stopping silently. */
+/** An agent the user talks to directly (the coordinator, a chat with one agent): how to ask the user instead of stopping silently. */
 export const NEEDS_YOU_RULES = `## When you need the user
-Never end a turn silently: always finish with your answer or result. If you can't go on without the user (a decision,
-missing access or credentials, an unclear requirement), ask them: call the ask_user tool with the question, why you are
-blocked and the options (recommended first), then end your turn; or end with a result block with status needs_decision
-(or blocked), a question and options. The user sees it as a card and their answer comes back to you as a new message.`;
+Never end a turn silently: always finish with your answer or result. Ask the user only when you truly can't go on without
+them: missing access or credentials, a choice that changes what they asked for, or a step that can't be undone. Then call
+the ask_user tool with the question, why you are blocked and the options (recommended first), and end your turn; or end
+with a result block with status needs_decision (or blocked), a question and options. The user sees it as a card and
+their answer comes back to you as a new message. Anything else you decide yourself, and say what you assumed.`;
 
-/** The coordinator: always close the loop with the user. */
-export const COORDINATOR_FEEDBACK_RULES = `## Always close the loop
-Every turn of yours ends with something for the user: the outcome, what is still running and what you are waiting for,
-or a question (ask_user, or a result with status needs_decision). When a specialist's result says the user was asked
-(needs_decision / blocked, or it didn't deliver), don't ask the same thing again: say in one line that their answer is
-needed, then end your turn; the answer resumes the work and the new result comes to you.`;
+/** A delegated specialist: questions go to the agent that delegated, never straight to the user. */
+export const SPECIALIST_ASK_RULES = `## When you are stuck
+Never end a turn silently: always finish with your result block. Make reasonable assumptions and state them rather than
+stopping. If you really can't go on (a decision only the delegating agent can make, missing access, a broken
+environment), end with status needs_decision or blocked, a question and options (recommended first). It goes to the
+agent that delegated to you, which answers it or takes it to the user; don't ask the user yourself.`;
+
+/** The coordinator: owns the plan, untangles its specialists, and closes the loop with the user. */
+export const COORDINATOR_FEEDBACK_RULES = `## You run the crew; the user isn't a babysitter
+You own the plan. When a specialist asks a question, is blocked, fails or delivers nothing, handle it yourself first:
+answer from the brief, the project and memory; give it the missing context or a narrower task (a follow-up delegate with
+its agentId); retry it; or hand the work to another specialist. Make the reasonable call and say which call you made.
+Go to the user (ask_user, or a result with status needs_decision and options) only when you can't decide it yourself:
+missing access or credentials, a choice that changes what the user asked for, or a step that can't be undone (merge,
+release, deleting data). Every turn of yours ends with something for the user: the outcome, what is still running, or that question.`;
 
 /** Compact result that goes back to a delegating agent: summary + findings, capped. */
 export function resultForParent(text: string, maxTokens: number): string {
@@ -279,7 +289,7 @@ export function budgetState(used: number, limit: number, warnPct: number): Budge
   return "ok";
 }
 
-export interface TextDelegation { role: string; harness?: string; folder?: string; model?: string; args?: string; goal: string }
+export interface TextDelegation { role: string; harness?: string; folder?: string; model?: string; args?: string; agentId?: string; goal: string }
 
 /** Instructions for a coordinator whose `delegate` tool didn't load (MCP blocked by policy, Pi without MCP…). */
 export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
@@ -290,7 +300,8 @@ DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, cursor, claud
 DELEGATE <role>@<harness> in "<folder>": <brief>   (run it in that folder instead of the project, e.g. GitLab Duo, which only runs in GitLab repos)
 DELEGATE <role>@<harness> model "<model>": <brief>   (run it on that model; for Pi write provider/model, e.g. DELEGATE scout@pi model "qwen-local-8800/qwen3.8:27b": …)
 DELEGATE <role>@<harness> args "<extra launch arguments>": <brief>   (rarely needed, e.g. args "--thinking high" for Pi)
-in, model and args can be combined in any order. Always use model "…" when the user or brief names a model or provider:
+DELEGATE <role> agent "<agentId>": <answer or next step>   (a follow-up to a specialist you started: it continues with its context, e.g. to answer its question)
+in, model, args and agent can be combined in any order. Always use model "…" when the user or brief names a model or provider:
 a model named only in the brief text is not applied.
 A brief may continue on the following lines until a blank line.
 To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
@@ -310,12 +321,12 @@ export function parseTextDelegations(text: string): TextDelegation[] {
   for (const raw of text.split(/\r?\n/)) {
     if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
     if (fence) continue;
-    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?((?:\s+(?:in|model|args)\s+(?:"[^"]*"|`[^`]*`))*)\s*:\s*(.*)$/.exec(raw);
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?((?:\s+(?:in|model|args|agent)\s+(?:"[^"]*"|`[^`]*`))*)\s*:\s*(.*)$/.exec(raw);
     if (m) {
       const opt: Record<string, string> = {};
-      for (const o of m[3]!.matchAll(/(in|model|args)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
+      for (const o of m[3]!.matchAll(/(in|model|args|agent)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
       cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(opt.in ? { folder: opt.in } : {}),
-        ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), goal: m[4]!.trim() };
+        ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), ...(opt.agent ? { agentId: opt.agent } : {}), goal: m[4]!.trim() };
       out.push(cur);
       continue;
     }
