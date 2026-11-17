@@ -5,13 +5,15 @@ import type { Orchestrator } from "./orchestrator";
 import type { ToolDef } from "./bridge";
 import type { JazzClient } from "./jazz";
 import type { Requirements } from "./requirements";
+import { QM_TYPES, VERDICTS, qmType, type EtmClient, type QmWrite } from "./etm";
+import { normPath, type ScmClient } from "./scm";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { RoleDef } from "@shared/types";
 import { MEMORY_KINDS, MEMORY_SCOPES } from "@shared/types";
 import type { Memory } from "@shared/types";
 import type { MemoryContext, MemoryStore } from "./memory";
 import { entryTitle, type KnowledgeBase } from "./knowledge";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
 import { DIAGRAM_KINDS, renderDiagram } from "@shared/diagrams";
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
@@ -23,6 +25,7 @@ export function buildTools(d: {
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
   knowledge?: KnowledgeBase; readOnly?: () => boolean;
+  etm?: () => EtmClient | null; scm?: () => ScmClient | null;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -32,6 +35,23 @@ export function buildTools(d: {
     const j = d.jazz();
     if (!j) throw new Error("Jazz integration is not configured (Settings → Integrations → IBM Jazz)");
     return j;
+  };
+  const etm = () => {
+    const e = d.etm?.();
+    if (!e) throw new Error("ETM test management is not configured (Settings → Integrations → IBM Jazz → Test management)");
+    return e;
+  };
+  const scm = () => {
+    const c = d.scm?.();
+    if (!c) throw new Error("EWM source control is not configured (Settings → Integrations → IBM Jazz → Source control)");
+    return c;
+  };
+  /** Folder an agent works in: its worktree, else its project folder. */
+  const agentDir = (agentId: string): string => {
+    const a = agentId ? d.db.getAgent(agentId) : null;
+    const dir = a?.worktree ?? (a?.projectId ? d.db.getProject(a.projectId)?.path : null);
+    if (!dir) throw new Error("this chat has no project folder to download into — read files with scm_read_file instead");
+    return dir;
   };
   const mem = () => {
     if (!d.memory || d.memoryEnabled?.() === false) throw new Error("Memory is turned off (Settings → Memory)");
@@ -421,6 +441,120 @@ export function buildTools(d: {
       set: "jazz", name: "jazz_comment", description: "Add a comment to a work item (e.g. analysis results).",
       inputSchema: obj({ id: s("work item id"), text: s("comment text") }, ["id", "text"]),
       handler: async (a) => { await jazz().comment(a.id, a.text); return { ok: true }; },
+    },
+    // ---------------- ETM test management (Reportable REST API + OSLC QM for requirement links) ----------------
+    {
+      set: "jazz", name: "qm_projects", description: "List the ETM (test management) project areas you can access, and the one configured.",
+      inputSchema: obj({}),
+      handler: async () => ({ projects: await etm().projects(true) }),
+    },
+    {
+      set: "jazz", name: "qm_list",
+      description: `List or find ETM artifacts. type: ${QM_TYPES.join(" | ")} (also plan, suite, case, script, tcer/record, result). query: words matched in the title, or ids "12,15". filter: optional reportable-API condition, e.g. "owner='jdoe'". Returns id, title, state.`,
+      inputSchema: obj({ type: s("artifact type"), query: s("words or ids, optional"), filter: s("server-side condition, optional"), max: { type: "number", description: "default 25, max 200" }, projectArea: s("ETM project area, default the configured one") }, ["type"]),
+      handler: async (a) => etm().list(qmType(a.type), { text: a.query, filter: a.filter, max: Math.min(a.max ?? 25, 200), projectArea: a.projectArea }),
+    },
+    {
+      set: "jazz", name: "qm_get",
+      description: "One ETM artifact with its fields, links (test plan → test cases/suites, test case → scripts, record → case/plan, result → record) and test script steps. requirements: true adds the requirements a test case validates.",
+      inputSchema: obj({ type: s("artifact type"), id: s("id or URL"), requirements: { type: "boolean" }, projectArea: s("optional") }, ["type", "id"]),
+      handler: async (a) => {
+        const t = qmType(a.type);
+        const item = await etm().item(t, String(a.id), a.projectArea);
+        if (a.requirements && t === "testcase") return { ...item, requirements: await etm().requirementLinks(item.id, a.projectArea).catch((e) => `unavailable: ${e?.message ?? e}`) };
+        return item;
+      },
+    },
+    {
+      set: "jazz", name: "qm_create",
+      description: "Create an ETM test plan, test suite, test case, test script (with steps) or execution record. links: target type → ids, e.g. a test plan {testcase: [\"12\"], testsuite: [\"3\"]}, a test case {testscript: [\"7\"]}, a suite {testcase: [...]}, a record {testcase: [\"12\"], testplan: [\"2\"]}. Record results with qm_record_result. Returns the new artifact with its id.",
+      inputSchema: obj({
+        type: s("testplan | testsuite | testcase | testscript | executionworkitem"), title: s("title"), description: s("description, optional"),
+        owner: s("owner user id, optional"), fields: { type: "object", description: "other simple elements by name, e.g. {\"weight\": \"5\"}" },
+        links: { type: "object", description: "target type → array of ids or URLs" },
+        steps: { type: "array", description: "test script steps", items: obj({ description: s("what to do"), expected: s("expected result"), name: s("optional") }, ["description"]) },
+        projectArea: s("optional"),
+      }, ["type", "title"]),
+      handler: async (a) => etm().create(qmType(a.type), { title: a.title, description: a.description, owner: a.owner, fields: a.fields, addLinks: a.links, steps: a.steps } as QmWrite, a.projectArea),
+    },
+    {
+      set: "jazz", name: "qm_update",
+      description: "Edit an ETM artifact: change title/description/owner/state or other fields, add or remove links (e.g. add test cases to a plan or suite, attach a script to a test case), or replace a test script's steps. Fields you don't pass stay as they are.",
+      inputSchema: obj({
+        type: s("artifact type"), id: s("id or URL"), title: s("optional"), description: s("optional"), owner: s("optional"), state: s("optional, full state id"),
+        fields: { type: "object", description: "other simple elements by name" },
+        addLinks: { type: "object", description: "target type → ids to link" }, removeLinks: { type: "object", description: "target type → ids to unlink" },
+        steps: { type: "array", description: "test script only: the new full list of steps", items: obj({ description: s("what to do"), expected: s("expected result"), name: s("optional") }, ["description"]) },
+        projectArea: s("optional"),
+      }, ["type", "id"]),
+      handler: async (a) => etm().update(qmType(a.type), String(a.id), { title: a.title, description: a.description, owner: a.owner, state: a.state, fields: a.fields, addLinks: a.addLinks, removeLinks: a.removeLinks, steps: a.steps }, a.projectArea),
+    },
+    {
+      set: "jazz", name: "qm_record_result",
+      description: `Record a test run in ETM: finds the test case's execution record in the plan (creates one if there is none) and adds an execution result. verdict: ${VERDICTS.join(" | ")}.`,
+      inputSchema: obj({
+        testcase: s("test case id"), testplan: s("test plan id, optional but recommended"), record: s("execution record id, optional"),
+        verdict: s("passed, failed, blocked…"), title: s("optional"), notes: s("what was observed, optional"), start: s("ISO time, optional"), end: s("ISO time, optional"), projectArea: s("optional"),
+      }, ["testcase", "verdict"]),
+      handler: async (a) => etm().recordResult(a),
+    },
+    {
+      set: "jazz", name: "qm_link_requirement",
+      description: "Link a test case to the requirement it validates (DOORS Next: pass the requirement URL that rm_get returns), or remove the link with remove: true. Returns the test case's requirement links.",
+      inputSchema: obj({ testcase: s("test case id"), requirement: s("requirement URL"), remove: { type: "boolean" }, projectArea: s("optional") }, ["testcase", "requirement"]),
+      handler: async (a) => ({ requirements: await etm().linkRequirement(String(a.testcase), String(a.requirement), !!a.remove, a.projectArea) }),
+    },
+    // ---------------- EWM source control (read-only: nothing is checked in or delivered) ----------------
+    {
+      set: "jazz", name: "scm_streams", description: "List EWM source control streams (name, id). query: words in the name, optional.",
+      inputSchema: obj({ query: s("optional"), max: { type: "number", description: "default 50" } }),
+      handler: async (a) => scm().streams({ text: a.query, max: a.max ?? 50 }),
+    },
+    {
+      set: "jazz", name: "scm_components", description: "Components of an EWM stream.",
+      inputSchema: obj({ stream: s("stream name or id") }, ["stream"]),
+      handler: async (a) => scm().components(String(a.stream)),
+    },
+    {
+      set: "jazz", name: "scm_list", description: "Files and folders under a path of a component in a stream (needs the EWM SCM command line on this PC). depth: default 1.",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("folder, default the component root"), depth: { type: "number" } }, ["stream", "component"]),
+      handler: async (a) => {
+        const all = await scm().list(String(a.stream), String(a.component), a.path ?? "/", a.depth ?? 1);
+        return { count: all.length, entries: all.slice(0, 500).map((e) => e.folder ? `${e.path}/` : e.path), ...(all.length > 500 ? { note: "first 500 shown; narrow the path" } : {}) };
+      },
+    },
+    {
+      set: "jazz", name: "scm_find_files", description: "Find files in a component by glob (\"*.c\", \"src/**/can_*.h\") or words in the path (needs the EWM SCM command line).",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), pattern: s("glob or words"), path: s("folder to search, optional") }, ["stream", "component", "pattern"]),
+      handler: async (a) => { const hits = await scm().find(String(a.stream), String(a.component), String(a.pattern), a.path ?? "/"); return { count: hits.length, files: hits.slice(0, 200).map((e) => e.path) }; },
+    },
+    {
+      set: "jazz", name: "scm_read_file", description: "Read a text file from an EWM stream (latest version). Big files: pass startLine and lines (default 400 lines).",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("file path inside the component"), startLine: { type: "number" }, lines: { type: "number" } }, ["stream", "component", "path"]),
+      handler: async (a) => scm().readFile(String(a.stream), String(a.component), String(a.path), { startLine: a.startLine, lines: a.lines }),
+    },
+    {
+      set: "jazz", name: "scm_download", description: "Copy text files from an EWM stream into your working folder (read-only on the EWM side). to: folder relative to your working folder, default ewm/<component>.",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), paths: { type: "array", items: { type: "string" }, description: "file paths inside the component (max 50)" }, to: s("target folder, optional") }, ["stream", "component", "paths"]),
+      handler: async (a, ctx) => {
+        const root = agentDir(ctx.agentId);
+        const to = String(a.to ?? `ewm/${String(a.component).replace(/[^\w.-]+/g, "_")}`);
+        if (isAbsolute(to)) throw new Error("to must be relative to your working folder");
+        const base = resolve(root, to);
+        if (relative(root, base).startsWith("..")) throw new Error("to must stay inside your working folder");
+        const saved: string[] = [], failed: string[] = [];
+        for (const p of (a.paths ?? []).slice(0, 50)) {
+          try {
+            const rel = normPath(String(p));
+            const text = await scm().fileText(String(a.stream), String(a.component), rel);
+            const out = join(base, rel);
+            mkdirSync(dirname(out), { recursive: true });
+            writeFileSync(out, text);
+            saved.push(relative(root, out).replace(/\\/g, "/"));
+          } catch (e: any) { failed.push(`${p}: ${e?.message ?? e}`); }
+        }
+        return { saved, ...(failed.length ? { failed } : {}) };
+      },
     },
     // ---------------- DOORS Next requirements (targeted retrieval: search → get, never whole modules) ----------------
     {

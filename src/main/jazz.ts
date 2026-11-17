@@ -292,6 +292,16 @@ export class JazzClient {
     return r.text();
   }
 
+  /**
+   * Authenticated request on this context root (ETM / EWM source control clients build on it). Same sign-in,
+   * 401 recovery and cookies as the work item calls. `path` may also be an absolute URL on the same server.
+   */
+  async request(method: string, path: string, body?: string, headers: Record<string, string> = {}) {
+    return this.send(method, path, body, headers);
+  }
+
+  get baseUrl(): string { return this.cfg.serverUrl; }
+
   // ---------------------------------------------------------------- internals
 
   private async rptXml(filter: string, fields: string, size: number): Promise<string> {

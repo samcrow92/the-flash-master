@@ -22,6 +22,9 @@ import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
 import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
 import { Requirements, parseRmLink } from "./requirements";
+import { EtmClient } from "./etm";
+import { ScmClient, type CliRunner } from "./scm";
+import { findScmCli, scmCliRunner } from "./scm-cli";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
 import { parseProxy, fallbacks, isProxySetupError, describe, explainProxyError, type ProxyCfg, type ParsedProxy } from "./proxy";
@@ -312,7 +315,7 @@ function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
       clearTimeout(limit);
       if (!w.isDestroyed()) w.close();
       signInWin = null;
-      jazzClient = null; rmClient = null;
+      jazzClient = null; rmClient = null; etmClient = null; scmClient = null;
       resolve(r);
     };
     const check = async () => { const user = await jazzIdentity(base); if (user) finish({ ok: true, detail: `Signed in as ${user}` }); };
@@ -343,9 +346,51 @@ const rmApi = (): JazzClient | null => {
 };
 const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config,
   () => settings.get().jazz.rm.component || parseRmLink(settings.get().jazz.rm.serverUrl).componentUri, () => rmUrl());
+// ---------------- ETM test management (/qm) and EWM source control (read-only, /ccm), same Jazz session ----------------
+const qmUrl = () => {
+  const j = settings.get().jazz;
+  const raw = j.qm.serverUrl.trim() || j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/(ccm|jts|rm)(\w*)\/?$/i, "/qm$2");
+  return raw.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "");
+};
+let etmClient: EtmClient | null = null;
+let etmKey = "";
+const etm = (): EtmClient | null => {
+  const j = settings.get().jazz;
+  if (!j.enabled || !j.qm.enabled || !qmUrl()) return null;
+  const key = JSON.stringify([qmUrl(), j.authType, j.username, j.hasPassword]);
+  if (!etmClient || key !== etmKey) {
+    const http = new JazzClient({ serverUrl: qmUrl(), projectAreas: [], authType: j.authType, username: j.username, password: readJazzPassword() }, netFetch);
+    etmClient = new EtmClient(http, () => ({ projectArea: settings.get().jazz.qm.projectArea, config: settings.get().jazz.qm.config }));
+    etmKey = key;
+  }
+  return etmClient;
+};
+let scmClient: ScmClient | null = null;
+let scmHttp: JazzClient | null = null;
+/** EWM SCM command line for folder listings; signs in with the Jazz user/password when those are set. */
+const scmCli = (): { run: CliRunner; repo: string } | null => {
+  const j = settings.get().jazz;
+  const exe = findScmCli(j.scm.cliPath);
+  if (!exe) return null;
+  const creds = (j.authType === "basic" || j.authType === "form") && j.username && j.hasPassword ? { user: j.username, password: readJazzPassword() } : null;
+  return { run: scmCliRunner(exe, creds), repo: j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "") };
+};
+const scm = (): ScmClient | null => {
+  const j = settings.get().jazz;
+  if (!j.scm.enabled) return null;
+  const http = jazz();
+  if (!http) return null;
+  if (!scmClient || scmHttp !== http) { scmClient = new ScmClient(http, scmCli); scmHttp = http; }
+  return scmClient;
+};
+/** Jazz hosts (work items, test management, requirements) whose certificate may be accepted when trustServerCert is on. */
+const jazzHosts = () => {
+  const j = settings.get().jazz;
+  return new Set([j.serverUrl, qmUrl(), rmUrl()].map(jazzHost).filter(Boolean));
+};
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
-bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
+bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, etm, scm, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
   memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge,
@@ -874,7 +919,7 @@ const api: FlashApi = {
   jazzSetPassword: async (password) => {
     await secrets.set(secretFile, password);
     settings.update({ jazz: { hasPassword: !!password } });
-    jazzClient = null; rmClient = null;
+    jazzClient = null; rmClient = null; etmClient = null; scmClient = null;
     await jazzSession().clearStorageData({ storages: ["cookies"] }); // new credentials → fresh login
   },
   jazzSignIn: async () => jazzSignIn(),
@@ -884,8 +929,11 @@ const api: FlashApi = {
   rmModule: async (ref, refresh, config) => requirements.module(ref, refresh, settings.get().jazz.rm.cacheHours, config),
   rmSearch: async (q, modules, top) => requirements.search(q, { modules, top: top ?? 25 }),
   rmDiagnostics: async () => [`server: ${rmUrl()}`, `auth: ${settings.get().jazz.authType}`, ...requirements.lastLog],
+  qmTest: async () => { const e = etm(); return e ? e.test() : { ok: false, detail: "Enable Jazz and Test management, and set the server URL first" }; },
+  qmProjects: async () => { const e = etm(); if (!e) throw new Error("Enable Jazz and Test management first"); return e.projects(true); },
+  scmTest: async () => { const c = scm(); return c ? c.test() : { ok: false, detail: "Enable Jazz and Source control, and set the server URL first" }; },
   rmCached: async () => requirements.allCached().map((d) => ({ module: d.module, fetchedAt: d.fetchedAt, count: d.requirements.filter((r) => !r.heading).length })),
-  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; rmClient = null; },
+  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; rmClient = null; etmClient = null; scmClient = null; },
   examSetup: async (install) => runExamSetup(install),
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),
@@ -1101,6 +1149,8 @@ async function proxyTest(url: string): Promise<{ ok: boolean; detail: string; co
 settings.onChange(() => void applyProxy());
 
 app.whenReady().then(async () => {
+  // Self-signed / company-CA Jazz servers: accept their certificate only when the user turned it on, only for Jazz hosts.
+  jazzSession().setCertificateVerifyProc((req, cb) => cb(settings.get().jazz.trustServerCert && jazzHosts().has(req.hostname) ? 0 : -3));
   await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret)]);
   await applyProxy();
   const port = await bridge.start();

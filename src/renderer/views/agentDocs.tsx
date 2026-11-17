@@ -255,6 +255,8 @@ export const AGENT_DOCS: AgentDoc[] = [
       "Derives test cases from requirements and code paths: equivalence classes, boundaries, error paths.",
       "Writes tests in the project’s framework: pytest, GoogleTest, Unity/CMock, vitest, CANoe test modules / CAPL.",
       "Runs suites and reports pass/fail counts, with a root-cause hypothesis for each failure.",
+      "Works in IBM Engineering Test Management: creates and edits test plans, suites, test cases and scripts, records results, and links test cases to DOORS Next requirements.",
+      "Reads code straight from IBM EWM streams (read-only) when it isn't checked out locally.",
     ],
     when: [
       "New code needs tests, or coverage of a requirement must be shown.",
@@ -272,11 +274,22 @@ export const AGENT_DOCS: AgentDoc[] = [
           { actor: "tester", text: "Reports 5/6 passing. The stuck-high case fails because the timeout path is never reached (evidence: the coverage line), and the log is saved as an artifact." },
         ],
       },
+      {
+        title: "Test cases in ETM",
+        steps: [
+          { actor: "you", text: "“@tester cover SRS-1102 in ETM, in test plan 12.”" },
+          { actor: "tester", text: "Reads the requirement (rm_get), checks ETM for existing test cases (qm_list), and reads the debounce code from the EWM stream (scm_read_file)." },
+          { actor: "tester", text: "Creates a test script with steps and a test case for it (qm_create), adds the case to plan 12 (qm_update) and links it to SRS-1102 (qm_link_requirement)." },
+          { actor: "tester", text: "After the run, records the verdicts on the plan's execution records (qm_record_result) and lists every id it touched." },
+        ],
+      },
     ],
     prompts: [
       "Write boundary tests for the voltage plausibility check and run them.",
       "The nightly suite has 7 failures. Sort them by likely cause.",
       "Write a CANoe test module for the wake-up sequence in the DBC.",
+      "Create ETM test cases for the requirements in module SRS Body, add them to test plan 12, and link each one to its requirement.",
+      "Record today's HiL run in ETM: TC 120–124 passed, TC 125 failed with DTC U0100.",
     ],
   },
   {

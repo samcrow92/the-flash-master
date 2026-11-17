@@ -40,7 +40,7 @@ export class McpBootstrap {
 
   constructor(private p: Paths, private settings: () => Settings, private onStatus: (s: McpServerStatus[]) => void) {
     this.set({ id: "flashmaster-core", label: "TheFlashMaster core (delegation, tasks, artifacts)", kind: "bundled-node", state: "ready", detail: null });
-    this.set({ id: "jazz", label: "IBM Jazz / EWM work items", kind: "bundled-node", state: "ready", detail: null });
+    this.set({ id: "jazz", label: "IBM Jazz: work items, tests (ETM), source (EWM), requirements", kind: "bundled-node", state: "ready", detail: null });
     for (const s of PY_SERVERS) this.set({ id: s.id, label: s.label, kind: "bundled-python", state: "missing", detail: "Not installed yet" });
     for (const c of MCP_CATALOG) this.set({ id: c.id, label: c.label, kind: "catalog", state: this.catalogReady(c) ? "ready" : "missing", detail: this.catalogReady(c) ? null : "Not installed yet" });
   }

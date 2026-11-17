@@ -125,6 +125,12 @@ export interface Settings {
     projectAreas: string[];
     /** DOORS Next (Jazz Requirements Management). Uses the same sign-in as Jazz work items. */
     rm: { enabled: boolean; serverUrl: string; projects: string[]; config: string; cacheHours: number; component: string };
+    /** Engineering Test Management (ETM / RQM): test plans, suites, cases, scripts, execution records and results. Same sign-in. */
+    qm: { enabled: boolean; serverUrl: string; projectArea: string; config: string };
+    /** EWM source control, read-only (streams, components, files). cliPath: lscm/scm for folder listings; blank = find it on PATH. */
+    scm: { enabled: boolean; cliPath: string };
+    /** Accept a self-signed or company-CA certificate from the Jazz servers (ccm, qm, rm hosts only) that Windows doesn't trust. */
+    trustServerCert: boolean;
     authType: "form" | "basic" | "windows" | "browser"; // windows = integrated Kerberos/NTLM; browser = SSO window (Jazz Authorization Server / OIDC)
     username: string;
     hasPassword: boolean; // password stored encrypted via safeStorage, never in settings
@@ -238,6 +244,9 @@ export const DEFAULT_SETTINGS: Settings = {
     projectArea: "",
     projectAreas: [],
     rm: { enabled: false, serverUrl: "", projects: [], config: "", cacheHours: 24, component: "" },
+    qm: { enabled: false, serverUrl: "", projectArea: "", config: "" },
+    scm: { enabled: false, cliPath: "" },
+    trustServerCert: false,
     authType: "basic",
     username: "",
     hasPassword: false,
