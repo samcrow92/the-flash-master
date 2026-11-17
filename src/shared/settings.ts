@@ -62,6 +62,11 @@ export interface Settings {
     stuckAfterMinutes: number;
     /** Stop a single tool call that has run this long without finishing, and let the agent carry on without it (0 = off). */
     toolTimeoutMinutes: number;
+    /**
+     * A delegated specialist that ends without a report (empty reply, error, crash) or stalls is recovered this many times
+     * (first a reminder to deliver, then a restart) before the user gets a "needs you" card. 0 = no recovery, card at once.
+     */
+    recoveryAttempts: number;
     /** Close delegated specialists that finished and sat idle this long (0 = never); work waiting for review is kept. */
     closeIdleAfterMinutes: number;
     /** Code-writing specialists (roles with `isolate: true`) work in their own git worktree and branch when delegated. */
@@ -218,7 +223,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "" },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true, unslop: true },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },

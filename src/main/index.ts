@@ -698,6 +698,7 @@ const api: FlashApi = {
   archiveThread: async (rootId, archived) => orch.archiveThread(String(rootId), !!archived),
   deleteThread: async (rootId) => orch.deleteThread(String(rootId)),
   deleteMessage: async (messageId) => orch.deleteMessage(String(messageId)),
+  answerAsk: async (messageId, answer) => orch.answerAsk(String(messageId), String(answer ?? "")),
   clearChat: async (chatId) => orch.clearChat(String(chatId)),
   listAgents: async (f) => db.listAgents(f ?? {}),
   startAgent: async (i) => orch.startAgent(i.projectId, i.role, i.brief),
@@ -987,7 +988,7 @@ for (const [name, fn] of Object.entries(api)) {
  * Older Windows and Linux get an opaque window; the renderer then paints its own backdrop under the glass panels.
  */
 function windowMaterial(): WindowState["material"] {
-  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) return "none";
+  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK) return "none";
   if (process.platform === "darwin") return "vibrancy";
   if (process.platform === "win32") {
     const build = Number(process.getSystemVersion().split(".")[2] ?? 0);
@@ -1027,7 +1028,7 @@ function createWindow(): void {
   // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
-  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon));
+  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });

@@ -7,7 +7,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
-import type { AgentRun, AppEvent, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
+import type { AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
 import type { Settings } from "@shared/settings";
@@ -29,7 +29,7 @@ import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
-  unslopRules,
+  unslopRules, isSilentReply, NEEDS_YOU_RULES, COORDINATOR_FEEDBACK_RULES,
 } from "./context";
 
 /** Outcome of closing one agent through the close_agent / close_idle_agents tools. */
@@ -98,7 +98,7 @@ interface Live {
   /** Memory ids already shown to this harness session (reminders on later turns only add new ones). */
   memoryShown?: Set<number>;
   /** Steering by interrupt: next turn input. `toolStop` = the title of a hung tool call that was stopped (input says so as is). */
-  redirect: { input: string; attachments: Attachment[]; msgIds: string[]; toolStop?: string } | null;
+  redirect: { input: string; attachments: Attachment[]; msgIds: string[]; toolStop?: string; nudge?: boolean } | null;
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
   warnedTools?: boolean;
   /** The coordinator's `delegate` tool didn't load: it delegates by writing DELEGATE lines, which the app carries out. */
@@ -139,6 +139,16 @@ interface Live {
   /** Text-mode delegations of this coordinator still being awaited by the app (results go back in one message). */
   textWaiting?: number;
   lastResult: string | null;
+  /** The delegated task (goal and brief), so a specialist that didn't deliver can be restarted on it. */
+  task?: { goal: string; brief: string | null; taskId?: string } | null;
+  /** Recovery attempts for the current delegated task (reminder, restart…), capped by agents.recoveryAttempts. */
+  recoveries?: number;
+  /** The agent raised a "needs you" card in this turn (ask_user): it's waiting for the user, not silent. */
+  askedThisTurn?: boolean;
+  /** The coordinator was already reminded once to tell the user something; a second silent turn raises a card. */
+  coordNudged?: boolean;
+  /** The stall watchdog gave up on this turn (it's ended as failed, not as stopped by the user). */
+  stallGiveUp?: string | null;
   stopped: boolean;
   /** Where streamed text goes for the *current* turn. Sessions outlive turns, so this is swapped per turn. */
   sink: ((delta: string) => void) | null;
@@ -161,6 +171,20 @@ const REPORT_DEBOUNCE_MS = 1500;
 /** lastActivity of a specialist the app closed for being idle (a follow-up with its agentId brings it back). */
 const IDLE_CLOSED = "Closed after";
 const MAX_TEXT_ROUNDS = 12;
+/** Quick answers of the app's own cards. */
+export const ASK_RESTART = "Restart it";
+export const ASK_SKIP = "Continue without it";
+export const ASK_RETRY = "Try again";
+const DELIVER_NUDGE = "You ended your turn without delivering a result, so the agent that delegated to you has nothing to work with. "
+  + "Deliver it now: what you did or found, ending with the result block. If you couldn't finish, say why with status blocked or failed; "
+  + "if you need the user, use status needs_decision with a question and options.";
+const RESTART_NOTE = (why: string) => `TheFlashMaster restarted you because the previous attempt at this task ${why}. `
+  + "Do the task below and end with the result block. If something keeps failing, stop and report it (status blocked or failed) instead of retrying it.";
+const STALL_NUDGE = (mins: number) => `You have sent nothing for ${mins} min. If something is hanging, stop it. Deliver your result now `
+  + "with what you have (the result block); if you're blocked, say what blocks you with status blocked.";
+const COORD_NUDGE = "Your turn ended without a reply to the user, so they don't know where things stand. Reply now: "
+  + "a bold outcome line and a few bullets (what was done, what is still running, what you're waiting for). If you need the user, ask them "
+  + "(ask_user, or a result with status needs_decision, a question and options).";
 const MAX_TOOLS_PER_REPLY = 200;
 const MAX_TOOL_OUTPUT = 20000;
 
@@ -413,6 +437,8 @@ export class Orchestrator {
       this.flow(parentAgentId, { kind: "delegate", label: `${agentLabel(live, role.title)}: ${a.goal.slice(0, 120)}`, ref: live.agentId });
       live.delegated = true;
       live.resultTaken = false;
+      live.recoveries = 0;
+      live.task = { goal: a.goal, brief, taskId };
       done = a.wait === false ? null : new Promise<string>((resolve) => { waiter = resolve; live.waiters.push(resolve); });
       // Waiting delegations borrow the coordinator's slot; background ones (wait: false) queue for their own.
       const borrowSlot = a.wait !== false && parent.busy;
@@ -674,7 +700,43 @@ export class Orchestrator {
         + "It is still running: keep waiting, send a message to steer it, or stop it.", "warn");
       flagged.push(l.agentId);
     }
+    // A delegated specialist still silent a whole period after the warning is recovered: told to deliver what it has
+    // (its turn is cancelled and continues with that), and past the recovery cap stopped and reported as failed.
+    for (const l of this.live.values()) {
+      if (!l.busy || !l.stuckSince || l.paused || l.stopped || l.awaitingApproval || !l.delegated || l.depth === 0 || !l.currentMessageId) continue;
+      if (now - l.stuckSince < mins * 60_000 || l.redirect) continue;
+      // A long build or test run is a running tool call, not silence: the tool call timeout handles those.
+      if ([...(l.tools?.values() ?? [])].some((r) => r.status !== "completed" && r.status !== "failed")) continue;
+      if ([...this.live.values()].some((c) => c.busy && c.parentAgentId === l.agentId)) continue;
+      this.recoverStall(l, now);
+      flagged.push(l.agentId);
+    }
     return flagged;
+  }
+
+  private recoverStall(l: Live, now: number): void {
+    const quiet = Math.round((now - (l.lastOutputAt ?? now)) / 60_000);
+    const cap = Math.max(0, this.d.settings().agents.recoveryAttempts ?? 2);
+    const n = (l.recoveries ?? 0) + 1;
+    const who = `${l.role.icon} ${agentLabel(l, l.role.title)}`;
+    l.stuckSince = now;
+    if (n > cap) {
+      l.stallGiveUp = `it sent nothing for ${quiet} min`;
+      this.flow(l.agentId, { kind: "status", label: `silent for ${quiet} min: stopping it`, status: "stuck" });
+    } else {
+      l.recoveries = n;
+      l.redirect = { input: STALL_NUDGE(quiet), attachments: [], msgIds: [], nudge: true };
+      this.flow(l.agentId, { kind: "status", label: `silent for ${quiet} min: told to deliver (${n}/${cap})`, status: "retry" });
+      this.system(l.chatId, l.threadRoot, `↻ **${who}** sent nothing for ${quiet} min, so TheFlashMaster interrupted it and asked it to deliver what it has (recovery ${n} of ${cap}).`);
+    }
+    const session = l.session;
+    const messageId = l.currentMessageId;
+    void session?.cancel();
+    // An agent that ignores the cancel is restarted; its turn resumes the session (or fails, and is recovered like a crash).
+    const t = setTimeout(() => {
+      if (l.busy && !l.stopped && l.session === session && session?.alive && l.currentMessageId === messageId) session.close();
+    }, this.toolStopGraceMs);
+    (t as { unref?: () => void }).unref?.();
   }
 
   /**
@@ -972,7 +1034,7 @@ export class Orchestrator {
       this.markDelivered(l, [msgId], true);
       return;
     }
-    l.redirect = l.redirect ? { ...l.redirect, input: `${l.redirect.input}\n${l.redirect.toolStop ? `\nThe user also says:\n` : ""}${text}`, attachments: [...l.redirect.attachments, ...attachments], msgIds: [...l.redirect.msgIds, msgId] }
+    l.redirect = l.redirect ? { ...l.redirect, input: `${l.redirect.input}\n${l.redirect.toolStop || l.redirect.nudge ? `\nThe user also says:\n` : ""}${text}`, attachments: [...l.redirect.attachments, ...attachments], msgIds: [...l.redirect.msgIds, msgId] }
       : { input: text, attachments, msgIds: [msgId] };
     this.flow(l.agentId, { kind: "status", label: `redirected: ${text.slice(0, 120)}`, status: "steer" });
     this.setStatus(l, "running", "Redirecting with your steering message…");
@@ -1147,6 +1209,7 @@ export class Orchestrator {
     live.idleSince = null;
     const turnStart = Date.now();
     let reportFix: string | null = null;
+    if (!t.textRound) live.askedThisTurn = false;
     const borrowed = !!t.borrowSlot;
     if (!borrowed) {
       const max = s.agents.maxConcurrent || MAX_CONCURRENT_FALLBACK;
@@ -1177,6 +1240,8 @@ export class Orchestrator {
     let finalStatus = "";
     let switchedToText = false;
     let crashed = false; // the harness exited and a restart did not help: offer another one
+    // How the turn ended for whoever waits on it: reported once the task's last turn is over (see the end of turn()).
+    let outcome: { result: string; failed: string | null; silent: boolean } | null;
     let lastFlush = Date.now();
     const project = t.chat.projectId ? this.d.db.getProject(t.chat.projectId) : null;
     let promptText: string;
@@ -1263,7 +1328,7 @@ export class Orchestrator {
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? NEEDS_YOU_RULES : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
@@ -1346,15 +1411,19 @@ export class Orchestrator {
       this.d.db.recordUsage({ agentId: live.agentId, projectId: t.chat.projectId, harness: live.harness, role: t.role.name, ...usage });
       live.sessionTokens += usage.tokensIn + usage.tokensOut;
       const redirected = !!live.redirect && !live.stopped;
-      const status = live.stopped ? "stopped" : redirected ? "done" : res.stopReason === "error" ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
+      const gaveUp = live.stallGiveUp ?? null;
+      live.stallGiveUp = null;
+      const status = live.stopped ? "stopped" : redirected ? "done" : res.stopReason === "error" || gaveUp ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
       finalStatus = redirected ? "redirected" : status;
-      if (redirected) text += live.redirect!.toolStop ? `\n\n_⏹ Stopped the hung tool call **${live.redirect!.toolStop}** — continuing without it._` : "\n\n_↪ Redirected by your steering message._";
+      if (redirected) text += live.redirect!.toolStop ? `\n\n_⏹ Stopped the hung tool call **${live.redirect!.toolStop}** — continuing without it._`
+        : live.redirect!.nudge ? "\n\n_↻ Interrupted by TheFlashMaster after a long silence: asked to deliver what it has._" : "\n\n_↪ Redirected by your steering message._";
       else if (res.error) text += `\n\n⚠️ ${res.error}`;
+      else if (gaveUp) text += `\n\n⚠️ Stopped by TheFlashMaster: ${gaveUp}.`;
       // Text-mode TOOL lines show in the reply's tool-call panel; don't repeat them in the prose.
       const shown = live.textTools && status === "done" && !redirected && !switchedToText && !live.queue.length
         ? stripTextToolCalls(text.slice(base), new Set(this.toolSetFor(live).map((x) => x.name))) : text.slice(base);
       const final = this.d.db.updateMessage(reply.id, { content: shown || (shown !== text.slice(base) ? "" : status === "paused" ? "_(paused)_" : "_(no output)_"),
-        status: res.stopReason === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
+        status: status === "error" ? "error" : "done", tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: usage.estimated });
       this.d.emit({ type: "message.updated", message: final });
       const compact = resultForParent(text, t.role.maxResultTokens) + (live.branch ? `\nbranch: ${live.branch} (isolated copy; the user merges it)` : "");
       live.lastResult = compact;
@@ -1368,7 +1437,7 @@ export class Orchestrator {
         : { kind: status === "done" ? "result" : "status", label: status === "done" ? resultLine.slice(0, 160) : status, status });
       this.emitAgent(this.d.db.updateAgent(live.agentId, { status: status === "done" ? "idle" : status, resultSummary: compact.slice(0, 4000),
         lastActivity: status === "done" ? (said !== "done" ? `${SAID_LABEL[said]}: ${asks}` : "Waiting for input") : status, ended: status === "stopped" }));
-      if (said !== "done") this.surfaceSaid(live, t.chat.id, t.threadRoot, said, asks!);
+      if (said !== "done") this.surfaceSaid(live, t.chat.id, t.threadRoot, said, asks!, parseResult(text).options);
       if (t.taskId) {
         const task = this.d.db.updateTask(t.taskId, { status: status === "error" || said !== "done" ? "blocked" : "review" });
         this.d.emit({ type: "task.updated", task });
@@ -1383,10 +1452,16 @@ export class Orchestrator {
         reportFix = reportFixPrompt(check, t.role.title);
         this.flow(live.agentId, { kind: "status", label: `deliverable check: ${check.problems.length} item(s) missing — sent back to fix`, status: "retry" });
         this.system(t.chat.id, t.threadRoot, `↩ **${agentLabel(live, t.role.title)}** didn't follow its instructions yet (${check.problems.map((x) => x.split(/[.:]/)[0]).join("; ")}), so it was sent back to finish them.`);
-      } else {
-        if (check?.problems.length) this.system(t.chat.id, t.threadRoot, `⚠️ **${agentLabel(live, t.role.title)}** still misses: ${check.problems.join(" ")}`, "warn");
-        this.finishDelegated(live, compact);
+      } else if (check?.problems.length) {
+        this.system(t.chat.id, t.threadRoot, `⚠️ **${agentLabel(live, t.role.title)}** still misses: ${check.problems.join(" ")}`, "warn");
       }
+      const asked = said === "needs_decision" || said === "blocked" || !!live.askedThisTurn;
+      outcome = {
+        result: compact + (asked && live.depth > 0 ? `\n(The user sees this as a "needs you" card in the chat; their answer goes to ${agentLabel(live, t.role.title)}, `
+          + "whose new result then comes to you. Don't ask the user the same thing again.)" : ""),
+        failed: status === "error" ? (gaveUp ?? res.error ?? "error") : null,
+        silent: status === "done" && !redirected && !asked && isSilentReply(text, live.depth > 0 ? 20 : 1),
+      };
       // Rollover compaction: a long-lived harness session re-sends its whole history every turn. Past the
       // threshold we close it; the next turn starts fresh with summary + recent turns only.
       if (s.tokens.compactAfterTokens > 0 && live.sessionTokens > s.tokens.compactAfterTokens * 2) {
@@ -1404,7 +1479,7 @@ export class Orchestrator {
       live.session?.close();
       live.session = null;
       if (!live.stopped && HARNESS_EXIT.test(msg)) crashed = true;
-      this.finishDelegated(live, live.stopped ? "stopped" : `error: ${msg}`);
+      outcome = { result: live.stopped ? "stopped" : `error: ${msg}`, failed: live.stopped ? null : msg, silent: false };
       if (t.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(t.taskId, { status: "blocked" }) });
     } finally {
       this.endThought(live);
@@ -1419,38 +1494,204 @@ export class Orchestrator {
       if (!borrowed) this.releaseSlot();
       if (live.parentAgentId) this.teamSlotFreed(live.parentAgentId);
     }
-    if (crashed && !live.stopped) this.offerHarnessSwitch(live, t);
-    if (reportFix && !live.stopped && !live.paused) {
-      void this.turn({ ...t, retry: false, input: reportFix, attachments: [], skills: [], brief: null, taskId: t.taskId, liveKey: live.key, msgIds: undefined,
-        deliver: false, borrowSlot: t.borrowSlot, textRound: 0, reportRound: (t.reportRound ?? 0) + 1 });
-      return;
-    }
+    // What continues this task: a re-plan in text mode, text-mode calls (TOOL / DELEGATE lines) or a steering redirect.
+    // Only the task's last turn reports back: reporting the first part (a reply of TOOL lines) used to hand the delegating
+    // agent an empty result and drop the specialist's real report.
+    let next: (() => void) | null = null;
     if (switchedToText && finalStatus === "done" && !live.stopped && !live.paused && !parseTextDelegations(text).length) {
       // The first reply was written without the delegate tool: have the coordinator re-plan with DELEGATE lines.
       const extra = live.textTools ? this.textToolsFor(live) : "";
-      void this.turn({ ...t, retry: false, input: `${TEXT_DELEGATION_RULES}${extra ? `\n\n${extra}` : ""}\n\nYour tools are not available, so use this text mode. Re-plan the user's last request now and delegate it with DELEGATE lines.`,
+      next = () => void this.turn({ ...t, retry: false, input: `${TEXT_DELEGATION_RULES}${extra ? `\n\n${extra}` : ""}\n\nYour tools are not available, so use this text mode. Re-plan the user's last request now and delegate it with DELEGATE lines.`,
         attachments: [], skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: 1 });
-      return;
-    }
-    if ((live.textDelegation || live.textTools) && finalStatus === "done" && !live.stopped && !live.paused && !live.queue.length) {
+    } else if ((live.textDelegation || live.textTools) && finalStatus === "done" && !live.stopped && !live.paused && !live.queue.length) {
       live.lastText = text;
       const reqs = live.textDelegation ? parseTextDelegations(text) : [];
       const agents = live.textDelegation ? parseTextAgents(text).length : 0;
       const calls = live.textTools ? parseTextToolCalls(text, new Set(this.toolSetFor(live).map((x) => x.name))) : [];
-      if (reqs.length || agents || calls.length) { void this.runTextDelegations(live, t, reqs, calls); return; }
+      if (reqs.length || agents || calls.length) next = () => void this.runTextDelegations(live, t, reqs, calls);
     }
-    if (live.redirect && !live.stopped) {
+    // The app's deliverable check sent the agent back to finish (HTML report, diagrams) before its result goes anywhere.
+    if (!next && reportFix && !live.stopped && !live.paused) {
+      const input = reportFix;
+      next = () => void this.turn({ ...t, retry: false, input, attachments: [], skills: [], brief: null, taskId: t.taskId, liveKey: live.key, msgIds: undefined,
+        deliver: false, borrowSlot: t.borrowSlot, textRound: 0, reportRound: (t.reportRound ?? 0) + 1 });
+    }
+    if (!next && live.redirect && !live.stopped) {
       const r = live.redirect;
       live.redirect = null;
-      void this.turn({ ...t, retry: false, input: r.toolStop ? r.input : `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
+      next = () => void this.turn({ ...t, retry: false, input: r.toolStop || r.nudge ? r.input : `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
         attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false, textRound: 0 });
-      return;
+    }
+    if (next) { next(); return; }
+    if (outcome) {
+      // A specialist that ended without a report is reminded, then restarted; past the cap the user gets a card.
+      const result = this.recoverOrReport(live, t, outcome);
+      if (result === null) return;
+      this.finishDelegated(live, result);
+      if (crashed && !live.stopped) this.offerHarnessSwitch(live, t);
+      if (this.coordinatorFeedback(live, t, outcome)) return;
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);
       void this.turn({ ...t, retry: false, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
         taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true, borrowSlot: false, textRound: 0 });
     }
+  }
+
+  /**
+   * A delegated specialist's task ended. Returns the result to report to its delegating agent, or null when a recovery
+   * turn was started instead: the first time it ended without a report it is reminded to deliver (same session); after
+   * an error or a second silent end it is restarted on the task. Past agents.recoveryAttempts the user gets a card.
+   */
+  private recoverOrReport(live: Live, t: Parameters<Orchestrator["turn"]>[0], o: { result: string; failed: string | null; silent: boolean }): string | null {
+    if (!o.failed && !o.silent) { live.recoveries = 0; return o.result; }
+    if (!live.delegated || live.depth === 0 || !live.parentAgentId || live.stopped || live.paused) return o.result;
+    const cap = Math.max(0, this.d.settings().agents.recoveryAttempts ?? 2);
+    const n = (live.recoveries ?? 0) + 1;
+    const name = agentLabel(live, live.role.title);
+    const who = `${live.role.icon} ${name}`;
+    const why = o.failed ? `failed (${o.failed.replace(/\s+/g, " ").slice(0, 200)})` : "ended without a report";
+    const goal = live.task?.goal ?? t.input;
+    if (n > cap) {
+      live.recoveries = 0;
+      const tried = cap ? ` TheFlashMaster tried ${cap === 1 ? "once" : `${cap} times`} to recover it (a reminder${cap > 1 ? ", then a restart" : ""}).` : "";
+      this.flow(live.agentId, { kind: "error", label: `gave up: ${why}`.slice(0, 160) });
+      if (live.task?.taskId) this.d.emit({ type: "task.updated", task: this.d.db.updateTask(live.task.taskId, { status: "blocked" }) });
+      this.raiseAsk(live, t.chat.id, {
+        kind: o.failed ? "failed" : "no_report", agentId: live.agentId, who,
+        question: `${name} didn't deliver a result. Restart it, or let the coordinator continue without it?`,
+        why: `It ${why}.${tried} Its task: ${goal.replace(/\s+/g, " ").slice(0, 220)}`,
+        options: [ASK_RESTART, ASK_SKIP], recommended: 0,
+      });
+      return `status: failed\nsummary: ${name} ${why} and delivered no result${cap ? ` after ${cap} recovery attempt${cap === 1 ? "" : "s"}` : ""}. `
+        + "The user sees a card asking whether to restart it or continue without it; their answer comes to you. Tell the user in one line, don't ask again.";
+    }
+    live.recoveries = n;
+    const restart = !!o.failed || n >= 2 || !live.session?.alive;
+    this.flow(live.agentId, { kind: "status", label: `${why}: ${restart ? "restarting it" : "asking it to deliver"} (${n}/${cap})`.slice(0, 160), status: "retry" });
+    this.system(t.chat.id, t.threadRoot, `↻ **${who}** ${why}, so TheFlashMaster ${restart ? "restarted it on its task" : "asked it to deliver its result"} (recovery ${n} of ${cap}).`);
+    this.setStatus(live, "running", restart ? "Restarting: the last attempt delivered nothing" : "Asked to deliver its result");
+    if (restart) { live.session?.close(); live.session = null; live.sessionTokens = 0; }
+    const parent = this.byAgent.get(live.parentAgentId);
+    void this.turn({ chat: t.chat, threadRoot: t.threadRoot, role: live.role, input: restart ? `${RESTART_NOTE(why)}\n\n${goal}` : DELIVER_NUDGE,
+      attachments: [], skills: [], depth: live.depth, brief: restart ? (live.task?.brief ?? t.brief) : null, taskId: undefined, liveKey: live.key,
+      msgIds: undefined, deliver: false, borrowSlot: live.waiters.length > 0 && !!parent?.busy, textRound: 0 })
+      .catch((e) => this.finishDelegated(live, `error: ${String(e?.message ?? e)}`));
+    return null;
+  }
+
+  /**
+   * The coordinator (any agent the user talks to directly) must never end a turn with nothing for the user: a silent
+   * turn gets one reminder; a second one raises a "needs you" card. Returns true when a reminder turn was started.
+   */
+  private coordinatorFeedback(live: Live, t: Parameters<Orchestrator["turn"]>[0], o: { failed: string | null; silent: boolean }): boolean {
+    if (live.depth > 0 || live.parentAgentId || live.stopped || live.paused || o.failed) return false;
+    if (!o.silent) { live.coordNudged = false; return false; }
+    if (live.queue.length) return false; // the user already wrote again: that turn answers them
+    const still = this.ownWorking(live.agentId).map((l) => agentLabel(l, l.role.title));
+    if (!live.coordNudged) {
+      live.coordNudged = true;
+      this.flow(live.agentId, { kind: "status", label: "ended without a reply: reminded to report", status: "retry" });
+      void this.turn({ ...t, retry: false, input: COORD_NUDGE + (still.length ? `\n\nStill working: ${still.join(", ")}.` : ""), attachments: [], skills: [], brief: null,
+        taskId: undefined, liveKey: live.key, msgIds: undefined, deliver: false, borrowSlot: false, textRound: 0 });
+      return true;
+    }
+    live.coordNudged = false;
+    const name = agentLabel(live, t.role.title);
+    this.raiseAsk(live, t.chat.id, {
+      kind: "silent", agentId: live.agentId, who: `${t.role.icon} ${name}`,
+      question: `${name} ended its turn without telling you anything. Should it try again, or do you want to steer it?`,
+      why: `It was reminded once to report and still wrote nothing.${still.length ? ` Still working: ${still.join(", ")}; their results wake it when they finish.` : ""}`,
+      options: [ASK_RETRY], recommended: 0,
+    });
+    return false;
+  }
+
+  /**
+   * Show a "needs you" card in the chat: the question, why it waits and quick answers. Cards go in the timeline the
+   * user reads (the coordinator's), not deep in a specialist's thread; answerAsk sends the answer to the agent.
+   */
+  private raiseAsk(l: Live, chatId: string, ask: AskCard): Message {
+    const root = this.byAgent.get(this.teamRoot(l.agentId)) ?? l;
+    const parentId = root.chatId === chatId ? root.threadRoot : l.threadRoot;
+    const label = { question: "Question", blocked: "Blocked", no_report: "No report", failed: "Failed", silent: "No reply" }[ask.kind];
+    const m = this.d.db.addMessage({ chatId, parentId, author: "system", agentId: l.agentId, role: l.role.name,
+      content: `❓ **Needs you** · ${ask.who} · ${label}\n\n**${ask.question}**${ask.why ? `\n\n${ask.why}` : ""}${ask.options.length ? `\n\nOptions: ${ask.options.join(" · ")}` : ""}`, ask });
+    this.d.emit({ type: "message.created", message: m });
+    this.d.emit({ type: "notice", level: "warn", text: `Needs you: ${ask.who} · ${ask.question}`.replace(/[*`]/g, "").slice(0, 140) });
+    this.emitAgent(this.d.db.updateAgent(l.agentId, { lastActivity: `❓ Needs you: ${ask.question}`.slice(0, 300) }));
+    this.flow(l.agentId, { kind: "status", label: `needs you: ${ask.question}`.slice(0, 160), status: "needs_you" });
+    return m;
+  }
+
+  /** The ask_user tool: an agent puts a question to the user as a card; the answer comes back to it as a new message. */
+  askUser(agentId: string, a: { question: string; why?: string; options?: string[]; recommended?: number; blocked?: boolean }): { asked: true; note: string } {
+    const l = this.byAgent.get(agentId);
+    if (!l) throw new Error("unknown agent");
+    const question = String(a.question ?? "").trim();
+    if (!question) throw new Error("question is required");
+    const options = (Array.isArray(a.options) ? a.options : []).map((o) => String(o).trim()).filter(Boolean).slice(0, 6).map((o) => o.slice(0, 120));
+    l.askedThisTurn = true;
+    this.raiseAsk(l, l.chatId, { kind: a.blocked ? "blocked" : "question", agentId, who: `${l.role.icon} ${agentLabel(l, l.role.title)}`,
+      question: question.slice(0, 600), why: a.why?.trim().slice(0, 800) || null, options,
+      recommended: typeof a.recommended === "number" && a.recommended >= 0 && a.recommended < options.length ? a.recommended : (options.length ? 0 : null) });
+    return { asked: true, note: "The user sees your question as a card in the chat. End your turn now with a short note (result status needs_decision); their answer comes to you as a new message." };
+  }
+
+  /**
+   * The user answered a "needs you" card. The answer goes to the agent that asked: a specialist continues in its own
+   * session and its new result goes back to its delegating agent; the coordinator gets it as a message from the user.
+   * For a specialist that didn't deliver, "Restart it" (or any other words, as guidance) restarts it on its task and
+   * "Continue without it" tells the coordinator to go on.
+   */
+  async answerAsk(messageId: string, answer: string): Promise<Message> {
+    const m = this.d.db.getMessage(messageId);
+    if (!m?.ask) throw new Error("That message isn't a question card.");
+    if (m.ask.answer) throw new Error("This card was already answered.");
+    const text = String(answer ?? "").trim();
+    if (!text) throw new Error("Pick an option or type an answer.");
+    const ask = m.ask;
+    const done = this.d.db.setMessageAsk(m.id, { ...ask, answer: { text: text.slice(0, 4000), at: Date.now() } })!;
+    this.d.emit({ type: "message.updated", message: done });
+    const chat = this.mustChat(m.chatId);
+    const l = ask.agentId ? this.byAgent.get(ask.agentId) : undefined;
+    const alive = !!l && !l.stopped && this.live.has(l.key);
+    if (ask.kind === "no_report" || ask.kind === "failed") {
+      if (text !== ASK_SKIP && alive && l!.task) {
+        const g = text === ASK_RESTART ? "" : `\n\nThe user adds: ${text}`;
+        this.restartTask(l!, chat, `${RESTART_NOTE("delivered no result")}${g}\n\n${l!.task.goal}`);
+        this.flow(l!.agentId, { kind: "status", label: "restarted by you", status: "retry" });
+      } else {
+        await this.sendUserMessage(chat.id, text === ASK_SKIP ? `Continue without ${ask.who}'s result.` : `About ${ask.who}, which didn't deliver: ${text}`, m.parentId);
+      }
+    } else if (ask.kind === "silent") {
+      await this.sendUserMessage(chat.id, text === ASK_RETRY ? "Continue, and tell me where things stand." : text, m.parentId);
+    } else if (alive && l!.depth > 0) {
+      const um = this.d.db.addMessage({ chatId: chat.id, parentId: l!.threadRoot, author: "user", content: text });
+      this.d.emit({ type: "message.created", message: um });
+      l!.delegated = !!l!.parentAgentId;
+      l!.resultTaken = false;
+      l!.recoveries = 0;
+      void this.turn({ chat, threadRoot: l!.threadRoot, role: l!.role, input: `The user answered your question "${ask.question}":\n${text}\n\nContinue the task with this answer.`,
+        skills: [], depth: l!.depth, brief: null, liveKey: l!.key, msgIds: [um.id], deliver: true, textRound: 0 })
+        .catch((e) => this.finishDelegated(l!, `error: ${String(e?.message ?? e)}`));
+    } else {
+      // The coordinator asked, or the specialist is gone (closed, app restarted): the coordinator takes the answer on.
+      await this.sendUserMessage(chat.id, `Answer to ${alive && l!.depth === 0 ? "your" : `${ask.who}'s`} question "${ask.question}": ${text}`, m.parentId);
+    }
+    return this.d.db.getMessage(m.id) ?? done;
+  }
+
+  /** Run a specialist's delegated task again from a fresh session; its result goes back to its delegating agent. */
+  private restartTask(l: Live, chat: Chat, input: string): void {
+    l.session?.close();
+    l.session = null;
+    l.sessionTokens = 0;
+    l.delegated = !!l.parentAgentId;
+    l.resultTaken = false;
+    l.recoveries = 0;
+    void this.turn({ chat, threadRoot: l.threadRoot, role: l.role, input, skills: [], depth: l.depth, brief: l.task?.brief ?? null, liveKey: l.key, deliver: false, textRound: 0 })
+      .catch((e) => this.finishDelegated(l, `error: ${String(e?.message ?? e)}`));
   }
 
   /** The harness keeps exiting: offer (✅ / ❌ on a chat message) to move this agent to another harness and retry. */
@@ -1934,11 +2175,17 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
    * A specialist reported that it needs a decision, is blocked, or failed. Its delegating agent gets this in the
    * result as usual; the user also sees it right away in the thread and as a notice, without waiting for the coordinator.
    */
-  private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string): void {
-    const icon = said === "needs_decision" ? "❓" : said === "blocked" ? "⛔" : "⚠️";
+  private surfaceSaid(l: Live, chatId: string, threadRoot: string | null, said: Exclude<ResultStatus, "done">, asks: string, options: string[] = []): void {
     const who = `${l.role.icon} ${agentLabel(l, l.role.title)}`;
-    if (l.depth > 0) this.system(chatId, threadRoot, `${icon} **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}`);
-    this.d.emit({ type: "notice", level: said === "failed" ? "error" : "warn", text: `${who} ${SAID_LABEL[said].toLowerCase()}: ${asks}`.replace(/[*`]/g, "").slice(0, 140) });
+    // A question or blocker is a "needs you" card (unless the agent already raised one with ask_user this turn).
+    if (said === "needs_decision" || said === "blocked") {
+      if (!l.askedThisTurn) this.raiseAsk(l, chatId, { kind: said === "blocked" ? "blocked" : "question", agentId: l.agentId, who, question: asks.slice(0, 600),
+        why: said === "blocked" ? `${agentLabel(l, l.role.title)} is blocked and can't go on without you.` : null, options, recommended: options.length ? 0 : null });
+      this.emitAgent(this.d.db.updateAgent(l.agentId, { lastActivity: `${SAID_LABEL[said]}: ${asks}` }));
+      return;
+    }
+    if (l.depth > 0) this.system(chatId, threadRoot, `⚠️ **${who}** ${SAID_LABEL[said].toLowerCase()}: ${asks}`);
+    this.d.emit({ type: "notice", level: "error", text: `${who} ${SAID_LABEL[said].toLowerCase()}: ${asks}`.replace(/[*`]/g, "").slice(0, 140) });
   }
 
   private setStatus(l: Live, status: AgentRun["status"], activity: string): void {

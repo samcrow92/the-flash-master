@@ -3,14 +3,18 @@
  *   FLASH_SMOKE_SHOT=<file.png>   boot, screenshot, exit 0 when the UI rendered
  *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, thread, reactions,
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
+ *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
  */
 import { app, BrowserWindow, type NativeImage } from "electron";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Orchestrator } from "./orchestrator";
+import type { Db } from "./db";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m: string) => void, icon?: NativeImage & { file: string }): Promise<void> {
+export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m: string) => void, icon?: NativeImage & { file: string },
+  hooks?: { orch: Orchestrator; db: Db }): Promise<void> {
   const js = <T = unknown>(code: string) => win.webContents.executeJavaScript(code) as Promise<T>;
   const shot = async (file: string) => writeFileSync(file, (await win.webContents.capturePage()).toPNG());
   const click = (text: string, sel = "button") =>
@@ -19,6 +23,54 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
     await sleep(Number(process.env.FLASH_SMOKE_DELAY ?? 2500));
     const ok = await js<boolean>("!!document.querySelector('.sidebar')");
     if (process.env.FLASH_SMOKE_SHOT) await shot(process.env.FLASH_SMOKE_SHOT);
+    const askDir = process.env.FLASH_SMOKE_ASK;
+    if (ok && askDir && hooks) {
+      mkdirSync(askDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock" } })`);
+      await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "brake-ecu")`);
+      win.webContents.reload();
+      await sleep(2000);
+      await click("brake-ecu", ".project-name");
+      await sleep(300);
+      await click("General", ".chat-link");
+      await sleep(500);
+      await js(`(()=>{const t=document.querySelector('.chat > .composer-wrap .composer2 textarea');const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;set.call(t,'Calibrate the brake model for the cold start [needs-decision]');t.dispatchEvent(new Event('input',{bubbles:true}));t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
+      await sleep(5000);
+      // A specialist that never delivers: reminded, restarted, then put to the user as a card.
+      const coord = hooks.db.listAgents().find((a) => a.role === "flashmaster");
+      if (coord) await hooks.orch.delegate(coord.id, { role: "tester", goal: "Check the CAN logs of the cold-start run [silent-always]", wait: false });
+      await sleep(6000);
+      const bottom = () => js(`(()=>{const l=document.querySelector('.chat .msg-list, .chat .messages, .chat-scroll');if(l)l.scrollTop=l.scrollHeight;document.querySelectorAll('.ask-card')[document.querySelectorAll('.ask-card').length-1]?.scrollIntoView({block:'end'})})()`);
+      await bottom();
+      await sleep(400);
+      await shot(join(askDir, "needs-you-cards-dark.png"));
+      await js(`document.querySelector('.ask-card .ask-opt.rec')?.click()`);
+      await sleep(1500);
+      await js(`document.querySelector('.ask-card.answered')?.scrollIntoView({block:'start'})`);
+      await sleep(400);
+      await shot(join(askDir, "needs-you-answered-dark.png"));
+      // The recovery attempts, as they show in the specialist's thread.
+      await js(`document.querySelector('.thread-pill')?.click()`);
+      await sleep(900);
+      await js(`[...document.querySelectorAll('.inline-thread.open .sys-line')].find(x=>x.textContent.includes('recovery'))?.scrollIntoView({block:'center'})`);
+      await sleep(400);
+      await shot(join(askDir, "recovery-thread-dark.png"));
+      await js(`document.querySelector('.thread-pill.open')?.click()`);
+      await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
+      win.webContents.reload();
+      await sleep(2500);
+      await click("brake-ecu", ".project-name");
+      await sleep(300);
+      await click("General", ".chat-link");
+      await sleep(800);
+      await bottom();
+      await sleep(600);
+      await shot(join(askDir, "needs-you-cards-light.png"));
+      log("info", `smoke-ask: cards=${await js<number>("document.querySelectorAll('.ask-card').length")}`);
+      app.exit(0);
+      return;
+    }
     const demo = process.env.FLASH_SMOKE_DEMO;
     if (ok && demo) {
       const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");

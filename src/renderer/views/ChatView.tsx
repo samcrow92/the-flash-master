@@ -8,6 +8,7 @@ import { HARNESS_IDS } from "@shared/types";
 import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
 import { ReplyBody } from "../components/ReplyBody";
+import { AskCard } from "../components/AskCard";
 import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
 import { UsageMeter } from "../components/UsageMeter";
@@ -266,6 +267,7 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
           {(m.steer || m.delivery) && <DeliveryBadge steer={m.steer} state={m.delivery} />}
           {m.author === "user" ? (editing ? <EditBox m={m} onDone={() => setEditing(false)} /> : <div className="plain">{m.content}</div>)
             : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} messageId={m.id} live={m.status === "streaming"} />
+            : m.ask ? <AskCard m={m} />
             : <>{!!m.tools?.length && <ToolRuns tools={m.tools} />}<Markdown text={m.content} /></>}
           {m.attachments.length > 0 && (
             <div className="msg-atts">

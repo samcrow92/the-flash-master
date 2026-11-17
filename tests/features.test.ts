@@ -160,7 +160,8 @@ describe("result status routing", () => {
     await until(() => db.getAgent(a.id)!.status === "idle" && !!db.getAgent(a.id)!.resultSummary);
     expect(db.getAgent(a.id)!.lastActivity).toMatch(/^Needs your decision: Use calibration set A or B/);
     expect(db.getAgent(a.id)!.resultSummary).toMatch(/^status: needs_decision\nquestion: /);
-    expect(events.some((e) => e.type === "notice" && e.level === "warn" && /needs your decision/.test(e.text))).toBe(true);
+    expect(events.some((e) => e.type === "notice" && e.level === "warn" && /^Needs you: .*Use calibration set A or B/.test(e.text))).toBe(true);
+    expect(db.listMessages(a.chatId!, null).find((m) => m.ask)?.ask).toMatchObject({ kind: "question", options: ["Set A", "Set B"] });
     expect(db.listTasks({}).find((t) => t.id === task.id)!.status).toBe("blocked");
   });
 });

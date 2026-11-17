@@ -16,6 +16,8 @@ export class MockSession implements HarnessSession {
   private cancelled = false;
   private closed = false;
   private turn = 0;
+  /** "[silent-always]": every reply of this session is empty, to try (and test) recovery and the "needs you" card. */
+  private silent = false;
 
   constructor(private o: SessionOptions, private delayMs: number) {}
 
@@ -69,7 +71,7 @@ export class MockSession implements HarnessSession {
         "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
       "<result>",
       // "[needs-decision]" in a request makes the mock ask back, to try (and test) decision routing.
-      ...(request.includes("[needs-decision]") ? ["status: needs_decision", "question: Use calibration set A or B? I recommend A (mock)."] : []),
+      ...(request.includes("[needs-decision]") ? ["status: needs_decision", "question: Use calibration set A or B? I recommend A (mock).", "options: Set A | Set B"] : []),
       `summary: Mock run for "${request.trim().slice(0, 60)}" completed.`,
       "findings:",
       "- No real analysis was performed (mock harness).",
@@ -95,6 +97,14 @@ export class MockSession implements HarnessSession {
       while (!this.closed && (hard || !this.cancelled)) await new Promise((r) => setTimeout(r, 10));
       if (this.closed) return { stopReason: "error", error: "harness exited (null)." };
       return { stopReason: "cancelled", usage: { tokensIn: estimateTokens(text), tokensOut: 0 } };
+    }
+    // "[silent]" ends this turn without a word (a reminder gets a normal reply); "[silent-always]" never says anything.
+    if (request.includes("[silent-always]")) this.silent = true;
+    if (this.silent || request.includes("[silent]")) return { stopReason: "end_turn", usage: { tokensIn: estimateTokens(text), tokensOut: 0 } };
+    // "[stall]" goes quiet (no tool call running) until the turn is cancelled, like an agent stuck thinking.
+    if (request.includes("[stall]")) {
+      while (!this.closed && !this.cancelled) await new Promise((r) => setTimeout(r, 10));
+      return this.closed ? { stopReason: "error", error: "harness exited (null)." } : { stopReason: "cancelled", usage: { tokensIn: estimateTokens(text), tokensOut: 0 } };
     }
     const words = reply.split(/(?<=\s)/);
     let k = 0;
