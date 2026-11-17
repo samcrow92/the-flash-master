@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { ToolRun } from "@shared/types";
 import { replySegments } from "@shared/replySegments";
 import { Markdown } from "./Markdown";
+import { ReplyText } from "./ReplyParts";
 import { useKeptState } from "./virtual";
 import { ToolRuns } from "./ToolRuns";
 import { Brain, ChevronDown, ChevronUp } from "./icons";
@@ -11,7 +12,7 @@ export function ReplyBody({ content, tools, messageId, live }: { content: string
   const segs = replySegments(content, tools);
   return (
     <div className="reply-body">
-      {segs.map((s, i) => s.kind === "text" ? <Markdown key={`t${i}`} text={s.text} />
+      {segs.map((s, i) => s.kind === "text" ? <ReplyText key={`t${i}`} id={`${messageId ?? "m"}:t${i}`} text={s.text} />
         : s.kind === "tools" ? <ToolRuns key={s.tools[0]!.id} tools={s.tools} messageId={messageId} live={live} />
         : <Thought key={s.run.id} run={s.run} />)}
     </div>

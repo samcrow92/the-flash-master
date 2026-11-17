@@ -1649,3 +1649,40 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .kb-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--blue); }
 .memory-text.kb { max-height: 9.5em; overflow: hidden; }
 .kb-card-title { font-weight: 600; margin-bottom: 4px; }
+
+/* Scannable replies: delegations and new agents as one-line cards, results as a status card, "Details" folded. */
+.deleg-group { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 10px; max-width: 920px; }
+.deleg-head { display: flex; align-items: center; gap: 6px; font-size: var(--fs-s); color: var(--muted); margin-bottom: 2px; }
+.deleg { border-radius: 8px; }
+.deleg.open { background: var(--quiet); }
+.deleg-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; text-align: left; background: transparent; border: none;
+  padding: 5px 8px; border-radius: 8px; color: var(--fg); font-size: var(--fs-m); cursor: pointer; }
+.deleg-row:hover:not(:disabled) { background: var(--quiet-hover); border: none; }
+.deleg-row:disabled { cursor: default; opacity: 1; }
+.deleg-row .role-badge { flex: none; color: var(--muted); }
+.deleg-label { flex: none; white-space: nowrap; }
+.deleg-label b { font-weight: 600; }
+.deleg-line { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.deleg-chev { flex: none; color: var(--muted); }
+.deleg-body { padding: 2px 10px 8px 32px; font-size: var(--fs-m); color: var(--muted); }
+.result-card { --rc: var(--green); margin: 6px 0 4px; padding: 8px 10px; max-width: 920px; border-radius: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--rc) 60%, transparent); background: color-mix(in srgb, var(--rc) 6%, transparent); }
+.result-card.ask { --rc: var(--blue); } .result-card.warn { --rc: var(--amber); } .result-card.bad { --rc: var(--red); }
+.result-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.result-head > svg { color: var(--rc); flex: none; align-self: flex-start; margin-top: 3px; }
+.result-status { font-size: var(--fs-s); font-weight: 600; color: var(--rc); white-space: nowrap; }
+.result-summary { flex: 1; min-width: 200px; }
+.result-summary .md p, .result-findings .md p, .result-question .md p { margin: 0; }
+.result-question { margin-top: 6px; font-weight: 500; }
+.result-findings { margin: 6px 0 0; padding-left: 20px; color: var(--muted); font-size: var(--fs-m); }
+.result-findings li { margin: 1px 0; }
+.result-arts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.reply-details { margin: 8px 0 2px; max-width: 920px; }
+.reply-details-head { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; padding: 3px 8px 3px 4px;
+  border-radius: 8px; color: var(--muted); font-size: var(--fs-s); font-weight: 500; cursor: pointer; }
+.reply-details-head:hover { background: var(--quiet-hover); border: none; color: var(--fg); }
+.reply-details-body { margin-top: 4px; padding-left: 12px; border-left: 2px solid var(--line); }
+.sys-line { display: flex; align-items: flex-start; gap: 7px; margin: 2px 0 8px 46px; color: var(--muted); font-size: var(--fs-s); max-width: 920px; }
+.sys-line > svg { flex: none; margin-top: 3px; }
+.sys-line .md p { margin: 0; }
+.inline-thread .sys-line, .thread-window .sys-line { margin-left: 32px; }

@@ -196,6 +196,7 @@ function Agents(f: F) {
     f.set(`agents.roleOverrides.${role}`, { ...(overrides[role] ?? {}), [key]: value || undefined });
   return <>
     <Row label="Max concurrent agent turns" hint="Further turns queue until a slot is free."><Num f={f} path="agents.maxConcurrent" min={1} /></Row>
+    <Row label="Specialists working at once (per coordinator)" hint="Keeps the coordinator from starting a swarm: further delegations wait until one of its specialists finishes, and it is told to plan and reuse finished specialists. 0 = no limit."><Num f={f} path="agents.maxParallelSpecialists" min={0} /></Row>
     <Row label="Agent tools" hint="Text mode: agents delegate, create agents and use TheFlashMaster's tools (tasks, artifacts, Jazz, DOORS Next) by writing DELEGATE / AGENT / TOOL lines that the app carries out. It works everywhere, also where company policy blocks MCP. Automatic: those tools are offered as MCP tools, with text mode as the fallback when they don't load.">
       <Choice f={f} path="agents.toolMode" options={[["text", "Text mode (default)"], ["auto", "MCP tools, text fallback"]]} /></Row>
     <Row label="Delegation depth" hint="How many levels of specialists may delegate further (1 = only the coordinator delegates)."><Num f={f} path="agents.delegationDepth" min={0} /></Row>
