@@ -21,7 +21,9 @@ export function killTree(child: ChildProcess): void {
   }
 }
 
-export function runCapture(command: string, args: string[], timeoutMs = 8000, cwd?: string, env?: Record<string, string>): Promise<{ code: number | null; out: string }> {
+/** Run to completion and capture stdout + stderr. `onData` also gets the output as it arrives (progress from long runs). */
+export function runCapture(command: string, args: string[], timeoutMs = 8000, cwd?: string, env?: Record<string, string>,
+  onData?: (chunk: string) => void): Promise<{ code: number | null; out: string }> {
   return new Promise((resolve) => {
     let out = "";
     let child: ChildProcess;
@@ -32,8 +34,9 @@ export function runCapture(command: string, args: string[], timeoutMs = 8000, cw
       return;
     }
     const t = setTimeout(() => { killTree(child); resolve({ code: null, out }); }, timeoutMs);
-    child.stdout?.on("data", (d) => (out += d));
-    child.stderr?.on("data", (d) => (out += d));
+    const take = (d: Buffer | string) => { out += d; if (onData) { try { onData(String(d)); } catch { /* a listener must not break the run */ } } };
+    child.stdout?.on("data", take);
+    child.stderr?.on("data", take);
     child.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out: out + String(e) }); });
     child.on("close", (code) => { clearTimeout(t); resolve({ code, out }); });
   });

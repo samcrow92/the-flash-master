@@ -77,6 +77,8 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       mkdirSync(graphDir, { recursive: true });
       const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
       await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "flash-master")`);
+      // A long memory list, as on a real install: the knowledge panel must keep its size above it.
+      await js(`(async()=>{for(let i=1;i<=30;i++) {const w=["brake","lamp","CAN","HIL","DaVinci","CAPL","bootloader","NVM","watchdog","diagnostics"];await window.flash.api.saveMemory({ content: w[i%10]+" "+w[(i*3)%10]+" rule "+i+" "+"xyzqwv".repeat(i%5+1)+": keep "+w[(i*7)%10]+" timing at "+(i*13)+" ms on bench "+(i%4), scope: "user", kind: "fact", tags: [w[i%10].toLowerCase()] });}})()`);
       win.webContents.reload();
       await sleep(2000);
       await click("flash-master", ".project-name");
@@ -89,10 +91,21 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       };
       await memoryPage();
       await shot(join(graphDir, "1-before-scan.png"));
+      const geometry = () => js<string>(`[".kb-panel", ".kb-graph", ".memory-scopes", ".kb-actions"].map((s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return s + "=" + (r ? Math.round(r.width) + "x" + Math.round(r.height) : "none"); }).join(" ")`);
+      log("info", `smoke-graph layout: ${await geometry()}`);
       await click("Scan code", ".kb-graph button");
-      await sleep(1500);
-      await shot(join(graphDir, "2-scanning.png"));
-      for (let i = 0; i < 600 && await js<boolean>("!!document.querySelector('.kb-graph button[disabled]')"); i++) await sleep(1000);
+      let installShot = false, scanShot = false;
+      for (let i = 0; i < 6000 && await js<boolean>("!!document.querySelector('.kb-graph button[disabled]')"); i++) {
+        if (!installShot && await js<boolean>("!!document.querySelector('.kb-progress-track.indeterminate')")) {
+          await sleep(300); await shot(join(graphDir, "2a-installing.png")); installShot = true;
+          log("info", `smoke-graph installing: ${await js<string>("document.querySelector('.kb-graph-line')?.textContent ?? ''")} · ${await geometry()}`);
+        }
+        if (!scanShot && await js<boolean>("(()=>{const f=document.querySelector('.kb-progress-track:not(.indeterminate) .kb-progress-fill');return !!f && parseFloat(f.style.width) >= 20})()")) {
+          await sleep(250); await shot(join(graphDir, "2b-scanning.png")); scanShot = true;
+          log("info", `smoke-graph scanning: ${await js<string>("document.querySelector('.kb-graph')?.textContent ?? ''")}`);
+        }
+        await sleep(100);
+      }
       await sleep(800);
       await js(`[...document.querySelectorAll('.seg button')].find(b=>b.textContent.includes('Knowledge base'))?.click()`);
       await sleep(800);

@@ -319,7 +319,8 @@ export class McpBootstrap {
    * Install a pip-distributed command-line tool into its own venv in app data (not the MCP servers' shared venv: a
    * tool's pinned dependencies must not clash with theirs). Honours the proxy, index and CA settings. Returns its Python.
    */
-  async installPipTool(id: string, requirement: string, minPython: [number, number] = [3, 10], onPhase?: (phase: string) => void): Promise<string> {
+  async installPipTool(id: string, requirement: string, minPython: [number, number] = [3, 10], onPhase?: (phase: string) => void,
+    onOutput?: (chunk: string) => void): Promise<string> {
     const s = this.settings();
     const venv = join(this.p.dataDir, id, ".venv");
     const vpy = venvPython(venv);
@@ -336,7 +337,7 @@ export class McpBootstrap {
     if (s.mcp.pipIndexUrl) args.push("--index-url", s.mcp.pipIndexUrl);
     if (cliProxyUrl(s.network.proxy)) args.push("--proxy", cliProxyUrl(s.network.proxy));
     if (s.network.caBundlePath) args.push("--cert", s.network.caBundlePath);
-    const r = await runCapture(vpy, args, 900000, undefined, networkEnv(s));
+    const r = await runCapture(vpy, args, 900000, undefined, networkEnv(s), onOutput);
     if (r.code !== 0) throw new Error(`pip failed: ${r.out.trim().slice(-300) || `exit ${r.code}`}`);
     writeFileSync(join(this.p.dataDir, id, ".installed"), requirement);
     return vpy;
