@@ -55,7 +55,17 @@ conventions, gotchas, decisions, glossary) that Flash Master writes and the team
   rule. Both changed → a conflict: nothing is overwritten and the Memory page offers *Use repo version* / *Keep mine*.
   Files with git merge markers or that can't be read are reported, never imported. Line endings (CRLF checkouts on
   Windows) and a BOM don't count as changes.
-- **Agent tools.** `knowledge_list`, `knowledge_read`, `knowledge_write`, `knowledge_delete`, `knowledge_checkpoint`.
+- **Code graph (graphify).** **Scan code** on the Memory page (or *Knowledge base · Scan code (graphify)* in the palette)
+  runs [graphify](https://github.com/Graphify-Labs/graphify) (Apache-2.0) on the project: `graphify update . --force`, a
+  local tree-sitter pass over the code, no LLM and no API key. The first scan installs it from PyPI (`graphifyy`) into its
+  own venv in app data (`<data>/graphify/.venv`, Python 3.11+, the proxy / index / CA settings of Settings → MCP apply);
+  graphify is installed, never vendored. The graph, its cache and the interactive `graph.html` (*Open graph*) stay local
+  in `.flashmaster/graphify` (git-ignored; `.flashmaster/.graphifyignore` keeps graphify out of its own output and the
+  knowledge files). Its report becomes the entry `code-map` (hubs, surprising connections, import cycles, suggested
+  questions, communities cut to fit), which syncs to the repo like every entry, so teammates and agents' recall get it.
+  Agents ask the full graph with `code_graph` (query, explain, path, god_nodes, affected), and a knowledge base build
+  starts from `code-map` when it is there. Scans run only when you press the button.
+- **Agent tools.** `knowledge_list`, `knowledge_read`, `knowledge_write`, `knowledge_delete`, `knowledge_checkpoint`, `code_graph`.
 - **Committing** stays with you: the Memory page shows how many knowledge files are not committed yet.
 
 ## Design notes (state of the art, November 2026)

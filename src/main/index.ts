@@ -17,6 +17,7 @@ import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
 import { MemoryStore } from "./memory";
 import { KnowledgeBase, ensureFlashmasterIgnore } from "./knowledge";
+import { CodeGraph, GRAPHIFY_MIN_PYTHON, GRAPHIFY_PACKAGE } from "./graphify";
 import { noProjectFolder } from "./worktree";
 import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
@@ -161,6 +162,12 @@ const mcp = new McpBootstrap({
   pythonSrc: join(resources, "mcp-servers"),
   dataDir,
 }, () => settings.get(), (servers) => emit({ type: "mcp.status", servers }));
+// Code graph (graphify) for the knowledge base: installed into its own venv on the first "Scan code", run on demand.
+const codeGraph = new CodeGraph({
+  db, knowledge, python: () => mcp.toolPython("graphify"),
+  install: (onPhase) => mcp.installPipTool("graphify", GRAPHIFY_PACKAGE, GRAPHIFY_MIN_PYTHON, (ph) => onPhase(ph.replace(GRAPHIFY_PACKAGE, "graphify"))),
+  onStatus: (status) => emit({ type: "codegraph.changed", status }),
+});
 
 const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory, knowledge,
@@ -396,7 +403,7 @@ const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, etm, scm, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
-  memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge,
+  memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,
   readOnly: () => settings.get().permissions.readOnly }));
 
 // ---------------- chat attachments ----------------
@@ -790,6 +797,16 @@ const api: FlashApi = {
     await orch.sendUserMessage(chat.id, `/kb${focus?.trim() ? ` ${focus.trim()}` : ""}`, null, {});
     return db.getChat(chat.id)!;
   },
+  codeGraphStatus: async (projectId) => codeGraph.status(projectId),
+  scanCodeGraph: async (projectId) => {
+    try { return await codeGraph.scan(projectId); } catch (e) { log("warn", `code graph scan: ${String(e)}`); throw e; } finally { emit({ type: "memory.changed" }); }
+  },
+  openCodeGraph: async (projectId) => {
+    const html = codeGraph.status(projectId).html;
+    if (!html) throw new Error("no code graph yet: press Scan code first");
+    const err = await shell.openPath(html);
+    if (err) throw new Error(err);
+  },
   openKnowledgeFolder: async (projectId) => {
     const dir = knowledge.folder(projectId);
     mkdirSync(dir, { recursive: true });
@@ -990,7 +1007,7 @@ for (const [name, fn] of Object.entries(api)) {
  * Older Windows and Linux get an opaque window; the renderer then paints its own backdrop under the glass panels.
  */
 function windowMaterial(): WindowState["material"] {
-  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK) return "none";
+  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH) return "none";
   if (process.platform === "darwin") return "vibrancy";
   if (process.platform === "win32") {
     const build = Number(process.getSystemVersion().split(".")[2] ?? 0);
@@ -1030,7 +1047,7 @@ function createWindow(): void {
   // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
-  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
+  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });

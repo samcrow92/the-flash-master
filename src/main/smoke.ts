@@ -4,6 +4,7 @@
  *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, thread, reactions,
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
+ *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  */
 import { app, BrowserWindow, type NativeImage } from "electron";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -68,6 +69,47 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(600);
       await shot(join(askDir, "needs-you-cards-light.png"));
       log("info", `smoke-ask: cards=${await js<number>("document.querySelectorAll('.ask-card').length")}`);
+      app.exit(0);
+      return;
+    }
+    const graphDir = process.env.FLASH_SMOKE_GRAPH;
+    if (ok && graphDir) {
+      mkdirSync(graphDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "flash-master")`);
+      win.webContents.reload();
+      await sleep(2000);
+      await click("flash-master", ".project-name");
+      await sleep(300);
+      const memoryPage = async () => {
+        await click("General", ".chat-link"); // opening a project chat makes it the current project, which the Memory page shows
+        await sleep(600);
+        await click("Memory", ".sidebar button");
+        await sleep(1200);
+      };
+      await memoryPage();
+      await shot(join(graphDir, "1-before-scan.png"));
+      await click("Scan code", ".kb-graph button");
+      await sleep(1500);
+      await shot(join(graphDir, "2-scanning.png"));
+      for (let i = 0; i < 600 && await js<boolean>("!!document.querySelector('.kb-graph button[disabled]')"); i++) await sleep(1000);
+      await sleep(800);
+      await js(`[...document.querySelectorAll('.seg button')].find(b=>b.textContent.includes('Knowledge base'))?.click()`);
+      await sleep(800);
+      await shot(join(graphDir, "3-after-scan-dark.png"));
+      log("info", `smoke-graph: ${await js<string>("document.querySelector('.kb-graph')?.textContent ?? 'none'")}`);
+      await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
+      win.webContents.reload();
+      await sleep(2500);
+      await click("flash-master", ".project-name");
+      await sleep(300);
+      await memoryPage();
+      await js(`[...document.querySelectorAll('.seg button')].find(b=>b.textContent.includes('Knowledge base'))?.click()`);
+      await sleep(800);
+      await shot(join(graphDir, "4-after-scan-light.png"));
+      await js(`document.querySelector('.memory-card')?.click()`);
+      await sleep(800);
+      await shot(join(graphDir, "5-code-map-entry.png"));
       app.exit(0);
       return;
     }

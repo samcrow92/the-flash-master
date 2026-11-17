@@ -331,6 +331,7 @@ How:
 - knowledge_list / knowledge_read to see what is there; knowledge_write(slug, content, tags?, importance?) to add or replace one entry; knowledge_delete(slug) for one that is wrong or obsolete.
 - Use the tools, not file edits: they keep the app's database and the repo folder in sync. Don't commit; the user reviews and commits the folder.
 - Teammates may have edited entries by hand: keep their wording where it is still right.
+- If the entry code-map is there, it is graphify's map of the code (the user's Scan code button): start from it, and ask code_graph (query, explain, path, affected) to see how parts connect instead of reading file after file. Don't edit or delete code-map: the next scan replaces it.
 - Delegate reading large areas to specialists if it helps, but write the entries yourself.
 - When done, call knowledge_checkpoint once: it records the current commit, so the next update only looks at what changed after it.
 - Reply with a short summary: entries added, updated and deleted.${focus.trim() ? `\n\nThe user asks you to focus on: ${focus.trim()}` : ""}`;
