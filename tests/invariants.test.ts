@@ -245,3 +245,19 @@ describe("hung tool calls", () => {
     expect(read("src/main/index.ts")).toMatch(/setInterval\(\(\) => \{[^}]*orch\.checkToolTimeouts\(\)/);
   });
 });
+
+describe("scannable coordinator replies", () => {
+  // The coordinator is told to put long notes under "## Details", which the chat folds; both sides must agree.
+  it("the coordinator prompt asks for the Details section the renderer folds, and agent prose goes through ReplyText", () => {
+    const prompt = read("agents/flashmaster.md");
+    expect(prompt).toContain("`## Details`");
+    expect(read("src/shared/replyParts.ts")).toMatch(/const DETAILS = .*Details/);
+    expect(read("src/renderer/components/ReplyBody.tsx")).toContain("<ReplyText ");
+  });
+  // Organised team: the cap and the wake-up are the app's job, so they work on every harness.
+  it("delegations go through the team cap, and finished specialists report back through finishDelegated", () => {
+    const orch = read("src/main/orchestrator.ts");
+    expect(orch).toContain("await this.waitForTeamSlot(");
+    expect(orch).not.toMatch(/this\.finishWaiters\(live, (compact|`error)/); // turn ends must also wake the coordinator
+  });
+});

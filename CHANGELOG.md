@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- **An organised team instead of a swarm of agents.** The coordinator plans first and groups related work into one brief per specialist.
+  - **At most 3 specialists work at once** per coordinator (Settings → Agents → *Specialists working at once*; 0 = no limit). Further delegations wait for a free one, so text-mode coordinators run in waves, and the chat says how many wait.
+  - Over the cap, a background delegation is refused with who is working and which finished specialists can take related work through their `agentId`, so no extra instance is created.
+- **Fix: finished specialists left the coordinator idle.** A specialist started in the background (or one whose waiting call the agent CLI had already dropped or timed out) now sends its result back as a new message to the coordinator, which continues on its own. This happens in the app, so it works on every harness. Results that finish close together arrive in one message; results the coordinator already fetched, and stopped specialists, wake nobody.
+- **Coordinator replies you can read at a glance.**
+  - Text-mode `DELEGATE` blocks show as one line per specialist (role icon, name, first sentence of the brief); click a line for the full brief. New agents (`AGENT … END`) get the same card.
+  - A specialist's result block is a status card: Done / Needs your decision / Blocked / Failed, the summary, then its findings.
+  - The coordinator leads with one bold outcome line and a few bullets; longer notes go under `## Details`, which the chat folds.
+  - Short one-line notices ("↪ Delegating: …") are slim lines instead of full message cards.
 - **Fix: taskbar still showed the Electron icon on Windows.** The window had the bolt, but the taskbar button follows the app ID, so it drew electron.exe (from source) or whatever icon Windows had cached for an older shortcut. Every window now carries the bolt as its taskbar/relaunch icon, and source runs use their own app ID so they never borrow an installed copy's shortcut.
 - **Integrated terminal in the top bar.** A terminal button next to the light/dark toggle (or Ctrl+`) drops down a glass panel with a real shell: PowerShell on Windows (PowerShell 7 when installed), your login shell on macOS. It uses xterm.js, the terminal VS Code uses, on ConPTY.
   - Starts in the current project's folder; several tabs, an expand button to fill the window, and hiding keeps the shells running.

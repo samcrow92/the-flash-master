@@ -225,7 +225,8 @@ AGENT <name>[@<harness>]: <one-line description>
 <its complete instructions: role, how it works, what it returns; several lines and blank lines are fine>
 END
 Then delegate to it by name. Then end your reply. TheFlashMaster runs those specialists
-in parallel and sends you their results in the next message; integrate them, or delegate follow-ups the same way.
+(a few at a time; more wait for a free one) and sends you their results in the next message; integrate them, or delegate
+follow-ups the same way. Keep the team small: one DELEGATE per area of work with a combined brief, not one per file.
 Don't do the work yourself, and don't call tools to do it.`;
 
 /** DELEGATE lines written by a coordinator in text mode (outside code fences). */

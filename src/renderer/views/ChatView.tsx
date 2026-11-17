@@ -3,6 +3,7 @@ import { useVirtualList } from "../components/virtual";
 import { ToolRuns } from "../components/ToolRuns";
 import type { HarnessId, Message } from "@shared/types";
 import { planEdit, planRetry } from "@shared/rewind";
+import { isNoticeLine } from "@shared/replyParts";
 import { HARNESS_IDS } from "@shared/types";
 import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
@@ -239,6 +240,9 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
 
   if (m.marker === "context-reset") {
     return <div className="ctx-divider" title={new Date(m.createdAt).toLocaleString()}><span><RotateCcw size={13} /> Context reset — agents start fresh from here</span></div>;
+  }
+  if (isNoticeLine(m)) {
+    return <div className="sys-line" data-msg-id={m.id} title={new Date(m.createdAt).toLocaleString()}><Info size={12} /><Markdown text={m.content} /></div>;
   }
   const sz = inThread ? 24 : 32;
   const avatar = m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={sz} /></button>
