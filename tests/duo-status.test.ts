@@ -110,7 +110,8 @@ describe("the coordinator and a Duo specialist", () => {
 
     const st = orch.agentStatus(parentId, r.agentId);
     expect(st).toMatchObject({ harness: "duo", working: true, processAlive: true, statusLine: { text: "reading the brake light sources" } });
-    expect(st.recent).toEqual(["Session ID: fakesession42", "Reading src/brake_light.c", "STATUS: reading the brake light sources"]);
+    // stdout and stderr are separate pipes, so their lines may arrive in either order.
+    expect([...(st.recent as string[])].sort()).toEqual(["Reading src/brake_light.c", "STATUS: reading the brake light sources", "Session ID: fakesession42"]);
     expect(st.writingNow).toContain("STATUS: reading");
     expect(st.hint).toMatch(/Quiet is not stuck while processAlive/);
   }, 30000);
