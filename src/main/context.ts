@@ -248,6 +248,29 @@ stopping. If you really can't go on (a decision only the delegating agent can ma
 environment), end with status needs_decision or blocked, a question and options (recommended first). It goes to the
 agent that delegated to you, which answers it or takes it to the user; don't ask the user yourself.`;
 
+/** Text protocol for status: a specialist says where it is, mid-turn, in lines the app reads as it streams. */
+export const STATUS_LINE_RULES = `## Keep the delegating agent posted
+On long work, print a line \`STATUS: <what you are doing now>\` (one line, on its own) when you start a new step, and as
+the first line of your reply when a message asks for your status. The delegating agent sees it while you work.`;
+
+/**
+ * GitLab Duo only: Duo runs headless (one \`duo run\` per turn), the app sees nothing but what it prints, and its TOOL
+ * lines only run after the turn ends, so STATUS lines are its one way to report back while it works.
+ */
+export const DUO_REPORTING_RULES = `## Reporting back from GitLab Duo
+You run headless: TheFlashMaster and the agent that delegated to you see only the text you print, and they can't see
+your tool calls. A TOOL line (report_progress included) only runs after your turn ends, so while you work, report with
+STATUS lines. Each one is a single line on its own:
+STATUS: <state> | <what you are doing> | <next>
+- state is one of: started, working, waiting (on a long command or pipeline), blocked, finishing.
+- Print one when you start, before each new step (reading, changing files, running tests or a pipeline), before any
+  command that may take more than a minute, and at least every few minutes of long work.
+- Blocked or missing access: print \`STATUS: blocked | <what blocks you> | <what you need>\`, then end with the result block
+  (status blocked) instead of waiting.
+- A message from the delegating agent that asks for your status: your reply starts with a STATUS line, then you continue.
+- Keep paths and MR/issue numbers in STATUS lines; no secrets or tokens. Always finish with the result block.
+Example: STATUS: working | reading the CAN timeout handling in src/can_tp.c | then fix and run the unit tests`;
+
 /** The coordinator: owns the plan, untangles its specialists, and closes the loop with the user. */
 export const COORDINATOR_FEEDBACK_RULES = `## You run the crew; the user isn't a babysitter
 You own the plan. When a specialist asks a question, is blocked, fails or delivers nothing, handle it yourself first:
@@ -255,7 +278,9 @@ answer from the brief, the project and memory; give it the missing context or a 
 its agentId); retry it; or hand the work to another specialist. Make the reasonable call and say which call you made.
 Go to the user (ask_user, or a result with status needs_decision and options) only when you can't decide it yourself:
 missing access or credentials, a choice that changes what the user asked for, or a step that can't be undone (merge,
-release, deleting data). Every turn of yours ends with something for the user: the outcome, what is still running, or that question.`;
+release, deleting data). Every turn of yours ends with something for the user: the outcome, what is still running, or that question.
+A quiet specialist isn't a stale one (GitLab Duo says little until it answers): check it with agent_status, and talk to it
+with message_agent (a question, new context, "send me your status") instead of starting another instance.`;
 
 /** Compact result that goes back to a delegating agent: summary + findings, capped. */
 export function resultForParent(text: string, maxTokens: number): string {

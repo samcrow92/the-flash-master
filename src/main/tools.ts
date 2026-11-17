@@ -116,6 +116,27 @@ export function buildTools(d: {
       handler: async (a) => d.orch.getResult(a.agentId),
     },
     {
+      set: "core", name: "agent_status",
+      description: "Where another agent of this project is right now, without interrupting it: working or not, for how long, when it last sent output, "
+        + "whether its process is alive (GitLab Duo says little until it answers: quiet + processAlive = still working, not stale), its last STATUS line, "
+        + "recent progress lines, current step and the end of what it is writing. Use it instead of guessing that a quiet specialist is stuck.",
+      inputSchema: obj({ agentId: s("agent id from delegate or list_agents") }, ["agentId"]),
+      handler: async (a, c) => d.orch.agentStatus(c.agentId, String(a.agentId ?? "")),
+    },
+    {
+      set: "core", name: "message_agent",
+      description: "Send a message to a specialist you started (any harness, GitLab Duo included): a question, new context, a correction, or \"send me your status\". "
+        + "Working: it gets the message inside its running turn where the harness can, else when that turn ends; interrupt: true stops the turn now and "
+        + "continues the same session with your message. Idle: starts a follow-up. Its reply comes back to you like a delegated result.",
+      inputSchema: obj({
+        agentId: s("agent id delegate returned"), message: s("what to tell or ask it"),
+        interrupt: { type: "boolean", description: "stop its running turn and deliver the message now (default false: delivered when the turn ends, or inside it when the harness supports that)" },
+        wait: { type: "boolean", description: "idle agent only: wait for its reply (default false: the reply comes to you in a new message)" },
+        timeoutSec: { type: "number", description: "max seconds to wait when wait is true (default 600)" },
+      }, ["agentId", "message"]),
+      handler: (a, c) => d.orch.messageAgent(c.agentId, a),
+    },
+    {
       set: "core", name: "read_report",
       description: "Read another agent's full report (its last finished reply), not just the short result delegate returns. Works for any agent of this project, "
         + "finished or working, at any depth: use it to pick up an earlier specialist's accepted report instead of delegating a helper or redoing the work. "

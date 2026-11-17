@@ -23,6 +23,10 @@ export type HarnessEvent =
   | { type: "tool"; title: string; status: string; kind: ToolKind; id?: string; input?: string; output?: string }
   | { type: "plan"; entries: { title: string; status: "pending" | "in_progress" | "completed" | "failed" }[] }
   | { type: "log"; text: string }
+  /** A progress line from a headless CLI (Duo's log): counts as output, shows as the agent's status, kept for status checks. */
+  | { type: "activity"; text: string }
+  /** The CLI process is alive and working (sent every few seconds by headless harnesses): the agent is busy, not stale. */
+  | { type: "heartbeat" }
   | { type: "steer_ack" } // the harness put a steering message into the model's context
   | { type: "diff"; path: string; oldText: string | null; newText: string };
 

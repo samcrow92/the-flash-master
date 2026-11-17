@@ -57,7 +57,7 @@ export async function gitlabRepoProblem(cwd: string, extraHosts: string[] = []):
     "Self-managed GitLab on another host name? Add it in Settings → Harnesses → GitLab Duo.";
 }
 
-const LOG_LINE_RE = /^\s*\d{4}-\d\d-\d\dT[\d:.]+\s*\[(\w+)\]:\s*/;
+const LOG_LINE_RE = /^\s*\d{4}-\d\d-\d\dT[\d:.]+(?:Z|[+-]\d\d:?\d\d)?\s*\[(\w+)\]:\s*/;
 
 /** The useful part of a failed Duo run: its [error] lines (not the shutdown chatter at the end), plus what to do about it. */
 export function duoFailure(log: string, code: number | null): string {
@@ -78,11 +78,26 @@ export function duoFailure(log: string, code: number | null): string {
   return `duo exited with ${code}: ${msg}`;
 }
 
+/**
+ * Progress lines from Duo's stderr log, for the orchestrator: the log prefix is stripped, debug/trace chatter and blank
+ * lines are dropped. Duo writes nothing on stdout until it answers, so this is how the app sees it working.
+ */
+export function duoActivity(line: string): string | null {
+  const m = LOG_LINE_RE.exec(line);
+  const level = m?.[1]?.toLowerCase();
+  if (level === "debug" || level === "trace" || level === "verbose" || level === "silly") return null;
+  const text = (m ? line.slice(m[0].length) : line).trim();
+  if (!text || /^[-=─━\s]+$/.test(text)) return null;
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
+}
+
 const SESSION_RE = /session[\s_-]*id[\s:=]+([A-Za-z0-9_-]{6,})/i;
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\u001b\[[0-9;?]*[A-Za-z]/g;
 
 export class DuoSession implements HarnessSession {
+  /** How often a running Duo process reports that it is alive (tests shorten it). */
+  static heartbeatMs = 15_000;
   sessionId: string | null;
   private current: ChildProcess | null = null;
   private closed = false;
@@ -103,6 +118,7 @@ export class DuoSession implements HarnessSession {
     return new Promise((resolve) => {
       let cancelled = false;
       let errTail = "";
+      let errLine = "";
       const child = spawnTool(this.exe, args, { cwd: this.o.cwd, env: { ...process.env, ...this.o.env }, stdio: ["ignore", "pipe", "pipe"] });
       this.current = child;
       child.stdout?.setEncoding("utf8");
@@ -117,10 +133,20 @@ export class DuoSession implements HarnessSession {
         errTail = (errTail + s).slice(-64000);
         const sid = SESSION_RE.exec(s)?.[1];
         if (sid) this.sessionId = sid;
+        const lines = (errLine + s).split(/\r?\n/);
+        errLine = (lines.pop() ?? "").slice(-4000);
+        for (const l of lines) {
+          const a = duoActivity(l);
+          if (a) this.o.onEvent({ type: "activity", text: a });
+        }
       });
+      // Duo can think for minutes without a word: while its process runs, tell the app it is working, not stale.
+      const beat = setInterval(() => { if (child.exitCode === null && !cancelled) this.o.onEvent({ type: "heartbeat" }); }, DuoSession.heartbeatMs);
+      (beat as { unref?: () => void }).unref?.();
       (child as any).__cancel = () => { cancelled = true; };
-      child.on("error", (e) => resolve({ stopReason: "error", error: e.message }));
+      child.on("error", (e) => { clearInterval(beat); resolve({ stopReason: "error", error: e.message }); });
       child.on("close", (code) => {
+        clearInterval(beat);
         this.current = null;
         if (cancelled) resolve({ stopReason: "cancelled" });
         else if (code === 0) resolve({ stopReason: "end_turn" });
