@@ -196,6 +196,10 @@ export interface FlashApi {
   /** Steps and server answers of the last module listing (for troubleshooting). */
   rmDiagnostics(): Promise<string[]>;
   rmCached(): Promise<{ module: RmModule; fetchedAt: number; count: number }[]>;
+  // Engineering Test Management (ETM) and EWM source control (read-only)
+  qmTest(): Promise<{ ok: boolean; detail: string }>;
+  qmProjects(): Promise<{ title: string; alias: string }[]>;
+  scmTest(): Promise<{ ok: boolean; detail: string }>;
 
   // settings
   getSettings(): Promise<{ settings: Settings; locked: string[] }>;
@@ -239,7 +243,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
-  "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "getSettings",
+  "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "qmTest", "qmProjects", "scmTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",
   "windowState", "windowControl", "terminalOpen", "terminalWrite", "terminalResize", "terminalClose",
 ];

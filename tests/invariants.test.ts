@@ -270,3 +270,14 @@ describe("scannable coordinator replies", () => {
     expect(orch).not.toMatch(/this\.finishWaiters\(live, (compact|`error)/); // turn ends must also wake the coordinator
   });
 });
+
+describe("EWM source control stays read-only", () => {
+  // Mari asked for reading and retrieving files only: no check-in, deliver or other change to EWM streams.
+  it("the SCM client only sends GET requests, and the SCM CLI only lists", () => {
+    const scm = read("src/main/scm.ts");
+    expect(scm).not.toMatch(/request\(\s*"(POST|PUT|PATCH|DELETE)"/);
+    const cliCalls = [...scm.matchAll(/\[\s*"(\w+)",\s*"(\w+)"/g)].map((m) => `${m[1]} ${m[2]}`);
+    expect(cliCalls.every((c) => c === "list remotefiles")).toBe(true);
+    expect(read("src/main/scm-cli.ts")).not.toMatch(/checkin|deliver|"(load|share)"/);
+  });
+});
