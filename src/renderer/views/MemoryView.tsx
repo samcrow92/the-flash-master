@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, BookOpen, Brain, ExternalLink, FolderOpen, Network, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
+import { ArrowUpRight, BookOpen, Brain, ExternalLink, FolderOpen, Loader2, Network, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
 import type { CodeGraphStatus, KnowledgeStatus, Memory, MemoryKind, MemoryScope } from "@shared/types";
 import { MEMORY_KINDS } from "@shared/types";
@@ -196,7 +196,7 @@ function CodeGraphRow({ projectId, onError }: { projectId: string; onError: (e: 
   const g = status?.graph;
   const running = status?.running ?? null;
   const scan = async () => {
-    setStatus((s) => (s ? { ...s, running: s.running ?? "Starting…", error: null } : s));
+    setStatus((s) => (s ? { ...s, running: s.running ?? "Starting…", progress: s.running ? s.progress : 0, error: null } : s));
     try {
       const r = await api().scanCodeGraph(projectId);
       setStatus(r);
@@ -211,21 +211,32 @@ function CodeGraphRow({ projectId, onError }: { projectId: string; onError: (e: 
     : g ? `${fmt(g.nodes)} symbols · ${fmt(g.edges)} relations · ${g.communities} communities · scanned ${ago(g.at)}${g.commit ? ` at ${short(g.commit)}` : ""}`
     : status && !status.installed ? "Map the code with graphify (runs locally, no LLM). The first scan installs it."
     : "Map the code with graphify (runs locally, no LLM) into a code-map entry.";
+  const pct = running && status?.progress != null ? Math.round(status.progress * 100) : null;
   return (
-    <div className="kb-graph">
-      <Network size={16} className={`kb-icon${running ? " kb-pulse" : ""}`} />
-      <div className="kb-text">
-        <div className="kb-title">Code graph</div>
-        <div className="muted small">{line}</div>
-        {status?.error && !running && <div className="kb-error small" title={status.error}>{clipText(status.error, 160)}</div>}
+    <div className={`kb-graph${running ? " running" : ""}`}>
+      <div className="kb-graph-head">
+        <Network size={16} className="kb-icon" />
+        <div className="kb-text">
+          <div className="kb-title">Code graph</div>
+          <div className="muted small kb-graph-line" title={line}>{line}</div>
+          {status?.error && !running && <div className="kb-error small" title={status.error}>{clipText(status.error, 160)}</div>}
+        </div>
+        <span className="grow" />
+        <div className="kb-actions">
+          {status?.html && !running && <button className="ghost" title="Open graphify's interactive graph in the browser" onClick={() => void api().openCodeGraph(projectId).catch(onError)}>
+            <ExternalLink size={14} /> Open graph
+          </button>}
+          <button disabled={!!running} aria-busy={!!running} title="Scan the project's code with graphify and write the code-map entry of the knowledge base" onClick={() => void scan()}>
+            {running ? <Loader2 size={14} className="spin" /> : <Network size={14} />} {running ? "Scanning…" : g ? "Rescan code" : "Scan code"}
+          </button>
+        </div>
       </div>
-      <span className="grow" />
-      {status?.html && !running && <button className="ghost" title="Open graphify's interactive graph in the browser" onClick={() => void api().openCodeGraph(projectId).catch(onError)}>
-        <ExternalLink size={14} /> Open graph
-      </button>}
-      <button disabled={!!running} title="Scan the project's code with graphify and write the code-map entry of the knowledge base" onClick={() => void scan()}>
-        <Network size={14} className={running ? "spin" : ""} /> {running ? "Scanning…" : g ? "Rescan code" : "Scan code"}
-      </button>
+      {running && (
+        <div className="kb-progress" role="progressbar" aria-label="Code scan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
+          <div className={`kb-progress-track${pct === null ? " indeterminate" : ""}`}><div className="kb-progress-fill" style={pct === null ? undefined : { width: `${Math.max(2, pct)}%` }} /></div>
+          <span className="kb-progress-pct">{pct === null ? "" : `${pct}%`}</span>
+        </div>
+      )}
     </div>
   );
 }

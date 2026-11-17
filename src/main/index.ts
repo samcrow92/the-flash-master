@@ -165,7 +165,7 @@ const mcp = new McpBootstrap({
 // Code graph (graphify) for the knowledge base: installed into its own venv on the first "Scan code", run on demand.
 const codeGraph = new CodeGraph({
   db, knowledge, python: () => mcp.toolPython("graphify"),
-  install: (onPhase) => mcp.installPipTool("graphify", GRAPHIFY_PACKAGE, GRAPHIFY_MIN_PYTHON, (ph) => onPhase(ph.replace(GRAPHIFY_PACKAGE, "graphify"))),
+  install: (onPhase, onOutput) => mcp.installPipTool("graphify", GRAPHIFY_PACKAGE, GRAPHIFY_MIN_PYTHON, (ph) => onPhase(ph.replace(GRAPHIFY_PACKAGE, "graphify")), onOutput),
   onStatus: (status) => emit({ type: "codegraph.changed", status }),
 });
 

@@ -33,10 +33,40 @@ export interface CodeGraphDeps {
   knowledge: KnowledgeBase;
   /** graphify's Python if installed, else null. */
   python: () => string | null;
-  /** Install graphify (first scan only) and return its Python. */
-  install: (onPhase: (phase: string) => void) => Promise<string>;
+  /** Install graphify (first scan only) and return its Python; pip's output goes to onOutput as it comes. */
+  install: (onPhase: (phase: string) => void, onOutput?: (chunk: string) => void) => Promise<string>;
   run?: Run;
   onStatus?: (s: CodeGraphStatus) => void;
+}
+
+/** Where graphify's scan output says it is (0…1), or undefined for a line that doesn't tell. */
+export function scanProgress(line: string): number | undefined {
+  const ext = /AST extraction:\s*(\d+)\s*\/\s*(\d+)/.exec(line);
+  if (ext && Number(ext[2]) > 0) return 0.08 + 0.77 * Math.min(1, Number(ext[1]) / Number(ext[2]));
+  if (/AST cache:/.test(line)) return 0.08;
+  if (/not classified|Updating code graph/.test(line)) return 0.04;
+  if (/Rebuilt:|No code-graph topology|graph\.json, graph\.html|Code graph updated/.test(line)) return 0.9;
+  return undefined;
+}
+
+/** pip's current step in plain words ("Downloading tree-sitter-cpp…"), or undefined. */
+export function pipStep(line: string): string | undefined {
+  const m = /^\s*(Collecting|Downloading|Installing collected packages|Building wheel for|Using cached)\s*:?\s*([^\s(]*)/.exec(line);
+  if (!m) return undefined;
+  if (m[1] === "Installing collected packages") return "Installing packages…";
+  const pkg = m[2]!.replace(/^.*\//, "").replace(/-\d.*$/, "").replace(/[<>=!~;[].*$/, "");
+  return `${m[1] === "Using cached" || m[1] === "Collecting" ? "Getting" : m[1]} ${pkg || "packages"}…`;
+}
+
+/** Calls onLine for each complete line of streamed output (\n or \r: progress lines often rewrite themselves). */
+function lines(onLine: (l: string) => void): (chunk: string) => void {
+  let buf = "";
+  return (chunk) => {
+    buf += chunk;
+    const parts = buf.split(/\r\n|\r|\n/);
+    buf = parts.pop() ?? "";
+    for (const l of parts) if (l.trim()) onLine(l);
+  };
 }
 
 interface GraphMeta { nodes: number; edges: number; communities: number; commit: string | null; version: string | null }
@@ -122,6 +152,7 @@ export function codeMapEntry(report: string, meta: GraphMeta, limit = MAX_KNOWLE
 
 export class CodeGraph {
   private running = new Map<string, string>();
+  private progress = new Map<string, number | null>();
   private errors = new Map<string, string>();
   private run: Run;
 
@@ -145,11 +176,15 @@ export class CodeGraph {
     let graph: CodeGraphStatus["graph"] = null;
     try { graph = { ...graphMeta(readFileSync(file, "utf8")), at: statSync(file).mtimeMs }; } catch { /* no graph yet */ }
     const html = join(out, "graph.html");
-    return { projectId, installed: !!this.d.python(), running: this.running.get(projectId) ?? null, graph, error: this.errors.get(projectId) ?? null, html: existsSync(html) ? html : null };
+    const running = this.running.get(projectId) ?? null;
+    return { projectId, installed: !!this.d.python(), running, progress: running ? this.progress.get(projectId) ?? null : null, graph, error: this.errors.get(projectId) ?? null, html: existsSync(html) ? html : null };
   }
 
-  private phase(projectId: string, phase: string | null): void {
-    if (phase) this.running.set(projectId, phase); else this.running.delete(projectId);
+  /** Report a step; progress undefined keeps the current value, null = can't be measured. Unchanged reports are dropped. */
+  private phase(projectId: string, phase: string | null, progress?: number | null): void {
+    const p = progress === undefined ? this.progress.get(projectId) ?? null : progress === null ? null : Math.round(Math.min(1, Math.max(0, progress)) * 100) / 100;
+    if (phase && this.running.get(projectId) === phase && this.progress.get(projectId) === p) return;
+    if (phase) { this.running.set(projectId, phase); this.progress.set(projectId, p); } else { this.running.delete(projectId); this.progress.delete(projectId); }
     this.d.onStatus?.(this.status(projectId));
   }
 
@@ -159,17 +194,24 @@ export class CodeGraph {
     if (this.running.has(projectId)) throw new Error("a scan of this project is already running");
     this.errors.delete(projectId);
     try {
-      this.phase(projectId, "Starting…");
-      const py = this.d.python() ?? await this.d.install((ph) => this.phase(projectId, ph));
+      this.phase(projectId, "Starting…", 0);
+      const py = this.d.python() ?? await this.d.install((ph) => this.phase(projectId, `${ph} (first scan only)`, null),
+        lines((l) => { const step = pipStep(l); if (step) this.phase(projectId, `Installing graphify: ${step}`, null); }));
       const out = this.outDir(projectId);
       mkdirSync(out, { recursive: true });
       ensureFlashmasterIgnore(p.path); // the graph and its cache stay out of git
       // graphify reads per-folder ignore files: keep it out of .flashmaster (its own output, the knowledge files).
       const ignore = join(p.path, ".flashmaster", ".graphifyignore");
       if (!existsSync(ignore)) writeFileSync(ignore, "# TheFlashMaster: graphify skips this folder (its output and the knowledge base live here).\n*\n");
-      this.phase(projectId, "Scanning the code…");
+      this.phase(projectId, "Scanning the code…", 0.02);
       const r = await this.run(py, ["-m", "graphify", "update", ".", "--force"], 30 * 60_000, p.path,
-        { GRAPHIFY_OUT: out, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" });
+        { GRAPHIFY_OUT: out, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+        lines((l) => {
+          const at = scanProgress(l);
+          if (at === undefined) return;
+          const files = /AST extraction:\s*(\d+)\s*\/\s*(\d+)/.exec(l);
+          this.phase(projectId, files ? `Scanning the code: ${files[1]} of ${files[2]} files` : at >= 0.9 ? "Building the graph…" : "Scanning the code…", at);
+        }));
       if (r.code !== 0) throw new Error(`graphify failed${r.code === null ? " (timed out)" : ""}: ${r.out.trim().split(/\r?\n/).slice(-4).join(" ").slice(-400) || `exit ${r.code}`}`);
       let report: string, meta: GraphMeta;
       try {
@@ -178,7 +220,7 @@ export class CodeGraph {
       } catch {
         throw new Error(`graphify wrote no graph: ${r.out.trim().split(/\r?\n/).slice(-3).join(" ").slice(-300)}`);
       }
-      this.phase(projectId, "Writing the knowledge base…");
+      this.phase(projectId, "Writing the knowledge base…", 0.96);
       this.d.knowledge.write(projectId, { slug: CODE_MAP_SLUG, content: codeMapEntry(report, meta), kind: "fact", tags: ["code-map", "graphify", "architecture"], importance: 4 },
         { role: null });
     } catch (e: any) {

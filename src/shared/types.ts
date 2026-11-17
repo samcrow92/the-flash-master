@@ -475,6 +475,8 @@ export interface CodeGraphStatus {
   installed: boolean;
   /** What a scan running now is doing ("Installing graphify…", "Scanning the code…"); null when idle. */
   running: string | null;
+  /** How far the running scan is, 0…1 (graphify's own file counts); null while the step can't be measured (installing). */
+  progress: number | null;
   /** The last graph built for this project (local: `.flashmaster/graphify`, not committed). */
   graph: { nodes: number; edges: number; communities: number; commit: string | null; at: number; version: string | null } | null;
   /** The error of the last scan, if it failed. */

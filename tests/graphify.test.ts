@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Db } from "../src/main/db";
 import { MemoryStore, MAX_KNOWLEDGE_CHARS } from "../src/main/memory";
 import { KnowledgeBase } from "../src/main/knowledge";
-import { CODE_MAP_SLUG, CodeGraph, codeMapEntry, graphMeta } from "../src/main/graphify";
+import { CODE_MAP_SLUG, CodeGraph, codeMapEntry, graphMeta, pipStep, scanProgress } from "../src/main/graphify";
 import { buildTools } from "../src/main/tools";
 import type { CodeGraphStatus } from "../src/shared/types";
 
@@ -111,15 +111,39 @@ function setup(opts: { installed?: boolean } = {}) {
     }
     return { code: 0, out: "[graphify] note: old id scheme\nNODE Engine [src=main.ts]" };
   };
-  const run = vi.fn(async (cmd: string, args: string[], _t?: number, cwd?: string, env?: Record<string, string>) => {
+  const run = vi.fn(async (cmd: string, args: string[], _t?: number, cwd?: string, env?: Record<string, string>, onData?: (c: string) => void) => {
     calls.push({ cmd, args, cwd, env });
+    // graphify's real progress output, split mid-line and with \r rewrites as a pipe delivers it.
+    if (args[2] === "update" && onData) for (const c of ["Updating code graph in . (no LLM needed)...\n  AST cache: 0/200 files ser", "ved (0%); 200 to extract\n",
+      "  AST extraction: 100/200 uncached files (50%) [4 workers]\r", "  AST extraction: 200/200 uncached files (100%) [4 workers]\n", "[graphify watch] Rebuilt: 4 nodes, 3 edges, 2 communities\n"]) onData(c);
     return answer(args, env);
   });
-  const install = vi.fn(async (onPhase: (p: string) => void) => { onPhase("Installing graphify…"); python = "/venv/python"; return python; });
+  const install = vi.fn(async (onPhase: (p: string) => void, onOutput?: (c: string) => void) => {
+    onPhase("Installing graphify…");
+    onOutput?.("Collecting graphifyy\n  Downloading tree_sitter_cpp-0.23.4-cp39-abi3-win_amd64.whl (300 kB)\nInstalling collected packages: networkx\n");
+    python = "/venv/python"; return python;
+  });
   const events: CodeGraphStatus[] = [];
   const cg = new CodeGraph({ db, knowledge: kb, python: () => python, install, run, onStatus: (s) => events.push(s) });
   return { dir, db, store, kb, p, cg, calls, install, events, setAnswer: (f: typeof answer) => { answer = f; } };
 }
+
+describe("progress parsing", () => {
+  it("reads graphify's file counts and pip's steps", () => {
+    expect(scanProgress("  AST extraction: 50/200 uncached files (25%) [4 workers]")).toBeCloseTo(0.08 + 0.77 * 0.25);
+    expect(scanProgress("[graphify watch] No code-graph topology changes detected; outputs left untouched.")).toBe(0.9);
+    expect(scanProgress("Tip: set GEMINI_API_KEY")).toBeUndefined();
+    expect(pipStep("Collecting tree-sitter-python<0.26,>=0.23 (from graphifyy)")).toBe("Getting tree-sitter-python…");
+    expect(pipStep("  Downloading numpy-2.3.1-cp313-cp313-win_amd64.whl (12.6 MB)")).toBe("Downloading numpy…");
+    expect(pipStep("Installing collected packages: numpy, networkx")).toBe("Installing packages…");
+    expect(pipStep("Successfully installed numpy")).toBeUndefined();
+  });
+
+  it("keeps the Memory page's knowledge panel and scope bar from being squashed by a long list", () => {
+    const css = readFileSync(join(__dirname, "..", "src", "renderer", "styles.css"), "utf8");
+    expect(css).toMatch(/\.memory-page > :not\(\.memory-list\) \{ flex-shrink: 0; \}/);
+  });
+});
 
 describe("code graph scan", () => {
   it("installs graphify on the first scan, runs it in the project and writes the code-map knowledge entry", async () => {
@@ -142,8 +166,14 @@ describe("code graph scan", () => {
     expect(m.tags).toContain("graphify");
     expect(readFileSync(join(t.dir, ".flashmaster", "knowledge", `${CODE_MAP_SLUG}.md`), "utf8")).toContain("- **Engine** (3)");
     // Progress is visible while it runs, and ends idle.
-    expect(t.events.map((e) => e.running)).toEqual(expect.arrayContaining(["Installing graphify…", "Scanning the code…", "Writing the knowledge base…"]));
-    expect(t.events.at(-1)!.running).toBeNull();
+    expect(t.events.map((e) => e.running)).toEqual(expect.arrayContaining(["Installing graphify… (first scan only)", "Installing graphify: Downloading tree_sitter_cpp…",
+      "Scanning the code: 100 of 200 files", "Scanning the code: 200 of 200 files", "Building the graph…", "Writing the knowledge base…"]));
+    // Installing can't be measured (an indeterminate bar); the scan follows graphify's file counts and only moves forward.
+    expect(t.events.find((e) => e.running?.startsWith("Installing"))!.progress).toBeNull();
+    const scan = t.events.filter((e) => e.running?.startsWith("Scanning") || e.running?.startsWith("Building") || e.running?.startsWith("Writing")).map((e) => e.progress!);
+    expect(scan).toEqual([...scan].sort((a, b) => a - b));
+    expect(t.events.find((e) => e.running === "Scanning the code: 100 of 200 files")!.progress).toBeCloseTo(0.47, 2);
+    expect(t.events.at(-1)!).toMatchObject({ running: null, progress: null });
   });
 
   it("reports a failed run, keeps no half entry and refuses a second scan of the same project while one runs", async () => {
