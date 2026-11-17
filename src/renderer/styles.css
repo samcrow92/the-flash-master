@@ -152,6 +152,12 @@ pre.code:hover .code-copy { opacity: 1; border-color: var(--line); }
 code.inline-code { cursor: copy; transition: background .15s, box-shadow .15s; }
 code.inline-code:hover { box-shadow: 0 0 0 1px var(--line); }
 code.inline-code.copied { box-shadow: 0 0 0 1px var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+/* Links in replies: web URLs and files an agent produced (reports open in the browser). */
+.md a[data-link] { color: var(--blue); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--blue) 35%, transparent); cursor: pointer; }
+.md a[data-link]:hover { border-bottom-color: var(--blue); }
+.md a.file-link { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; overflow-wrap: anywhere; }
+.md a.file-link .file-link-icon { flex: none; align-self: center; opacity: .75; }
+.md a[data-link] code.inline-code { cursor: pointer; color: inherit; }
 .streaming { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .caret { width: 8px; height: 15px; background: var(--accent); display: inline-block; animation: pulse .9s infinite; border-radius: 2px; }
 .msg-footer { display: flex; align-items: center; gap: 4px; margin-top: 4px; position: relative; flex-wrap: wrap; min-height: 20px; }

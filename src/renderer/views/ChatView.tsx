@@ -91,7 +91,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
 
   return (
     <div className={`chat-layout ${popout ? "chat-popout " : ""}${st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
-      <section className="chat">
+      <section className="chat" data-chat={chatId}>
         <header className="chat-header">
           <div className="chat-title-block">
             {editingTitle ? (

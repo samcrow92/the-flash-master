@@ -180,7 +180,7 @@ describe("orchestrator sends an agent back until its report is delivered", () =>
     await until(() => prompts.length >= 2 && db.listAgents({}).every((x) => x.status === "idle"));
     expect(prompts[1]).toMatch(/TheFlashMaster checked your result/);
     expect(prompts[1]).toMatch(/No HTML report was written/);
-    expect(readFileSync(join(dir, "reports", "rca-mock.html"), "utf8")).toContain("diagram fishbone");
+    expect(readFileSync(join(dir, "reports", "rca-report.html"), "utf8")).toContain("diagram fishbone");
     await new Promise((r) => setTimeout(r, 200));
     expect(prompts).toHaveLength(2); // satisfied: no third round
     const notes = db.listMessages(chat.id, null).filter((m) => m.author === "system").map((m) => m.content).join("\n");

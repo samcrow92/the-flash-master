@@ -115,7 +115,10 @@ Whenever you create or rewrite an HTML file or report (.html), it must contain d
 /** Replies are read in a chat: one idea per paragraph, not one long block. */
 export const REPLY_STYLE = "Reply style: the user reads your replies in a chat. Write short paragraphs (one idea each, two to four sentences) separated by blank lines. "
   + "Use a bullet list for steps or several findings, a heading when a reply has distinct parts, and code blocks for code and commands. "
-  + "Before and after tool calls, say briefly what you are checking and what you found, each as its own paragraph.";
+  + "Before and after tool calls, say briefly what you are checking and what you found, each as its own paragraph. "
+  + "Links: whenever you create or update a file the user will want to open (an .html report, a document, a diagram, a log export), put a direct link to it in your reply "
+  + "as a Markdown link with its absolute path as a file URL, e.g. [rca-report.html](file:///C:/work/project/reports/rca-report.html) (forward slashes, spaces as %20). "
+  + "Link web pages with their full https:// URL. The chat makes these clickable: files open in their default app (HTML in the browser).";
 
 /**
  * pstack's unslop skill as a standing writing rule. It covers what the agent writes through tools too (the user asked for
