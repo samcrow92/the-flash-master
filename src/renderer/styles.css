@@ -1648,6 +1648,12 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .kb-title { font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
 .kb-title .link-btn { background: none; border: none; padding: 0; font: inherit; font-weight: 400; font-size: 12px; cursor: pointer; }
 .kb-title .link-btn:hover { color: var(--fg); text-decoration: underline; }
+.kb-graph { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.kb-graph .grow { flex: 1; }
+.kb-graph button { display: inline-flex; align-items: center; gap: 6px; }
+.kb-graph .kb-icon { margin: 0 1px; }
+.kb-graph .kb-icon.kb-pulse { animation: pulse 1.4s ease-in-out infinite; }
+.kb-error { color: var(--amber); margin-top: 2px; }
 .kb-conflicts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .kb-conflict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .kb-conflict .grow { flex: 1; }

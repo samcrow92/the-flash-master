@@ -295,18 +295,51 @@ export class McpBootstrap {
     return existsSync(join(this.p.dataDir, "mcp", id, ".installed")) && existsSync(venvPython(join(this.p.dataDir, "mcp", ".venv")));
   }
 
-  private async findPython(): Promise<{ cmd: string; args: string[] } | null> {
-    if (this.python) return { cmd: this.python, args: [] };
+  private async findPython(min: [number, number] = [3, 10]): Promise<{ cmd: string; args: string[] } | null> {
+    if (this.python && min[1] <= 10) return { cmd: this.python, args: [] };
     const configured = this.settings().mcp.pythonPath;
     const candidates: { cmd: string; args: string[] }[] = configured ? [{ cmd: configured, args: [] }]
       : process.platform === "win32" ? [{ cmd: "py", args: ["-3"] }, { cmd: "python", args: [] }] : [{ cmd: "python3", args: [] }, { cmd: "python", args: [] }];
     for (const c of candidates) {
       const exe = await which(c.cmd);
       if (!exe) continue;
-      const r = await runCapture(exe, [...c.args, "-c", "import sys;print(sys.version_info[:2]>=(3,10))"], 10000);
+      const r = await runCapture(exe, [...c.args, "-c", `import sys;print(sys.version_info[:2]>=(${min[0]},${min[1]}))`], 10000);
       if (r.out.includes("True")) return { cmd: exe, args: c.args };
     }
     return null;
+  }
+
+  /** Python of a tool's own venv in app data (`<dataDir>/<id>/.venv`), or null while it is not installed. */
+  toolPython(id: string): string | null {
+    const vpy = venvPython(join(this.p.dataDir, id, ".venv"));
+    return existsSync(vpy) && existsSync(join(this.p.dataDir, id, ".installed")) ? vpy : null;
+  }
+
+  /**
+   * Install a pip-distributed command-line tool into its own venv in app data (not the MCP servers' shared venv: a
+   * tool's pinned dependencies must not clash with theirs). Honours the proxy, index and CA settings. Returns its Python.
+   */
+  async installPipTool(id: string, requirement: string, minPython: [number, number] = [3, 10], onPhase?: (phase: string) => void): Promise<string> {
+    const s = this.settings();
+    const venv = join(this.p.dataDir, id, ".venv");
+    const vpy = venvPython(venv);
+    if (!existsSync(vpy)) {
+      const py = await this.findPython(minPython);
+      if (!py) throw new Error(`Python ${minPython.join(".")} or newer not found: install it, or set its path in Settings → MCP`);
+      onPhase?.("Creating a Python environment…");
+      mkdirSync(join(this.p.dataDir, id), { recursive: true });
+      const v = await runCapture(py.cmd, [...py.args, "-m", "venv", venv], 180000);
+      if (v.code !== 0) throw new Error(`venv failed: ${v.out.slice(-300)}`);
+    }
+    onPhase?.(`Installing ${requirement}…`);
+    const args = ["-m", "pip", "install", "--disable-pip-version-check", "--upgrade", requirement];
+    if (s.mcp.pipIndexUrl) args.push("--index-url", s.mcp.pipIndexUrl);
+    if (cliProxyUrl(s.network.proxy)) args.push("--proxy", cliProxyUrl(s.network.proxy));
+    if (s.network.caBundlePath) args.push("--cert", s.network.caBundlePath);
+    const r = await runCapture(vpy, args, 900000, undefined, networkEnv(s));
+    if (r.code !== 0) throw new Error(`pip failed: ${r.out.trim().slice(-300) || `exit ${r.code}`}`);
+    writeFileSync(join(this.p.dataDir, id, ".installed"), requirement);
+    return vpy;
   }
 
   private set(s: McpServerStatus): void {

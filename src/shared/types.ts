@@ -468,6 +468,21 @@ export interface KnowledgeStatus {
   lastSync: KnowledgeSyncResult | null;
 }
 
+/** The project's code graph, built on demand by graphify (https://github.com/Graphify-Labs/graphify) and summarised into the knowledge base. */
+export interface CodeGraphStatus {
+  projectId: string;
+  /** graphify is installed in the app's own Python environment. */
+  installed: boolean;
+  /** What a scan running now is doing ("Installing graphify…", "Scanning the code…"); null when idle. */
+  running: string | null;
+  /** The last graph built for this project (local: `.flashmaster/graphify`, not committed). */
+  graph: { nodes: number; edges: number; communities: number; commit: string | null; at: number; version: string | null } | null;
+  /** The error of the last scan, if it failed. */
+  error: string | null;
+  /** Absolute path of graph.html (the interactive view), when there is one. */
+  html: string | null;
+}
+
 export interface MemoryHit extends Memory {
   /** Final rank: relevance blended with recency and importance (0…~1). */
   score: number;
@@ -493,6 +508,7 @@ export type AppEvent =
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "artifacts.changed"; chatId: string }
   | { type: "memory.changed" }
+  | { type: "codegraph.changed"; status: CodeGraphStatus }
   | { type: "update.state"; state: UpdateState }
   | { type: "plugins.changed"; installed: InstalledPlugin[] }
   | { type: "window.state"; state: WindowState }

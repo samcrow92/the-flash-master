@@ -14,6 +14,7 @@ import { MEMORY_KINDS, MEMORY_SCOPES } from "@shared/types";
 import type { Memory } from "@shared/types";
 import type { MemoryContext, MemoryStore } from "./memory";
 import { entryTitle, type KnowledgeBase } from "./knowledge";
+import { CODE_GRAPH_COMMANDS, type CodeGraph, type CodeGraphCommand } from "./graphify";
 import { DIAGRAM_KINDS, renderDiagram } from "@shared/diagrams";
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
@@ -24,7 +25,7 @@ export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
-  knowledge?: KnowledgeBase; readOnly?: () => boolean;
+  knowledge?: KnowledgeBase; codeGraph?: CodeGraph; readOnly?: () => boolean;
   etm?: () => EtmClient | null; scm?: () => ScmClient | null;
 }): ToolDef[] {
   const rm = () => {
@@ -402,6 +403,25 @@ export function buildTools(d: {
         const k = kb(c.agentId);
         const r = await k.kb.checkpoint(k.projectId);
         return changed({ checkpoint: r.commit, entries: r.sync.entries, ...(r.commit ? {} : { note: "not a git repository: no commit to record" }), ...syncNote(r.sync) });
+      },
+    },
+    {
+      set: "core", name: "code_graph",
+      description: "Ask the project's code graph (built by graphify when the user presses Scan code; summary in the knowledge entry code-map). Cheaper than reading many files to find how parts connect. "
+        + "command: query (question → relevant symbols and relations), explain (one node and its neighbours), path (shortest connection from → to), god_nodes (most connected abstractions), affected (what depends on node). "
+        + "Nodes are symbols, files or labels, e.g. 'Orchestrator', 'src/main/db.ts'.",
+      inputSchema: obj({
+        command: { type: "string", enum: [...CODE_GRAPH_COMMANDS], description: "what to ask" },
+        question: s("query: the question in words"), node: s("explain / affected: a symbol, file or label"),
+        from: s("path: start node"), to: s("path: end node"),
+        budget: { type: "number", description: "query: output token cap (default 1500)" }, top: { type: "number", description: "god_nodes: how many (default 15)" },
+      }, ["command"]),
+      handler: async (a, c) => {
+        if (!d.codeGraph) throw new Error("the code graph is not available");
+        const projectId = memCtx(c.agentId).projectId;
+        if (!projectId) throw new Error("the code graph belongs to a project: this chat has no project folder");
+        if (!CODE_GRAPH_COMMANDS.includes(a.command)) throw new Error(`command must be one of ${CODE_GRAPH_COMMANDS.join(", ")}`);
+        return { result: await d.codeGraph.ask(projectId, a.command as CodeGraphCommand, a) };
       },
     },
     // ---------------- Jazz ----------------

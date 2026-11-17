@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentRun, AppEvent, Chat, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SearchHit, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
+import type { AgentRun, AppEvent, Chat, CodeGraphStatus, HarnessId, HarnessModels, McpServerStatus, Message, Project, RoleDef, SearchHit, SkillDef, Task, CopilotUsage, UpdateState, WindowState } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import { chatKey, pickAgentChat } from "./agentChat";
 import { agentLabel } from "@shared/instances";
@@ -51,6 +51,8 @@ interface State {
   artifactsRev: Record<string, number>;
   /** Bumped on every memory change (Memory page reloads). */
   memoryRev: number;
+  /** Code graph (graphify) per project, as the last scan event left it. */
+  codeGraph: Record<string, CodeGraphStatus>;
   openFlow(chatId: string, agentId: string | null): void;
   agents: Record<string, AgentRun>;
   tasks: Record<string, Task>;
@@ -158,6 +160,7 @@ export const useStore = create<State>((set, get) => ({
   artifactsPanel: null,
   artifactsRev: {},
   memoryRev: 0,
+  codeGraph: {},
   agents: {},
   tasks: {},
   roles: [],
@@ -424,6 +427,9 @@ export const useStore = create<State>((set, get) => ({
         break;
       case "memory.changed":
         set((s2) => ({ memoryRev: s2.memoryRev + 1 }));
+        break;
+      case "codegraph.changed":
+        set((s2) => ({ codeGraph: { ...s2.codeGraph, [e.status.projectId]: e.status } }));
         break;
       case "artifacts.changed":
         set((s2) => ({ artifactsRev: { ...s2.artifactsRev, [e.chatId]: (s2.artifactsRev[e.chatId] ?? 0) + 1 } }));

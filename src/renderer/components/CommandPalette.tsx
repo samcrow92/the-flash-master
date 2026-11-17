@@ -6,7 +6,7 @@ import { TABS as SETTINGS_TABS } from "../views/SettingsView";
 import { useMenu } from "./ContextMenu";
 import { toggleTerminal } from "./TerminalPanel";
 import {
-  BookOpen, Bot, Brain, ClipboardList, RefreshCw, Sparkles, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
+  BookOpen, Bot, Brain, ClipboardList, Network, RefreshCw, Sparkles, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
 } from "./icons";
 
 export const usePalette = create<{ open: boolean; setOpen(v: boolean): void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
@@ -108,6 +108,11 @@ function knowledgeActions(projectId: string | null, projectName: (id: string | n
           const moved = r.imported.length + r.exported.length + r.deletedLocal.length + r.deletedRepo.length;
           st.toast(r.conflicts.length ? "warn" : "info", r.conflicts.length ? `Knowledge base: ${r.conflicts.length} conflict${r.conflicts.length === 1 ? "" : "s"} (Memory page)` : moved ? `Knowledge base synced: ${moved} change${moved === 1 ? "" : "s"}` : "Knowledge base already in sync");
         } catch (e) { fail(e); }
+      } },
+    { id: "a:kb-scan", group: "Action", label: "Knowledge base · Scan code (graphify)", hint, keywords: "kb knowledge graphify code graph map scan symbols architecture", icon: <Network size={16} />,
+      run: async () => {
+        st.toast("info", "Scanning the code with graphify…");
+        try { const r = await api().scanCodeGraph(projectId); st.toast("info", r.graph ? `Code map updated: ${r.graph.nodes.toLocaleString()} symbols` : "Code scan finished"); } catch (e) { fail(e); }
       } },
   ];
 }

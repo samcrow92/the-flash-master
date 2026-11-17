@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, BookOpen, Brain, FolderOpen, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
+import { ArrowUpRight, BookOpen, Brain, ExternalLink, FolderOpen, Network, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
-import type { KnowledgeStatus, Memory, MemoryKind, MemoryScope } from "@shared/types";
+import type { CodeGraphStatus, KnowledgeStatus, Memory, MemoryKind, MemoryScope } from "@shared/types";
 import { MEMORY_KINDS } from "@shared/types";
 import { api, ago, roleOf, useStore } from "../store";
 
@@ -169,6 +169,7 @@ function KnowledgePanel({ projectId, rev, onError, onShow }: { projectId: string
           <Sparkles size={14} /> {fresh ? "Build" : "Update"}
         </button>
       </div>
+      <CodeGraphRow projectId={projectId} onError={onError} />
       {!!s?.conflicts.length && <div className="kb-conflicts">
         {s.conflicts.map((c) => (
           <div key={c.slug} className="kb-conflict">
@@ -178,6 +179,53 @@ function KnowledgePanel({ projectId, rev, onError, onShow }: { projectId: string
           </div>
         ))}
       </div>}
+    </div>
+  );
+}
+
+/**
+ * Code graph row of the knowledge base strip: graphify maps the code locally (tree-sitter, no LLM) on demand and its
+ * report becomes the "code-map" entry. The first scan installs graphify into the app's own Python environment.
+ */
+function CodeGraphRow({ projectId, onError }: { projectId: string; onError: (e: unknown) => void }) {
+  const st = useStore();
+  const live = useStore((s) => s.codeGraph[projectId]);
+  const [status, setStatus] = useState<CodeGraphStatus | null>(null);
+  useEffect(() => { void api().codeGraphStatus(projectId).then(setStatus).catch(() => setStatus(null)); }, [projectId]);
+  useEffect(() => { if (live) setStatus(live); }, [live]);
+  const g = status?.graph;
+  const running = status?.running ?? null;
+  const scan = async () => {
+    setStatus((s) => (s ? { ...s, running: s.running ?? "Starting…", error: null } : s));
+    try {
+      const r = await api().scanCodeGraph(projectId);
+      setStatus(r);
+      st.toast("info", r.graph ? `Code map updated: ${r.graph.nodes.toLocaleString()} symbols, ${r.graph.communities} communities` : "Code scan finished");
+    } catch (e) {
+      onError(e);
+      void api().codeGraphStatus(projectId).then(setStatus).catch(() => undefined);
+    }
+  };
+  const fmt = (n: number) => n.toLocaleString();
+  const line = running ? running
+    : g ? `${fmt(g.nodes)} symbols · ${fmt(g.edges)} relations · ${g.communities} communities · scanned ${ago(g.at)}${g.commit ? ` at ${short(g.commit)}` : ""}`
+    : status && !status.installed ? "Map the code with graphify (runs locally, no LLM). The first scan installs it."
+    : "Map the code with graphify (runs locally, no LLM) into a code-map entry.";
+  return (
+    <div className="kb-graph">
+      <Network size={16} className={`kb-icon${running ? " kb-pulse" : ""}`} />
+      <div className="kb-text">
+        <div className="kb-title">Code graph</div>
+        <div className="muted small">{line}</div>
+        {status?.error && !running && <div className="kb-error small" title={status.error}>{clipText(status.error, 160)}</div>}
+      </div>
+      <span className="grow" />
+      {status?.html && !running && <button className="ghost" title="Open graphify's interactive graph in the browser" onClick={() => void api().openCodeGraph(projectId).catch(onError)}>
+        <ExternalLink size={14} /> Open graph
+      </button>}
+      <button disabled={!!running} title="Scan the project's code with graphify and write the code-map entry of the knowledge base" onClick={() => void scan()}>
+        <Network size={14} className={running ? "spin" : ""} /> {running ? "Scanning…" : g ? "Rescan code" : "Scan code"}
+      </button>
     </div>
   );
 }
