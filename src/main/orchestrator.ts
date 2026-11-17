@@ -29,7 +29,7 @@ import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
-  unslopRules, isSilentReply, NEEDS_YOU_RULES, SPECIALIST_ASK_RULES, STATUS_LINE_RULES, COORDINATOR_FEEDBACK_RULES,
+  unslopRules, isSilentReply, NEEDS_YOU_RULES, SPECIALIST_ASK_RULES, STATUS_LINE_RULES, DUO_REPORTING_RULES, COORDINATOR_FEEDBACK_RULES,
 } from "./context";
 
 /** Outcome of closing one agent through the close_agent / close_idle_agents tools. */
@@ -667,7 +667,7 @@ export class Orchestrator {
       l.statusNote = { text: note, at: Date.now() };
       l.recent = [...(l.recent ?? []), `STATUS: ${note}`].slice(-RECENT_LINES);
       this.setStatus(l, "running", `📣 ${note}`.slice(0, 300));
-      this.flow(l.agentId, { kind: "status", label: `status: ${note.slice(0, 150)}`, status: "running" });
+      this.flow(l.agentId, { kind: "status", label: `status: ${note.slice(0, 150)}`, status: /^blocked\b/i.test(note) ? "blocked" : "running" });
     }
   }
 
@@ -1509,7 +1509,7 @@ export class Orchestrator {
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? STATUS_LINE_RULES : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? DUO_REPORTING_RULES : STATUS_LINE_RULES) : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");

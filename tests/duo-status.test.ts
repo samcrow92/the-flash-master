@@ -4,7 +4,7 @@
  * Now Duo's log lines and a heartbeat while its process runs count as working, the coordinator can check a specialist
  * (agent_status) and talk to it (message_agent), and agents report where they are with STATUS lines.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -152,6 +152,46 @@ describe("the coordinator and a Duo specialist", () => {
     await until(() => replies().length === 2 && replies()[1]!.status === "done", 20000);
     expect(replies()[1]!.content).toContain("the agent that delegated to you, sends you this message");
     await until(() => inputs.some((i) => /## Specialist results[\s\S]*Mock run for "TheFlashMaster, the agent that delegated/.test(i)), 20000);
+  }, 30000);
+
+  it("Duo specialists get Duo's own reporting guidelines on their first turn; other specialists the general STATUS rule", async () => {
+    const duoPrompts: string[] = [];
+    const real = DuoSession.prototype.prompt;
+    const spy = vi.spyOn(DuoSession.prototype, "prompt").mockImplementation(function (this: DuoSession, text: string, att?: any) {
+      duoPrompts.push(text);
+      return real.call(this, text, att);
+    });
+    try {
+      const { db, orch, chat } = setup();
+      cleanup = () => orch.stopAll();
+      const parentId = await idleCoordinator(db, orch, chat.id);
+      await orch.delegate(parentId, { role: "tester", goal: "review the MR", harness: "duo", timeoutSec: 20 });
+      expect(duoPrompts[0]).toContain("## Reporting back from GitLab Duo");
+      expect(duoPrompts[0]).toMatch(/STATUS: <state> \| <what you are doing> \| <next>/);
+      expect(duoPrompts[0]).not.toContain("## Keep the delegating agent posted");
+      const inputs: string[] = [];
+      const mockProto = Object.getPrototypeOf((orch as any).byAgent.get(parentId).session);
+      const mockReal = mockProto.prompt;
+      const mspy = vi.spyOn(mockProto, "prompt").mockImplementation(function (this: unknown, text: unknown, att?: unknown) {
+        inputs.push(String(text));
+        return mockReal.call(this, text, att);
+      });
+      await orch.delegate(parentId, { role: "tester", goal: "check the brake light" });
+      mspy.mockRestore();
+      expect(inputs[0]).toContain("## Keep the delegating agent posted");
+      expect(inputs[0]).not.toContain("Reporting back from GitLab Duo");
+    } finally { spy.mockRestore(); }
+  }, 30000);
+
+  it("a blocked STATUS line shows as blocked in the agent's flow", async () => {
+    const { db, orch, chat } = setup();
+    cleanup = () => orch.stopAll();
+    const parentId = await idleCoordinator(db, orch, chat.id);
+    const r = await orch.delegate(parentId, { role: "tester", goal: "Check the brake light", wait: false });
+    const l = (orch as any).byAgent.get(r.agentId);
+    (orch as any).readStatusLines(l, "STATUS: blocked | no access to the GitLab project | a token with api scope\n");
+    expect(db.listEvents(r.agentId).some((e) => e.label.startsWith("status: blocked") && e.status === "blocked")).toBe(true);
+    expect(orch.agentStatus(parentId, r.agentId).statusLine).toMatchObject({ text: "blocked | no access to the GitLab project | a token with api scope" });
   }, 30000);
 
   it("message_agent to an idle agent starts a follow-up; only the agent that started it may message it", async () => {
