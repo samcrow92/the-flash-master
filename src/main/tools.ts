@@ -170,7 +170,8 @@ export function buildTools(d: {
       set: "core", name: "ask_user",
       description: "Ask the user something you can't go on without (a decision, missing access or credentials, an unclear requirement). "
         + "They see a clear card in the chat with your question, why you're blocked and the options; their answer comes back to you as a new message. "
-        + "After calling it, end your turn with a short note. Don't use it for things you can decide yourself.",
+        + "After calling it, end your turn with a short note. Only for what you can't decide yourself: missing access or credentials, a change to what the user asked for, an irreversible step. "
+        + "From a delegated specialist the question goes to the agent that delegated to you instead, which answers it or takes it to the user.",
       inputSchema: obj({
         question: s("the question, one or two sentences"), why: s("what is blocked and why you need the user (optional)"),
         options: { type: "array", items: { type: "string" }, description: "short quick answers, recommended first (optional; the user can also type their own)" },
