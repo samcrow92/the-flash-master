@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Clickable links to files and web pages in chat.** Web URLs, `file:///` links, Windows paths (`C:\…`), and project-relative paths in agent replies (also inside backticks) open on click: web pages in your browser, files with their default app, so an agent's `.html` report opens in the browser. Relative paths resolve inside the chat's project. Programs and scripts (`.exe`, `.bat`, `.ps1`, `.lnk`, …) are never run from a link; their folder opens with the file selected. Network (UNC) paths and other link types (`javascript:`, `data:`, …) are refused. Agents are told to end replies with a direct link to every file they create.
 - **An organised team instead of a swarm of agents.** The coordinator plans first and groups related work into one brief per specialist.
   - **At most 3 specialists work at once** per coordinator (Settings → Agents → *Specialists working at once*; 0 = no limit). Further delegations wait for a free one, so text-mode coordinators run in waves, and the chat says how many wait.
   - Over the cap, a background delegation is refused with who is working and which finished specialists can take related work through their `agentId`, so no extra instance is created.
