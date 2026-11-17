@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Agents work with IBM Engineering Test Management (ETM) and read EWM source control.** Turn them on in Settings → Integrations → IBM Jazz; both use the Jazz sign-in you already have.
+  - **Testing:** `qm_list`, `qm_get`, `qm_create`, `qm_update` for test plans, suites, test cases, test scripts (with steps) and execution records; `qm_record_result` finds or creates the execution record and adds the verdict; `qm_link_requirement` links a test case to the DOORS Next requirement it validates.
+  - **Source, read-only:** `scm_streams`, `scm_components`, `scm_read_file`, `scm_download`, plus `scm_list` / `scm_find_files` through the EWM SCM command line. Nothing is checked in or delivered.
+  - **Self-signed servers:** a *Trust the server's certificate* switch accepts the Jazz hosts' own certificate when Windows doesn't trust it.
+  - Built against IBM's documented APIs without a live server; see [docs/jazz.md](docs/jazz.md) for what still needs a check on a real server.
 - **An organised team instead of a swarm of agents.** The coordinator plans first and groups related work into one brief per specialist.
   - **At most 3 specialists work at once** per coordinator (Settings → Agents → *Specialists working at once*; 0 = no limit). Further delegations wait for a free one, so text-mode coordinators run in waves, and the chat says how many wait.
   - Over the cap, a background delegation is refused with who is working and which finished specialists can take related work through their `agentId`, so no extra instance is created.

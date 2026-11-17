@@ -639,6 +639,50 @@ function RmSettings({ f }: { f: F }) {
   </>;
 }
 
+function QmSettings({ f }: { f: F }) {
+  const st = useStore();
+  const [test, setTest] = useState("");
+  const [projects, setProjects] = useState<{ title: string; alias: string }[] | null>(null);
+  const qm = f.s.jazz.qm;
+  const derived = f.s.jazz.serverUrl.replace(/[#?].*$/, "").replace(/\/(ccm|jts|rm)(\w*)\/?$/i, "/qm$2");
+  return <>
+    <h4>IBM Engineering Test Management (ETM)</h4>
+    <p className="muted small">Uses the same sign-in as Jazz work items above. Agents get <code>qm_*</code> tools to read, create and edit test plans, suites, test cases, test scripts and execution records, record results, and link test cases to DOORS Next requirements.</p>
+    <Row label="Enabled"><Bool f={f} path="jazz.qm.enabled" /></Row>
+    {qm.enabled && <>
+      <Row label="Test management server" hint={`ETM context root, e.g. https://alm.company.com/qm. Blank = ${derived || "…/qm"}`}><Text f={f} path="jazz.qm.serverUrl" placeholder={derived || "https://alm.company.com/qm"} /></Row>
+      <Row label="Project area" hint="The ETM project area agents work in (they can name another one per call).">
+        <div className="col gap-s">
+          <div className="row gap">
+            <input className="grow" key={qm.projectArea} defaultValue={qm.projectArea} list="qm-known-areas" placeholder="e.g. Body Electronics (Quality Management)" disabled={f.locked("jazz.qm")}
+              onBlur={(e) => { const v = e.target.value.trim(); if (v !== qm.projectArea) void f.set("jazz.qm.projectArea", v); }} />
+            <datalist id="qm-known-areas">{(projects ?? []).map((p) => <option key={p.alias} value={p.title} />)}</datalist>
+            <button onClick={async () => { try { setProjects(await api().qmProjects()); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } }}><RefreshCw size={14} /> From server</button>
+          </div>
+          {projects && projects.length > 0 && <div className="row gap wrap">
+            {projects.filter((p) => p.title !== qm.projectArea).slice(0, 40).map((p) => <button key={p.alias} className="chip" onClick={() => f.set("jazz.qm.projectArea", p.title)}><Plus size={12} /> {p.title}</button>)}
+          </div>}
+        </div>
+      </Row>
+      <Row label="Configuration (optional)" hint="For configuration-managed ETM projects: the stream or baseline URL (oslc_config.context). Blank = the default configuration."><Text f={f} path="jazz.qm.config" /></Row>
+      <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().qmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span><MarkText text={test} /></span></div></Row>
+    </>}
+  </>;
+}
+
+function ScmSettings({ f }: { f: F }) {
+  const [test, setTest] = useState("");
+  return <>
+    <h4>IBM EWM source control (read-only)</h4>
+    <p className="muted small">Agents can list streams and components and read or copy files with the <code>scm_*</code> tools. Nothing is ever checked in or delivered. Same server and sign-in as work items.</p>
+    <Row label="Enabled"><Bool f={f} path="jazz.scm.enabled" /></Row>
+    {f.s.jazz.scm.enabled && <>
+      <Row label="SCM command line" hint="Folder listings and file search use the EWM SCM command line (scm.exe or lscm from the EWM client). Blank = find it on PATH. Reading a file by path works without it."><Text f={f} path="jazz.scm.cliPath" placeholder={"C:\\Program Files\\IBM\\…\\scmtools\\eclipse\\scm.exe"} /></Row>
+      <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().scmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span><MarkText text={test} /></span></div></Row>
+    </>}
+  </>;
+}
+
 function Integrations(f: F) {
   const st = useStore();
   const [pw, setPw] = useState("");
@@ -661,9 +705,12 @@ function Integrations(f: F) {
       <div className="row gap"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••" />
         <button disabled={!pw} onClick={async () => { await api().jazzSetPassword(pw); setPw(""); st.setSettings((await api().getSettings()).settings); st.toast("info", "Password saved"); }}>Save</button></div>
     </Row>}
+    <Row label="Trust the server's certificate" hint="Turn on when the Jazz servers use a self-signed or company certificate that Windows doesn't trust (the test says “certificate” or ERR_CERT…). Applies only to the Jazz hosts set here. Better: install the company CA in Windows."><Bool f={f} path="jazz.trustServerCert" /></Row>
     <Row label="Default query"><Text f={f} path="jazz.defaultQuery" placeholder="words or ids shown when the Jazz page opens (optional)" /></Row>
     <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().jazzTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span><MarkText text={test} /></span></div></Row>
     <RmSettings f={f} />
+    <QmSettings f={f} />
+    <ScmSettings f={f} />
 
     <h4>winIDEA (iSYSTEM / TASKING)</h4>
     <Row label="winIDEA install path" hint="Folder or winIDEA.exe; blank = most recently used instance."><Text f={f} path="winidea.installPath" /></Row>
