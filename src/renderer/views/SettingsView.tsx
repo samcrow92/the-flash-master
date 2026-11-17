@@ -302,6 +302,9 @@ function InstructionSettings({ f }: { f: F }) {
     <Row label="Keep project AGENTS.md / instruction files" hint="In clean mode, still load the repository's own agent instructions (useful when a repo documents its build/test conventions).">
       <Bool f={f} path="agents.keepProjectInstructions" />
     </Row>
+    <Row label="Unslop writing style" hint="Every agent follows pstack's unslop rules (no AI filler, no em dashes, plain words) in its replies and in text it writes through tools: commits, PR descriptions, comments, docs. /unslop applies it to one message.">
+      <Bool f={f} path="agents.unslop" />
+    </Row>
     <Row label="Team rules" hint="Sent to every agent as part of its stable instructions — your workflow, conventions and setup. Keep it short (it is part of every session).">
       <Area f={f} path="agents.houseRules" rows={6} />
     </Row>

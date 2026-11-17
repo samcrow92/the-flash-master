@@ -28,6 +28,7 @@ import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
+  unslopRules,
 } from "./context";
 
 /** Outcome of closing one agent through the close_agent / close_idle_agents tools. */
@@ -1254,6 +1255,7 @@ export class Orchestrator {
         return buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
+            first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
             first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);

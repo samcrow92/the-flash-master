@@ -64,6 +64,8 @@ export interface Settings {
     closeIdleAfterMinutes: number;
     /** Code-writing specialists (roles with `isolate: true`) work in their own git worktree and branch when delegated. */
     isolateWriters: boolean;
+    /** Send pstack's unslop writing rules (skills/pstack/unslop.md) to every agent, for replies and for text written through tools. */
+    unslop: boolean;
   };
   /** Task board auto-cleanup; Review tasks and tasks with a working agent are always kept. */
   tasks: {
@@ -208,7 +210,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "" },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true, unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },

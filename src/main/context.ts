@@ -103,6 +103,17 @@ export const REPLY_STYLE = "Reply style: the user reads your replies in a chat. 
   + "Use a bullet list for steps or several findings, a heading when a reply has distinct parts, and code blocks for code and commands. "
   + "Before and after tool calls, say briefly what you are checking and what you found, each as its own paragraph.";
 
+/**
+ * pstack's unslop skill as a standing writing rule. It covers what the agent writes through tools too (the user asked for
+ * it "for all tool interactions"), but never code, quotes or output passed along verbatim.
+ */
+export function unslopRules(skill: Pick<SkillDef, "body"> | undefined): string {
+  if (!skill?.body.trim()) return "";
+  return "## Writing style (unslop)\nApply these rules to everything you write: replies, results, briefs for other agents, and text you write through tools "
+    + "(commit messages, PR descriptions, issue and review comments, docs, reports). Leave code, identifiers, quoted text and tool output you pass along verbatim as they are.\n\n"
+    + skill.body.trim();
+}
+
 /** Byte-stable prefix: never put timestamps or counters here, so provider prompt caches stay warm. */
 export function rolePrefix(role: RoleDef, projectPath: string | null, o: { clean?: boolean; houseRules?: string } = {}): string {
   return [
