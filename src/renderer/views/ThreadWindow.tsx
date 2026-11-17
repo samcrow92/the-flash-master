@@ -30,7 +30,7 @@ export function ThreadWindow({ chatId, rootId }: { chatId: string; rootId: strin
 
   if (!ready) return <div className="splash"><div className="logo-big"><Zap size={44} strokeWidth={1.6} /></div><div className="splash-bar"><i /></div></div>;
   return (
-    <div className="thread-window">
+    <div className="thread-window" data-chat={chatId}>
       <ThreadPanel chatId={chatId} rootId={rootId} standalone />
       <ContextMenuHost />
       <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}</div>

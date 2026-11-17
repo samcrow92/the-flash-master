@@ -22,6 +22,7 @@ import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
 import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
 import { Requirements, parseRmLink } from "./requirements";
+import { resolveLink } from "./links";
 import { EtmClient } from "./etm";
 import { ScmClient, type CliRunner } from "./scm";
 import { findScmCli, scmCliRunner } from "./scm-cli";
@@ -670,6 +671,16 @@ const api: FlashApi = {
     const ok = path.startsWith(appAttachDir) || db.listProjects().some((p) => path.startsWith(join(p.path, ".flashmaster", "attachments")));
     if (!ok || !existsSync(path)) throw new Error("attachment not found");
     await shell.openPath(path);
+  },
+  openLink: async (target, chatId) => {
+    const c = chatId ? db.getChat(String(chatId)) : null;
+    const project = c?.projectId ? db.getProject(c.projectId)?.path : null;
+    const a = resolveLink(String(target ?? ""), { platform: process.platform, bases: project ? [project] : [], home: homedir(), exists: existsSync });
+    if (a.kind === "refuse") return { ok: false, detail: `Can't open this link: ${a.reason}` };
+    if (a.kind === "web") { await shell.openExternal(a.url); return { ok: true, detail: "Opened in your browser." }; }
+    if (a.kind === "reveal") { shell.showItemInFolder(a.path); return { ok: true, detail: "Programs are not run from chat links; showing it in its folder." }; }
+    const err = await shell.openPath(a.path);
+    return err ? { ok: false, detail: err } : { ok: true, detail: "Opened." };
   },
   openThreadWindow: async (chatId, rootId) => openThreadWindow(chatId, rootId),
   openChatWindow: async (chatId) => openChatWindow(chatId),

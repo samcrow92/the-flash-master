@@ -3,6 +3,9 @@
  * without any agent CLI installed. Replies are deterministic and include a result block.
  */
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { HarnessStatus } from "@shared/types";
 import { estimateTokens } from "../context";
 import type { HarnessAdapter, HarnessSession, PromptAttachment, SessionOptions, TurnResult } from "./types";
@@ -24,6 +27,16 @@ export class MockSession implements HarnessSession {
     this.turn += 1;
     const request = /## Request\n([\s\S]*)$/.exec(text)?.[1] ?? text;
     const role = /# Role: (.+)/.exec(text)?.[1] ?? "Mock agent";
+    // "html report" in a request makes the mock write a small report and link it, as real agents are told to.
+    let report: string | null = null;
+    if (/\bhtml report\b/i.test(request) && this.o.cwd) {
+      try {
+        const dir = join(this.o.cwd, "reports");
+        mkdirSync(dir, { recursive: true });
+        report = join(dir, "rca-report.html");
+        writeFileSync(report, "<!doctype html><meta charset=utf-8><title>RCA report (mock)</title><h1>RCA report (mock)</h1><p>Written by the mock harness.</p>");
+      } catch { report = null; }
+    }
     const reply = [
       `**${role}** (mock harness, turn ${this.turn}) received:`,
       `> ${request.trim().split("\n")[0]!.slice(0, 160)}`,
@@ -40,6 +53,8 @@ export class MockSession implements HarnessSession {
           "Implementation": ["Filter off-by-one (ruled out)"], "Verification & Validation": ["HIL misses cold start (confirmed)"],
           "Process": ["Late change without impact analysis"], "Tools & Environment": ["Cold chamber unavailable"] } }),
         "```", ""] : []),
+      ...(report ? ["Report written: [rca-report.html](" + pathToFileURL(report).href + ")", "",
+        "Background: [ISO 26262 overview](https://www.iso.org/standard/68383.html). The file is also at `reports/rca-report.html`.", ""] : []),
       ...(/\b(fix|implement|change|edit|debounce)\b/i.test(request) ? [
         "Proposed change (mock) — also shown in **Artifacts → Changes**:", "",
         "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
