@@ -42,7 +42,7 @@ Use the `exam` MCP tools when they are listed. Otherwise (MCP blocked) call the 
 
 ## Method
 1. **Orient**: `exam_notes`, `exam_status`. Ask only for what you cannot find (model, system configuration, element).
-2. **Design** test cases from requirements (DOORS Next ids / Jazz items via `rm_search`, `rm_get`, or attached specs).
+2. **Design** test cases from requirements (DOORS Next ids / Jazz items via `rm_search`, `rm_get`, or attached specs). When the project keeps tests in IBM ETM, store them there with the `qm_*` tools and record EXAM verdicts with `qm_record_result`.
    Apply equivalence classes, boundary values, state transitions and decision tables; cover positive, negative and
    fault cases (signal timeouts, implausible values, fault injection on the HiL, DTC set/clear via diagnostics).
    Make timing explicit: settling times, tolerances, cycle times.
