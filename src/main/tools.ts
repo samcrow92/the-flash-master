@@ -167,6 +167,19 @@ export function buildTools(d: {
       },
     },
     {
+      set: "core", name: "ask_user",
+      description: "Ask the user something you can't go on without (a decision, missing access or credentials, an unclear requirement). "
+        + "They see a clear card in the chat with your question, why you're blocked and the options; their answer comes back to you as a new message. "
+        + "After calling it, end your turn with a short note. Don't use it for things you can decide yourself.",
+      inputSchema: obj({
+        question: s("the question, one or two sentences"), why: s("what is blocked and why you need the user (optional)"),
+        options: { type: "array", items: { type: "string" }, description: "short quick answers, recommended first (optional; the user can also type their own)" },
+        recommended: { type: "number", description: "index of the option you recommend (default 0)" },
+        blocked: { type: "boolean", description: "true when you are blocked (missing access, broken environment) rather than asking for a decision" },
+      }, ["question"]),
+      handler: async (a, c) => d.orch.askUser(c.agentId, a),
+    },
+    {
       set: "core", name: "create_task", description: "Create a task in the project's task board.",
       inputSchema: obj({ title: s("short title"), description: s("details"), priority: { type: "number", description: "1 high … 4 low" },
         assigneeRole: s("role to assign"), jazzId: s("linked Jazz work item id"), parentId: s("parent task id") }, ["title"]),

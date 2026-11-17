@@ -1692,3 +1692,32 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .sys-line > svg { flex: none; margin-top: 3px; }
 .sys-line .md p { margin: 0; }
 .inline-thread .sys-line, .thread-window .sys-line { margin-left: 32px; }
+
+/* "Needs you" cards: an agent waits for the user. Glass, one accent edge per kind, quick answers as pills. */
+.ask-card { --ak: var(--blue); margin: 4px 0 2px; padding: 12px 14px 12px; max-width: 720px; border-radius: 14px;
+  background: color-mix(in srgb, var(--ak) 7%, var(--glass)); border: 1px solid color-mix(in srgb, var(--ak) 32%, var(--rim));
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .12); backdrop-filter: blur(14px) saturate(1.3); }
+.ask-card.warn { --ak: var(--amber); } .ask-card.bad { --ak: var(--red); }
+.ask-card.answered { --ak: var(--muted); background: transparent; box-shadow: none; border-color: var(--line); opacity: .85; }
+.ask-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-s); }
+.ask-flag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-weight: 600;
+  color: var(--accent-fg); background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+.ask-card.answered .ask-flag { background: var(--bg3); color: var(--muted); }
+.ask-kind { display: inline-flex; align-items: center; gap: 4px; color: var(--ak); font-weight: 600; }
+.ask-who { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-question { margin-top: 8px; font-size: var(--fs-l); font-weight: 600; }
+.ask-question .md p, .ask-why .md p { margin: 0; }
+.ask-why { margin-top: 4px; color: var(--muted); font-size: var(--fs-m); }
+.ask-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ask-opt { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  background: var(--bg3); border: 1px solid var(--line); color: var(--fg); font-weight: 500; }
+.ask-opt:hover:not(:disabled) { border-color: var(--ak); }
+.ask-opt.rec { border-color: color-mix(in srgb, var(--ak) 60%, var(--line)); background: color-mix(in srgb, var(--ak) 14%, var(--bg3)); }
+.ask-rec { font-size: var(--fs-xs); color: var(--ak); font-weight: 600; }
+.ask-reply { display: flex; gap: 6px; margin-top: 8px; }
+.ask-reply input { flex: 1; min-width: 0; border-radius: 10px; }
+.ask-send { flex: none; width: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; }
+.ask-answer { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: var(--fs-m); color: var(--muted); }
+.ask-answer > svg { color: var(--green); }
+.ask-answer b { color: var(--fg); font-weight: 600; }
+.msg-system .msg-content:has(> .ask-card) { border-left: none; padding-left: 0; }

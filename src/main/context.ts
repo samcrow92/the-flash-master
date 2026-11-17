@@ -55,7 +55,8 @@ export const RESULT_CONTRACT = (maxTokens: number) =>
   `When you finish, end your reply with a result block:
 <result>
 status: done | needs_decision | blocked | failed
-question: only for needs_decision / blocked — what you need, the options, and the one you recommend
+question: only for needs_decision / blocked — what you need from the user, in one or two sentences
+options: only for needs_decision — the choices, separated by " | ", recommended one first
 summary: <= ${maxTokens} tokens — what you did / found, decisions, open questions
 findings: bullet list (file:line where relevant)
 artifacts: ids of stored artifacts, if any
@@ -187,6 +188,8 @@ export interface ParsedResult {
   /** null when the reply has no result block; "done" when the block has no (valid) status line. */
   status: ResultStatus | null;
   question: string | null;
+  /** Quick answers for a needs_decision ("options: A | B"), the recommended one first. */
+  options: string[];
   summary: string | null;
   findings: string[];
   artifacts: string[];
@@ -194,23 +197,61 @@ export interface ParsedResult {
 
 export function parseResult(text: string): ParsedResult {
   const m = /<result>([\s\S]*?)(?:<\/result>|$)/i.exec(text);
-  if (!m) return { status: null, question: null, summary: null, findings: [], artifacts: [] };
+  if (!m) return { status: null, question: null, options: [], summary: null, findings: [], artifacts: [] };
   const block = m[1]!;
   const raw = /^\s*status:\s*([\w-]+)/im.exec(block)?.[1]?.toLowerCase().replace(/-/g, "_") ?? "";
   const status = (RESULT_STATUSES as string[]).includes(raw) ? (raw as ResultStatus) : "done";
-  const question = /^\s*question:\s*([\s\S]*?)(?:\n\s*(?:summary|findings|artifacts):|$)/im.exec(block)?.[1]?.trim() || null;
+  const question = /^\s*question:\s*([\s\S]*?)(?:\n\s*(?:options|summary|findings|artifacts):|$)/im.exec(block)?.[1]?.trim() || null;
+  const options = splitOptions(/^\s*options:\s*(.*)$/im.exec(block)?.[1] ?? "");
   const summary = /summary:\s*([\s\S]*?)(?:\n\s*(?:findings|artifacts):|$)/i.exec(block)?.[1]?.trim() || null;
   const findingsBlock = /findings:\s*([\s\S]*?)(?:\n\s*artifacts:|$)/i.exec(block)?.[1] ?? "";
   const findings = findingsBlock.split("\n").map((l) => l.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
   const artifacts = (/artifacts:\s*(.*)/i.exec(block)?.[1] ?? "").split(/[,\s]+/).map((s) => s.trim()).filter((s) => s && s !== "none" && s !== "-");
-  return { status, question, summary, findings, artifacts };
+  return { status, question, options, summary, findings, artifacts };
 }
+
+/** "A | B | C" (or "A; B") → up to 6 short options. */
+export function splitOptions(line: string): string[] {
+  return line.split(/\s*[|;]\s*/).map((o) => o.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter((o) => o && !/^(?:none|-|n\/a)$/i.test(o))
+    .map((o) => (o.length > 120 ? `${o.slice(0, 119)}…` : o)).slice(0, 6);
+}
+
+/**
+ * The reply delivered nothing a delegating agent (or the user) could use: no result block and next to no prose once
+ * text-mode TOOL / DELEGATE lines and notices are left out. A specialist like this is asked to deliver, then restarted.
+ * minChars 1 = nothing at all (the coordinator may answer in a word).
+ */
+export function isSilentReply(text: string, minChars = 20): boolean {
+  if (/<result>/i.test(text)) return false;
+  const prose = text
+    .replace(/```[\s\S]*?```/g, " [code] ")
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*(?:[-*]\s+)?(?:\*\*)?(?:TOOL|DELEGATE|AGENT)(?:\*\*)?\s/.test(l) && !/^\s*_?(?:⚠|↪|↻|⏹)/.test(l))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return prose.replace(/[^\p{L}\p{N}]/gu, "").length < minChars;
+}
+
+/** Every agent: how to ask the user for something instead of stopping silently. */
+export const NEEDS_YOU_RULES = `## When you need the user
+Never end a turn silently: always finish with your answer or result. If you can't go on without the user (a decision,
+missing access or credentials, an unclear requirement), ask them: call the ask_user tool with the question, why you are
+blocked and the options (recommended first), then end your turn; or end with a result block with status needs_decision
+(or blocked), a question and options. The user sees it as a card and their answer comes back to you as a new message.`;
+
+/** The coordinator: always close the loop with the user. */
+export const COORDINATOR_FEEDBACK_RULES = `## Always close the loop
+Every turn of yours ends with something for the user: the outcome, what is still running and what you are waiting for,
+or a question (ask_user, or a result with status needs_decision). When a specialist's result says the user was asked
+(needs_decision / blocked, or it didn't deliver), don't ask the same thing again: say in one line that their answer is
+needed, then end your turn; the answer resumes the work and the new result comes to you.`;
 
 /** Compact result that goes back to a delegating agent: summary + findings, capped. */
 export function resultForParent(text: string, maxTokens: number): string {
   const r = parseResult(text);
   const body = r.summary
-    ? [r.status && r.status !== "done" ? `status: ${r.status}` : "", r.question ? `question: ${r.question}` : "", `summary: ${r.summary}`, r.findings.length ? "findings:\n" + r.findings.map((f) => `- ${f}`).join("\n") : "", r.artifacts.length ? `artifacts: ${r.artifacts.join(", ")}` : ""].filter(Boolean).join("\n")
+    ? [r.status && r.status !== "done" ? `status: ${r.status}` : "", r.question ? `question: ${r.question}` : "", r.options.length ? `options: ${r.options.join(" | ")}` : "", `summary: ${r.summary}`, r.findings.length ? "findings:\n" + r.findings.map((f) => `- ${f}`).join("\n") : "", r.artifacts.length ? `artifacts: ${r.artifacts.join(", ")}` : ""].filter(Boolean).join("\n")
     : text;
   const maxChars = maxTokens * 4;
   return body.length > maxChars ? body.slice(0, maxChars) + "\n…[truncated to result budget]" : body;

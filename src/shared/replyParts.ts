@@ -21,7 +21,7 @@ const DETAILS = /^\s*#{1,4}\s*(?:\*\*)?(Details|More details|Full details)(?:\*\
 
 export function parseResultBlock(block: string): ResultPart {
   const raw = /^\s*status:\s*([\w-]+)/im.exec(block)?.[1]?.toLowerCase().replace(/-/g, "_") ?? "done";
-  const question = /^\s*question:\s*([\s\S]*?)(?:\n\s*(?:summary|findings|artifacts):|$)/im.exec(block)?.[1]?.trim() || null;
+  const question = /^\s*question:\s*([\s\S]*?)(?:\n\s*(?:options|summary|findings|artifacts):|$)/im.exec(block)?.[1]?.trim() || null;
   const summary = /summary:\s*([\s\S]*?)(?:\n\s*(?:findings|artifacts):|$)/i.exec(block)?.[1]?.trim() || null;
   const findingsBlock = /findings:\s*([\s\S]*?)(?:\n\s*artifacts:|$)/i.exec(block)?.[1] ?? "";
   const findings = findingsBlock.split("\n").map((l) => l.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
@@ -103,6 +103,6 @@ export function briefHeadline(brief: string, max = 140): string {
 }
 
 /** A short one-line system notice ("↪ Delegating: …") shows as a slim line in the chat instead of a full message card. */
-export function isNoticeLine(m: { author: string; content: string; tools?: unknown[]; reactions?: string[] }): boolean {
-  return m.author === "system" && !m.content.trim().includes("\n") && m.content.length <= 240 && !m.tools?.length && !m.reactions?.length;
+export function isNoticeLine(m: { author: string; content: string; tools?: unknown[]; reactions?: string[]; ask?: unknown }): boolean {
+  return m.author === "system" && !m.ask && !m.content.trim().includes("\n") && m.content.length <= 240 && !m.tools?.length && !m.reactions?.length;
 }

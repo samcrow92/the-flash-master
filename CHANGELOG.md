@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **The flow always goes end to end, and you always get feedback.**
+  - **Fix: specialists finished without delivering anything.** With text-mode tools (the default), a specialist whose first reply was only `TOOL` lines had that reply sent to the coordinator as its result, and its real report afterwards was dropped. Now only the task's last turn reports back.
+  - **Silent specialists are recovered.** One that ends without a report, fails or crashes is first asked to deliver, then restarted on its task. One that sends nothing for twice the stuck-agent time (no tool call running) is interrupted and told to deliver what it has. The chat shows each attempt. Settings → Agents → *Recover a specialist that delivers nothing* (default 2; 0 = ask you right away).
+  - **"Needs you" cards.** Questions and blockers show as a clear card in the chat: who asks, the question, why it waits, quick answers (recommended first) and a field for your own answer. Your answer goes back to the agent that asked, and a specialist's new result goes on to the coordinator by itself. Agents raise them with the new `ask_user` tool or a result with `status: needs_decision` / `blocked` (now with an `options:` line). A specialist that still delivers nothing after the recovery attempts becomes a card too: *Restart it*, *Continue without it*, or tell it what to do.
+  - **The coordinator never ends a turn silently.** An empty turn gets one reminder to tell you where things stand; a second one raises a card.
 - **Diagrams are mandatory in HTML reports.** Every agent, on every harness, is told that HTML files and reports it writes must include diagrams: an Ishikawa (fishbone) for root causes, plus flowcharts, timelines and sequence diagrams where they help (Settings → Agents → *Diagrams in HTML reports*, on by default).
   - New `diagram_svg` tool renders Ishikawa, flowchart, timeline and sequence diagrams as inline SVG with embedded styles, so reports open offline (no CDN, no scripts). Given a report file and a `<!-- diagram:name -->` marker it inserts the SVG itself, so agents don't spend tokens pasting SVG.
   - Fishbone cause labels now wrap instead of running across the neighbouring bone.

@@ -98,7 +98,7 @@ describe("token efficiency engine", () => {
 
   it("parses result blocks and caps what goes back to the parent", () => {
     const text = "work...\n<result>\nsummary: All good\nfindings:\n- a.c:3 leak\n- b.c:9 race\nartifacts: a1b2, c3d4\n</result>";
-    expect(parseResult(text)).toEqual({ status: "done", question: null, summary: "All good", findings: ["a.c:3 leak", "b.c:9 race"], artifacts: ["a1b2", "c3d4"] });
+    expect(parseResult(text)).toEqual({ status: "done", question: null, options: [], summary: "All good", findings: ["a.c:3 leak", "b.c:9 race"], artifacts: ["a1b2", "c3d4"] });
     expect(resultForParent(text, 400)).toContain("findings:\n- a.c:3 leak");
     expect(resultForParent("z".repeat(5000), 10).length).toBeLessThan(100);
   });

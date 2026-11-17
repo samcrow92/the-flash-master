@@ -131,7 +131,7 @@ describe("window chrome", () => {
   it("the app icon is resolved for packaged and source runs, and the smoke test checks it loaded", () => {
     const src = read("src/main/index.ts");
     expect(src).toMatch(/iconCandidates\(\{[^}]*process\.resourcesPath[^}]*app\.getAppPath\(\)[^}]*join\(here, "\.\.", "\.\."\)/);
-    expect(src).toMatch(/runSmoke\(win!, log, appIcon\)/);
+    expect(src).toMatch(/runSmoke\(win!, log, appIcon[,)]/);
     expect(read("src/main/smoke.ts")).toMatch(/app\.exit\(ok && iconOk && [^)]*\? 0 : 1\)/);
   });
   it("the frameless title bar shows the app icon and Windows-style caption buttons", () => {
@@ -268,6 +268,18 @@ describe("scannable coordinator replies", () => {
     const orch = read("src/main/orchestrator.ts");
     expect(orch).toContain("await this.waitForTeamSlot(");
     expect(orch).not.toMatch(/this\.finishWaiters\(live, (compact|`error)/); // turn ends must also wake the coordinator
+  });
+  // End to end, always with feedback: a turn reports back only once its task is over (not after its first TOOL lines),
+  // through the recovery check; questions and blockers are cards with an answer path the renderer offers.
+  it("turns report through recoverOrReport after the continuations, and needs-you cards can be answered from the chat", () => {
+    const orch = read("src/main/orchestrator.ts");
+    const tail = orch.slice(orch.indexOf("let next: (() => void) | null = null;"), orch.indexOf("private recoverOrReport("));
+    expect(tail.indexOf("if (next) { next(); return; }")).toBeGreaterThan(0);
+    expect(tail.indexOf("this.recoverOrReport(live, t, outcome)")).toBeGreaterThan(tail.indexOf("if (next) { next(); return; }"));
+    expect(orch.slice(orch.indexOf("private async turn("), orch.indexOf("let next: (() => void) | null = null;"))).not.toContain("this.finishDelegated(");
+    expect(read("src/main/tools.ts")).toContain('name: "ask_user"');
+    expect(read("src/renderer/views/ChatView.tsx")).toContain("<AskCard m={m} />");
+    expect(read("src/renderer/components/AskCard.tsx")).toContain("api().answerAsk(");
   });
 });
 

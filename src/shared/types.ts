@@ -68,9 +68,33 @@ export interface Message {
   /** Commands / tool calls the agent ran while writing this reply (expandable in the chat). */
   tools?: ToolRun[];
   reactions: string[];
+  /** A "needs you" card: an agent (or the app) waits for the user's answer to go on. */
+  ask?: AskCard;
   replyCount: number;
   /** Root messages only: its thread is archived (hidden from the Threads panel and inline; restorable). */
   threadArchived?: boolean;
+}
+
+/**
+ * What a "needs you" card asks. question/blocked come from an agent (ask_user, or a result block with that status);
+ * no_report/failed from the app when a specialist kept ending without a report; silent when the coordinator ended
+ * its turn twice with nothing for the user. The answer resumes the flow: it goes to the agent that asked.
+ */
+export type AskKind = "question" | "blocked" | "no_report" | "failed" | "silent";
+export interface AskCard {
+  kind: AskKind;
+  /** The agent the answer goes to (null: the chat's coordinator). */
+  agentId: string | null;
+  /** How the asking agent shows in the app, e.g. "🧪 Nova · Tester". */
+  who: string;
+  question: string;
+  /** What is waiting on the answer and why. */
+  why: string | null;
+  /** Quick answers shown as buttons; the user can also type their own. */
+  options: string[];
+  /** Index of the option the agent recommends. */
+  recommended?: number | null;
+  answer?: { text: string; at: number } | null;
 }
 
 /** A message found by the chat search. `snippet` wraps each match in \u0002…\u0003 (drawn highlighted). */

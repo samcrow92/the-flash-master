@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import type {
+import type { AskCard,
   AgentEvent, AgentRun, AgentStatus, Attachment, PlanStep, Artifact, FileChange, Chat, HarnessId, Message, MessageStatus, Project, SearchHit, Task, TaskStatus, ToolRun, UsageSummary,
 } from "@shared/types";
 
@@ -245,11 +245,11 @@ export class Db {
     return r ? this.hydrate(r) : null;
   }
   addMessage(i: { chatId: string; parentId?: string | null; author: Message["author"]; content: string; agentId?: string | null;
-    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"] }): Message {
+    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; ask?: AskCard }): Message {
     const id = newId();
     this.seq += 1;
-    const meta = i.attachments?.length || i.steer || i.marker || i.delivery
-      ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}), ...(i.delivery ? { delivery: i.delivery } : {}) }) : null;
+    const meta = i.attachments?.length || i.steer || i.marker || i.delivery || i.ask
+      ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}), ...(i.delivery ? { delivery: i.delivery } : {}), ...(i.ask ? { ask: i.ask } : {}) }) : null;
     this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now(), meta);
     // A new reply brings an archived thread back.
@@ -263,6 +263,16 @@ export class Db {
       patch.content ?? m.content, patch.status ?? m.status, patch.tokensIn ?? m.tokensIn, patch.tokensOut ?? m.tokensOut,
       (patch.estimated ?? m.estimated) ? 1 : 0, id);
     return this.getMessage(id)!;
+  }
+  /** The "needs you" card of a message (kept in meta), e.g. once it is answered. */
+  setMessageAsk(id: string, ask: AskCard): Message | null {
+    const r = this.get("SELECT meta FROM messages WHERE id=?", id);
+    if (!r) return null;
+    let meta: Record<string, unknown> = {};
+    try { meta = r.meta ? JSON.parse(r.meta as string) : {}; } catch { /* ignore */ }
+    meta.ask = ask;
+    this.run("UPDATE messages SET meta=? WHERE id=?", JSON.stringify(meta), id);
+    return this.getMessage(id);
   }
   /** Commands / tool calls of an agent reply (kept in meta). */
   setMessageTools(id: string, tools: ToolRun[]): void {
@@ -365,13 +375,13 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
-    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[]; threadArchived?: boolean } = {};
+    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[]; threadArchived?: boolean; ask?: AskCard } = {};
     try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
       estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}), ...(meta.delivery ? { delivery: meta.delivery } : {}), ...(meta.tools?.length ? { tools: meta.tools } : {}),
-      reactions: this.reactions(r.id), replyCount, ...(meta.threadArchived && !r.parent_id ? { threadArchived: true } : {}),
+      ...(meta.ask ? { ask: meta.ask } : {}), reactions: this.reactions(r.id), replyCount, ...(meta.threadArchived && !r.parent_id ? { threadArchived: true } : {}),
     };
   }
 
