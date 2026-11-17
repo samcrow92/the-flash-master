@@ -227,6 +227,12 @@ export interface RoleDef {
    * ishikawa = that report contains an Ishikawa (fishbone) diagram.
    */
   requires?: string[];
+  /**
+   * Must run on a local model (frontmatter `local: true`, or instructions that demand local inference). The app then runs
+   * it only on Pi or OpenCode with a local model (the coordinator's, the role's, or Settings → Modes → LOCAL), never on a
+   * hosted harness such as GitLab Duo, and stops with a clear error when no local model is set up.
+   */
+  local?: boolean;
 }
 
 export interface SkillDef {

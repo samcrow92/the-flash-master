@@ -25,6 +25,7 @@ import { buildFixRequest, type ReviewComment } from "@shared/review";
 import { prepareInstructions } from "./harness/instructions";
 import { checkReports, reportFixPrompt } from "./report-check";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
+import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
 import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
@@ -90,6 +91,8 @@ interface Live {
   role: RoleDef;
   harness: HarnessId;
   model: string | null; // forced model (economy routing); null = chat/role/harness default
+  /** Set for a local-only agent (role or delegation): which local model it was given, for its first-turn runtime note. */
+  local?: { source: LocalPick["source"] } | null;
   session: HarnessSession | null;
   sessionTokens: number; // estimated tokens accumulated in the harness session (drives rollover compaction)
   busy: boolean;
@@ -395,7 +398,7 @@ export class Orchestrator {
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
-    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; provider?: string; args?: string; agentId?: string; folder?: string }):
+    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; provider?: string; args?: string; agentId?: string; folder?: string; local?: boolean }):
     Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string; model?: string | null }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
@@ -415,8 +418,16 @@ export class Orchestrator {
     const folder = a.folder?.trim() && !a.agentId ? this.resolveFolder(a.folder.trim(), projectPath) : null;
     const model = delegateModel(a.model, a.provider);
     const launchArgs = checkLaunchArgs(a.args);
+    // Local-only: asked for (local: true), or the role demands it. A brief that demands local inference prefers a local
+    // runtime when one is set up (soft: without one it runs as before, and a refusal comes back with a locality hint).
+    const strictLocal = a.local === true || !!this.role(a.role).local;
+    const softLocal = !strictLocal && needsLocalInference(`${a.goal}\n${a.context ?? ""}\n${a.acceptance ?? ""}`)
+      && !("error" in pickLocalRuntime({ role: this.role(a.role), pick: model ? { harness: want, model } : undefined, localMode: s.modes.local,
+        usable: (h) => this.d.harnesses.resolve(h, s) === h }));
+    const local = !a.agentId && (strictLocal || softLocal);
     // GitLab Duo only works in GitLab repos: say so now, before an agent is created that could never start.
-    if (want === "duo" && !a.agentId && this.d.harnesses.resolve("duo", s) === "duo") {
+    // (A local-only agent never runs on Duo, so the check doesn't apply to it.)
+    if (want === "duo" && !local && !a.agentId && this.d.harnesses.resolve("duo", s) === "duo") {
       const problem = await gitlabRepoProblem(folder ?? projectPath ?? this.noProjectDir() ?? this.d.homeDir, duoGitlabHosts(s.duo));
       if (problem) throw new Error(`${problem} Pass folder = a GitLab repository to run it there.`);
     }
@@ -451,12 +462,12 @@ export class Orchestrator {
         reserved = await this.waitForTeamSlot(parent, a.wait === false);
         // A model (or provider) from the coordinator applies to the harness it asked for, or to the role's harness when it named none.
         live = this.ensureLive(chat, threadRoot, this.role(a.role), parent.depth + 1, `${parentAgentId}>${a.role}#${++this.instanceSeq}`, parentAgentId, brief,
-          want || model ? { harness: want, model } : undefined);
+          want || model || local ? { harness: want, model, local } : undefined);
         if (folder) { live.folder = folder; this.d.db.setAgentFolder(live.agentId, folder); }
         if (launchArgs) { live.launchArgs = launchArgs; this.d.db.setAgentLaunchArgs(live.agentId, launchArgs); }
       }
       const role = live.role;
-      if (want && live.harness !== want)
+      if (want && live.harness !== want && !live.local)
         this.system(chat.id, threadRoot, `⚠️ ${want} is not available (not installed or disabled in Settings → Harnesses); ${role.title} runs on ${live.harness}.`, "warn");
       let taskId: string | undefined;
       if (s.agents.autoTaskFromDelegation) {
@@ -1172,9 +1183,13 @@ export class Orchestrator {
     const key = a.parentAgentId ? `${a.parentAgentId}>${role.name}#${a.id}` : `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
     if (this.live.has(key) || this.byAgent.has(a.id)) throw new Error(`${role.title} is already running again in this chat`);
     const harness = this.d.harnesses.resolve(a.harness, this.d.settings());
+    // A local-only agent comes back on its local harness or not at all (never on the default, possibly hosted, one).
+    if (role.local && (harness !== a.harness || !isLocalHarness(harness)))
+      throw new Error(`${role.title} must run on a local model, but ${a.harness} is not available (Settings → Harnesses)`);
     const l: Live = { key, agentId: a.id, name: a.name, chatId: chat.id, threadRoot, role, harness, model: a.model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: a.resultSummary, stopped: false, sink: null, redirect: null, awaiting: [],
-      worktree: a.worktree, branch: a.branch, folder: a.folder ?? null, launchArgs: a.launchArgs ?? null, parentAgentId: a.parentAgentId ?? null };
+      worktree: a.worktree, branch: a.branch, folder: a.folder ?? null, launchArgs: a.launchArgs ?? null, parentAgentId: a.parentAgentId ?? null,
+      local: role.local ? { source: "role" } : null };
     this.live.set(key, l);
     this.byAgent.set(a.id, l);
     return l;
@@ -1509,7 +1524,7 @@ export class Orchestrator {
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? DUO_REPORTING_RULES : STATUS_LINE_RULES) : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.local ? localRuntimeNote(live.harness, live.model, live.local.source) : "", first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? DUO_REPORTING_RULES : STATUS_LINE_RULES) : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
@@ -1639,7 +1654,8 @@ export class Orchestrator {
       }
       const asked = said === "needs_decision" || said === "blocked" || !!live.askedThisTurn;
       outcome = {
-        result: compact + (live.pendingQuestion ? `\n${live.pendingQuestion}` : "") + (asked && live.parentAgentId ? `\n${UNTANGLE_NOTE(agentLabel(live, t.role.title), live.agentId)}` : ""),
+        result: compact + (live.pendingQuestion ? `\n${live.pendingQuestion}` : "") + (asked && live.parentAgentId ? `\n${UNTANGLE_NOTE(agentLabel(live, t.role.title), live.agentId)}` : "")
+          + (said === "blocked" && live.parentAgentId ? this.localityHint(live, text) : ""),
         failed: status === "error" ? (gaveUp ?? res.error ?? "error") : null,
         silent: status === "done" && !redirected && !asked && isSilentReply(text, live.depth > 0 ? 20 : 1),
       };
@@ -2026,33 +2042,55 @@ export class Orchestrator {
   // ------------------------------------------------------------------ helpers
 
   private ensureLive(chat: Chat, threadRoot: string | null, role: RoleDef, depth: number, keyOverride?: string,
-    parentAgentId?: string, brief?: string, pick?: { harness?: HarnessId; model: string | null }): Live {
+    parentAgentId?: string, brief?: string, pick?: { harness?: HarnessId; model: string | null; local?: boolean }): Live {
     const key = keyOverride ?? `${chat.id}|${threadRoot ?? "main"}|${role.name}`;
     const existing = this.live.get(key);
     if (existing) return existing;
     const s = this.d.settings();
+    // A local-only agent runs on a local model, whatever the chat, drive mode, economy routing or default harness say,
+    // and is not started at all when there is none (a hosted run would only refuse the work).
+    const localPick = role.local || pick?.local
+      ? pickLocalRuntime({ role, pick, localMode: s.modes.local, usable: (h) => this.d.harnesses.resolve(h, s) === h })
+      : null;
+    if (localPick && "error" in localPick) throw new Error(`${role.title} was not started: ${localPick.error}`);
     const override = s.agents.roleOverrides[role.name];
     const mode = chat.mode ? s.modes[chat.mode] : null;
     const requested = (mode?.harness || null) ?? (chat.agentRole === role.name ? chat.harness : null) ?? override?.harness ?? role.harness ?? null;
     // Economy routing: delegated specialists can run on a cheaper harness/model.
     const economy = !!parentAgentId && s.tokens.economyForDelegated && !!s.tokens.economyHarness;
     // An explicit harness from the coordinator (the user asked for "the Pi agent") wins over economy routing.
-    const harness = this.d.harnesses.resolve(pick?.harness ?? (economy ? (s.tokens.economyHarness as HarnessId) : requested), s);
+    const harness = localPick ? localPick.harness : this.d.harnesses.resolve(pick?.harness ?? (economy ? (s.tokens.economyHarness as HarnessId) : requested), s);
     // The coordinator's model goes with its harness (or with whatever harness runs the role when it named none);
     // a harness it asked for that isn't available drops the model, which belongs to that harness.
-    const model = pick?.model && (!pick.harness || harness === pick.harness) ? pick.model
+    const model = localPick ? localPick.model : pick?.model && (!pick.harness || harness === pick.harness) ? pick.model
       : pick?.harness && harness === pick.harness ? null : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
+    const askedFor = pick?.harness ?? requested;
+    if (localPick && askedFor && askedFor !== harness)
+      this.system(chat.id, threadRoot, `🏠 ${role.title} must run on a local model, so it runs on **${harness}** · ${model} instead of ${askedFor}.`);
     // Delegated specialists get a given name, unique in the chat, so parallel copies of one role can be told apart.
     const name = parentAgentId ? pickInstanceName(this.d.db.agentNamesInChat(chat.id)) : null;
     const agent = this.d.db.createAgent({ projectId: chat.projectId, chatId: chat.id, role: role.name, harness, model,
       parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}`, name });
     const l: Live = { key, agentId: agent.id, name, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false, sink: null, redirect: null, awaiting: [],
-      parentAgentId: parentAgentId ?? null };
+      parentAgentId: parentAgentId ?? null, local: localPick ? { source: localPick.source } : null };
     this.live.set(key, l);
     this.byAgent.set(agent.id, l);
     this.emitAgent(agent);
     return l;
+  }
+
+  /**
+   * A specialist on a hosted harness that stopped because its work must stay on a local model: tell the delegating agent
+   * exactly how to re-run it locally (or that no local model is set up), so it fixes the blocker instead of passing it on.
+   */
+  private localityHint(live: Live, text: string): string {
+    if (live.local || isLocalHarness(live.harness) || !needsLocalInference(text)) return "";
+    const s = this.d.settings();
+    const p = pickLocalRuntime({ role: live.role, localMode: s.modes.local, usable: (h) => this.d.harnesses.resolve(h, s) === h });
+    return "error" in p
+      ? `\nLocality: it refused because it ran on ${live.harness} (hosted) and its work must stay on a local model, but no local model is set up. That is a setup step only the user can do: ask them to set Settings → Modes → LOCAL to Pi or OpenCode with their local model.`
+      : `\nLocality: it refused because it ran on ${live.harness} (hosted) and its work must stay on a local model. Re-delegate the same brief now with local: true (text mode: DELEGATE ${live.role.name}@${p.harness} model "${p.model}": …); it will run on ${p.harness} · ${p.model}. Don't ask the user.`;
   }
 
   /** Agents expected to hand work to specialists: the coordinator (and its custom copies at depth 0). */
