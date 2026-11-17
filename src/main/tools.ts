@@ -10,6 +10,9 @@ import { MEMORY_KINDS, MEMORY_SCOPES } from "@shared/types";
 import type { Memory } from "@shared/types";
 import type { MemoryContext, MemoryStore } from "./memory";
 import { entryTitle, type KnowledgeBase } from "./knowledge";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
+import { DIAGRAM_KINDS, renderDiagram } from "@shared/diagrams";
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
 const s = (description: string) => ({ type: "string", description });
@@ -19,7 +22,7 @@ export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
-  knowledge?: KnowledgeBase;
+  knowledge?: KnowledgeBase; readOnly?: () => boolean;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -189,6 +192,36 @@ export function buildTools(d: {
         const off = a.offset ?? 0;
         const len = a.length ?? 4000;
         return { title: art.title, total: art.content.length, offset: off, content: art.content.slice(off, off + len) };
+      },
+    },
+    {
+      set: "core", name: "diagram_svg",
+      description: "Render a diagram as offline inline SVG for an HTML report: ishikawa (fishbone), flowchart, timeline or sequence. "
+        + "With file + marker, inserts it into that .html file in place of <!-- diagram:<marker> --> and returns only a confirmation; without file, returns the SVG.",
+      inputSchema: obj({
+        kind: { type: "string", enum: [...DIAGRAM_KINDS] },
+        spec: { type: "object", description: "ishikawa {problem, categories: {name: [cause…]}} · flowchart {nodes: [{id, label, kind?: start|step|decision|end}], edges: [{from, to, label?}]} · "
+          + "timeline {events: [{when, label, detail?}]} · sequence {participants: [name…], messages: [{from, to, label, reply?}]}" },
+        file: s("optional: path of the .html file (relative to your working folder) to insert the diagram into"),
+        marker: s("with file: the name in the <!-- diagram:<marker> --> comment to replace"),
+      }, ["kind", "spec"]),
+      handler: async (a, c) => {
+        const svg = renderDiagram(a.kind, a.spec);
+        if (!a.file) return { svg };
+        if (d.readOnly?.()) throw new Error("read-only mode is on (Settings → Permissions): call without file and write the SVG yourself, or ask the user");
+        const base = d.orch.agentWorkDir(c.agentId);
+        if (!base) throw new Error("no working folder: call without file to get the SVG");
+        const path = resolve(base, a.file);
+        const rel = relative(realpathSync(base), realpathSync(path));
+        if (rel.startsWith("..") || isAbsolute(rel)) throw new Error("file must be inside your working folder");
+        if (!/\.html?$/i.test(path)) throw new Error("file must be an .html file");
+        const marker = String(a.marker ?? "").trim();
+        if (!marker) throw new Error("marker is required with file");
+        const html = readFileSync(path, "utf8");
+        const re = new RegExp(`<!--\\s*diagram:\\s*${marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*-->`);
+        if (!re.test(html)) throw new Error(`marker <!-- diagram:${marker} --> not found in ${a.file}`);
+        writeFileSync(path, html.replace(re, () => `<figure class="diagram-figure">${svg}</figure>`));
+        return { ok: true, file: a.file, marker, bytes: svg.length };
       },
     },
     // ---------------- Memory (user / project / short-term) ----------------

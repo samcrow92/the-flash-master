@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Diagrams are mandatory in HTML reports.** Every agent, on every harness, is told that HTML files and reports it writes must include diagrams: an Ishikawa (fishbone) for root causes, plus flowcharts, timelines and sequence diagrams where they help (Settings → Agents → *Diagrams in HTML reports*, on by default).
+  - New `diagram_svg` tool renders Ishikawa, flowchart, timeline and sequence diagrams as inline SVG with embedded styles, so reports open offline (no CDN, no scripts). Given a report file and a `<!-- diagram:name -->` marker it inserts the SVG itself, so agents don't spend tokens pasting SVG.
+  - Fishbone cause labels now wrap instead of running across the neighbouring bone.
+- **The NOW analyst is now "Structured Analysis & RCA (Ishikawa · INCOSE)".** It no longer uses the NOW format: problem definition (is / is-not), system context, Ishikawa with 5 Whys, cause verification, escape analysis and traced actions per INCOSE / ISO/IEC/IEEE 15288, always delivered as an easy-to-read `.html` report (summary card first, then diagrams and tables).
 - **An organised team instead of a swarm of agents.** The coordinator plans first and groups related work into one brief per specialist.
   - **At most 3 specialists work at once** per coordinator (Settings → Agents → *Specialists working at once*; 0 = no limit). Further delegations wait for a free one, so text-mode coordinators run in waves, and the chat says how many wait.
   - Over the cap, a background delegation is refused with who is working and which finished specialists can take related work through their `agentId`, so no extra instance is created.

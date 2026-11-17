@@ -98,6 +98,20 @@ export function buildTurnPrompt(p: PromptParts): string {
   return out.join("\n\n");
 }
 
+/**
+ * Mandatory diagrams in HTML output (Settings → Agents → "Diagrams in HTML reports", on by default). Sent to every agent on
+ * every harness. Diagrams are inline SVG so reports open offline (no CDN, no scripts): the diagram_svg tool renders them.
+ */
+export const HTML_REPORT_RULES = `## HTML reports: diagrams are mandatory
+Whenever you create or rewrite an HTML file or report (.html), it must contain diagrams, not only text and tables:
+- Root-cause analysis, defects, failures, escalations: always an Ishikawa (fishbone) diagram of the causes, grouped by category, each cause marked (confirmed), (plausible) or (ruled out).
+- Also add whichever fits the content: a flowchart (process, decision logic, failure mechanism, 5-Whys chain), a timeline (events, detection, milestones), a sequence diagram (messages between components, ECUs, services, people).
+- Diagrams must work offline: inline <svg> only. No CDN links, no external scripts or fonts, no Mermaid or other libraries loaded from the web.
+- Use the diagram_svg tool: kind ishikawa {problem, categories: {"Category": ["cause (confirmed)", …]}}, flowchart {nodes: [{id, label, kind: start|step|decision|end}], edges: [{from, to, label?}]}, timeline {events: [{when, label, detail?}]}, sequence {participants: [..], messages: [{from, to, label, reply?}]}.
+  Put a marker comment such as <!-- diagram:causes --> in the HTML where each diagram goes, then call diagram_svg with file (the .html path) and marker: it inserts the SVG there, so you never paste SVG yourself. Without file it returns the SVG.
+- If the tool is not available, hand-write inline SVG with a viewBox. Ishikawa layout: problem box at the right end of a horizontal spine (arrow pointing to it); category bones slanting off the spine, alternating above and below; causes as short horizontal ticks on each bone, text right-aligned.
+- Give each diagram a heading and a one-line caption saying what it shows; keep the page self-contained (one file, inline CSS) and easy to read: summary first, then diagrams, then details.`;
+
 /** Replies are read in a chat: one idea per paragraph, not one long block. */
 export const REPLY_STYLE = "Reply style: the user reads your replies in a chat. Write short paragraphs (one idea each, two to four sentences) separated by blank lines. "
   + "Use a bullet list for steps or several findings, a heading when a reply has distinct parts, and code blocks for code and commands. "

@@ -1,6 +1,6 @@
 import { memo, useMemo, type MouseEvent } from "react";
 import { Marked } from "marked";
-import { fishboneSvg } from "./diagrams";
+import { fishboneSvg } from "@shared/diagrams";
 
 // Raw HTML in agent output is escaped, never rendered (agents can echo untrusted file content).
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

@@ -26,7 +26,7 @@ import { prepareInstructions } from "./harness/instructions";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { slugRole, type AgentSpec } from "./roles";
 import {
-  budgetState, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
+  budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
 } from "./context";
 
@@ -1223,7 +1223,7 @@ export class Orchestrator {
         return buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
@@ -1957,6 +1957,14 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
   /** Used by the bridge: tasks created by agents get the agent's project. */
   agentProject(agentId: string): string | null {
     return this.d.db.getAgent(agentId)?.projectId ?? null;
+  }
+
+  /** Folder an agent works in (its worktree, delegated folder or the project root); null when it has none. */
+  agentWorkDir(agentId: string): string | null {
+    const live = [...this.live.values()].find((l) => l.agentId === agentId);
+    const a = this.d.db.getAgent(agentId);
+    const project = a?.projectId ? this.d.db.getProject(a.projectId)?.path ?? null : null;
+    return live?.worktree ?? live?.folder ?? project;
   }
 
   runTask(task: Task, roleName?: string): Promise<AgentRun> {
