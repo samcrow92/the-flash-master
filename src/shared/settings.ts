@@ -56,6 +56,8 @@ export interface Settings {
     instructionMode: "clean" | "harness"; // clean = TheFlashMaster instructions only (harness AGENTS.md/rules/skills off)
     keepProjectInstructions: boolean; // in clean mode, still load the project's AGENTS.md / instruction files
     houseRules: string; // extra rules sent to every agent (your workflow/setup)
+    /** HTML files and reports agents create must include diagrams (Ishikawa for root causes, flowcharts, timelines, sequences). */
+    reportDiagrams: boolean;
     /** Warn when a working agent has produced no output for this many minutes (0 = off). */
     stuckAfterMinutes: number;
     /** Stop a single tool call that has run this long without finishing, and let the agent carry on without it (0 = off). */
@@ -216,7 +218,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "" },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true, unslop: true },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true, unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },

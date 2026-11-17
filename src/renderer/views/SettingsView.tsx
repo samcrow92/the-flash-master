@@ -302,6 +302,9 @@ function InstructionSettings({ f }: { f: F }) {
     <Row label="Keep project AGENTS.md / instruction files" hint="In clean mode, still load the repository's own agent instructions (useful when a repo documents its build/test conventions).">
       <Bool f={f} path="agents.keepProjectInstructions" />
     </Row>
+    <Row label="Diagrams in HTML reports" hint="Every agent, on every harness, must add diagrams to the HTML files and reports it creates: an Ishikawa (fishbone) for root causes, flowcharts, timelines and sequence diagrams where they help. Diagrams are inline SVG, so reports open offline.">
+      <Bool f={f} path="agents.reportDiagrams" />
+    </Row>
     <Row label="Unslop writing style" hint="Every agent follows pstack's unslop rules (no AI filler, no em dashes, plain words) in its replies and in text it writes through tools: commits, PR descriptions, comments, docs. /unslop applies it to one message.">
       <Bool f={f} path="agents.unslop" />
     </Row>

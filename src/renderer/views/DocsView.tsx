@@ -370,7 +370,7 @@ function Agents() {
         <tr><td>Work with DBC, ARXML, CDD, DaVinci, CANoe or CAPL</td><td><PageLink to="agent:autosar-vector"><code>@autosar-vector</code></PageLink></td></tr>
         <tr><td>Debug on the target hardware</td><td><PageLink to="agent:winidea-debugger"><code>@winidea-debugger</code></PageLink></td></tr>
         <tr><td>Triage or update Jazz work items</td><td><PageLink to="agent:jazz-analyst"><code>@jazz-analyst</code></PageLink></td></tr>
-        <tr><td>Find the root cause of a problem (NOW + Ishikawa)</td><td><PageLink to="agent:rca-analyst"><code>@rca-analyst</code></PageLink></td></tr>
+        <tr><td>Find the root cause of a problem (Ishikawa + INCOSE, HTML report)</td><td><PageLink to="agent:rca-analyst"><code>@rca-analyst</code></PageLink></td></tr>
         <tr><td>Build or update a PowerPoint deck</td><td><PageLink to="agent:presentation-expert"><code>@presentation-expert</code></PageLink></td></tr>
       </tbody>
     </table>
@@ -397,7 +397,7 @@ function Agents() {
       <div><b>Decide</b><span>Software Architect, Challenger</span></div>
       <div><b>Build</b><span>Software Expert, AUTOSAR &amp; Vector Expert</span></div>
       <div><b>Prove</b><span>Code Reviewer, Test Engineer, EXAM Test Agent, winIDEA Debug Engineer</span></div>
-      <div><b>Explain</b><span>NOW Analysis &amp; RCA, Presentation Expert</span></div>
+      <div><b>Explain</b><span>Structured Analysis &amp; RCA, Presentation Expert</span></div>
     </div>
     <p className="small muted">TheFlashMaster moves work through these stages, and the <PageLink to="superpowers">Superpowers workflow</PageLink> makes the order strict.</p>
 

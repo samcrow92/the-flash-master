@@ -98,7 +98,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await shot(join(demo, "2b-progress-flow.png"));
       await click("Progress", ".chat-controls button");
       await sleep(300);
-      await send("@rca-analyst Analyse the brake light flicker in NOW format with an Ishikawa root cause analysis");
+      await send("@rca-analyst Analyse the brake light flicker with an Ishikawa root cause analysis");
       await sleep(1500);
       await click("Progress", ".chat-controls button");
       await sleep(400);

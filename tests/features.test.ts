@@ -22,12 +22,14 @@ const until = async (fn: () => boolean, ms = 6000) => {
 };
 
 describe("new specialists", () => {
-  it("ships the presentation expert and the NOW/Ishikawa analyst; the template is not loaded as an agent", () => {
+  it("ships the presentation expert and the Ishikawa/INCOSE analyst; the template is not loaded as an agent", () => {
     const roles = loadRoles(AGENTS, "/none");
     const byName = Object.fromEntries(roles.map((r) => [r.name, r]));
     expect(byName["presentation-expert"]!.tools).toEqual(["flashmaster-core", "office"]);
     expect(byName["rca-analyst"]!.tools).toContain("office");
-    expect(byName["rca-analyst"]!.prompt).toMatch(/NOW format/);
+    expect(byName["rca-analyst"]!.prompt).not.toMatch(/\bNOW\b/);
+    expect(byName["rca-analyst"]!.prompt).toMatch(/\.html report/);
+    expect(byName["rca-analyst"]!.prompt).toContain("diagram_svg");
     expect(byName["rca-analyst"]!.prompt).toMatch(/INCOSE/);
     expect(byName["rca-analyst"]!.prompt).toContain("```ishikawa");
     expect(roles.some((r) => r.name === "my-agent")).toBe(false);

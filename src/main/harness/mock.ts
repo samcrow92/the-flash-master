@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderDiagram } from "@shared/diagrams";
 import { pathToFileURL } from "node:url";
 import type { HarnessStatus } from "@shared/types";
 import { estimateTokens } from "../context";
@@ -22,21 +23,29 @@ export class MockSession implements HarnessSession {
     return !this.closed;
   }
 
+  private writeReport(): string | null {
+    if (!this.o.cwd) return null;
+    try {
+      const dir = join(this.o.cwd, "reports");
+      mkdirSync(dir, { recursive: true });
+      const svg = renderDiagram("ishikawa", { problem: "Brake light flickers at cold start (-20 °C)", categories: {
+        Requirements: ["No cold-start timing requirement (confirmed)"], "Design / Architecture": ["Shared PWM timer (confirmed)"],
+        "Verification & Validation": ["No test below -10 °C (confirmed)"] } });
+      const file = join(dir, "rca-report.html");
+      writeFileSync(file, `<!doctype html><html><head><meta charset="utf-8"><title>RCA (mock)</title></head>`
+        + `<body><h1>Root-cause analysis (mock)</h1><h2>Ishikawa</h2><figure>${svg}</figure></body></html>`);
+      return file;
+    } catch { return null; }
+  }
+
   async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     this.cancelled = false;
     this.turn += 1;
     const request = /## Request\n([\s\S]*)$/.exec(text)?.[1] ?? text;
     const role = /# Role: (.+)/.exec(text)?.[1] ?? "Mock agent";
-    // "html report" in a request makes the mock write a small report and link it, as real agents are told to.
-    let report: string | null = null;
-    if (/\bhtml report\b/i.test(request) && this.o.cwd) {
-      try {
-        const dir = join(this.o.cwd, "reports");
-        mkdirSync(dir, { recursive: true });
-        report = join(dir, "rca-report.html");
-        writeFileSync(report, "<!doctype html><meta charset=utf-8><title>RCA report (mock)</title><h1>RCA report (mock)</h1><p>Written by the mock harness.</p>");
-      } catch { report = null; }
-    }
+    // "html report" in a request, or being sent back by the app's deliverable check, makes the mock write a small report
+    // with an Ishikawa and link it, as real agents are told to (shows the enforcement loop offline).
+    const report = /\bhtml report\b/i.test(request) || /TheFlashMaster checked your result/.test(text) ? this.writeReport() : null;
     const reply = [
       `**${role}** (mock harness, turn ${this.turn}) received:`,
       `> ${request.trim().split("\n")[0]!.slice(0, 160)}`,
