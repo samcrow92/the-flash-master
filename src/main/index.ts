@@ -17,6 +17,7 @@ import { Bridge } from "./bridge";
 import { buildTools } from "./tools";
 import { MemoryStore } from "./memory";
 import { KnowledgeBase, ensureFlashmasterIgnore } from "./knowledge";
+import { noProjectFolder } from "./worktree";
 import { McpBootstrap, selfTestServer } from "./mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
@@ -164,6 +165,7 @@ const mcp = new McpBootstrap({
 const orch = new Orchestrator({
   db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory, knowledge,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
+  noProjectDir: () => noProjectFolder(settings.get().agents.noProjectFolder ?? "", process.platform, homedir()),
   extraRules: () => marketplace.instructions(),
   harnessEnv: (h) => harnessEnv(h),
   roleEnv: (role) => mcp.roleEnv(role),

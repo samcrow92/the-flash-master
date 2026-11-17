@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState } from "../src/main/worktree";
+import { canIsolate, createWorktree, defaultGit, defaultNoProjectFolder, mergeWorktree, noProjectFolder, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState } from "../src/main/worktree";
 import { buildFixRequest } from "../src/shared/review";
 import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
@@ -89,6 +89,10 @@ describe("agent worktrees", () => {
     const a = db.listAgents({}).find((x) => x.role === "tester")!;
     expect(a.branch).toBe(`flash/tester-${a.id.slice(0, 8)}`);
     expect(existsSync(a.worktree!)).toBe(true);
+    // The worktree lives in the project's own .wt folder, which ignores itself: the project's git status stays clean.
+    expect(a.worktree).toBe(join(p.path, ".wt", a.id.slice(0, 8)));
+    expect(readFileSync(join(p.path, ".wt", ".gitignore"), "utf8")).toMatch(/^\*$/m);
+    expect(git(p.path, "status", "--porcelain").trim()).toBe("");
     expect(a.resultSummary).toMatch(/branch: flash\/tester-/);
     expect(db.listMessages(chat.id, null).some((m) => m.author === "system" && /own copy of the project/.test(m.content))).toBe(true);
     expect((await orch.discardWork(a.id)).ok).toBe(true); // nothing committed: nothing to lose
@@ -97,6 +101,28 @@ describe("agent worktrees", () => {
     await orch.sendUserMessage(chat.id, "hello", null);
     await until(() => db.listAgents({}).some((x) => x.role === "flashmaster" && !!x.resultSummary));
     expect(db.listAgents({}).find((x) => x.role === "flashmaster")!.worktree).toBeNull();
+  });
+
+  it("works in the no-project folder when a chat has no project", async () => {
+    expect(defaultNoProjectFolder("win32", "C:\\Users\\mari")).toBe("C:\\Data\\.wt");
+    expect(defaultNoProjectFolder("linux", "/home/mari")).toBe(join("/home/mari", "Data", ".wt"));
+    expect(noProjectFolder("", "darwin", "/Users/mari")).toBe(join("/Users/mari", "Data", ".wt"));
+    expect(noProjectFolder("~/work", "linux", "/home/mari")).toBe(join("/home/mari", "work"));
+    expect(noProjectFolder(" D:\\Scratch ", "win32", "C:\\Users\\mari")).toBe("D:\\Scratch");
+
+    const db = new Db(":memory:");
+    const settings = mergeSettings(DEFAULT_SETTINGS, { general: { defaultHarness: "mock" } }) as Settings;
+    const roles = loadRoles(join(__dirname, "..", "agents"), "/none");
+    const root = join(mkdtempSync(join(tmpdir(), "np-")), "Data", ".wt");
+    const orch = new Orchestrator({ db, harnesses: new HarnessRegistry([new MockAdapter(1)]), settings: () => settings, roles: () => roles,
+      skills: () => [], emit: () => undefined, mcpServersFor: () => [], homeDir: tmpdir(), noProjectDir: () => root });
+    const chat = db.createChat({ projectId: null, title: "c", kind: "project", agentRole: "flashmaster" });
+    await orch.sendUserMessage(chat.id, "hello", null);
+    await until(() => db.listAgents({}).some((x) => x.role === "flashmaster" && !!x.resultSummary));
+    const a = db.listAgents({}).find((x) => x.role === "flashmaster")!;
+    expect(existsSync(root)).toBe(true); // created on first use
+    expect(realpathSync(orch.agentWorkDir(a.id)!)).toBe(realpathSync(root));
+    expect(a.worktree).toBeNull();
   });
 
   it("lists every change on the agent's branch for review: committed, uncommitted and new files", async () => {
