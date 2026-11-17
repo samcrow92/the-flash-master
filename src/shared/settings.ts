@@ -32,6 +32,10 @@ export interface Settings {
   profile: { name: string; avatar: string; hue: number };
   harnesses: Record<HarnessId, HarnessSettings>;
   modes: Record<DriveMode, ModeProfile>;
+  /** GitLab Duo agents only start in GitLab repos (see harness/duo.ts). */
+  duo: {
+    hosts: string; // extra host names that are GitLab (self-managed), besides gitlab.com and hosts named gitlab…
+  };
   chat: {
     maxAttachmentMB: number;
     defaultSendWhileBusy: "queue" | "steer"; // what Enter does while an agent is still working
@@ -200,6 +204,7 @@ export const DEFAULT_SETTINGS: Settings = {
     comfort: { harness: "", model: "sol", thinking: "low" },
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
+  duo: { hosts: "" },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, toolMode: "text", roleOverrides: {}, delegationDepth: 2, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", stuckAfterMinutes: 10, toolTimeoutMinutes: 0, closeIdleAfterMinutes: 30, isolateWriters: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },

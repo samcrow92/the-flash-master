@@ -178,7 +178,11 @@ function Harnesses(f: F) {
         {h === "pi" && <div className="warn-note">Pi runs in its native RPC mode. Pi has no MCP support by design, so Pi agents cannot delegate, report progress steps or use the Vector/winIDEA/PowerPoint/Jazz tools — use Copilot or OpenCode for the coordinator and tool-heavy specialists. Read-only mode is enforced with Pi's read-only tool set.</div>}
         {h === "cursor" && <div className="muted small">Cursor Agent runs as <code>cursor-agent acp</code> with your Cursor login (<code>cursor-agent login</code>). Models come from your Cursor plan.</div>}
         {h === "claude" && <div className="muted small">Claude Code runs through its ACP bridge, <code>claude-agent-acp</code> (npm i -g @agentclientprotocol/claude-agent-acp), with the login of your Claude Code CLI. CLAUDE.md files still load.</div>}
-        {h === "duo" && <div className="warn-note">GitLab Duo runs in headless mode (no ACP) and auto-approves its own tools. Use read-only prompts or a sandbox.</div>}
+        {h === "duo" && <>
+          <div className="muted small">Duo agents only start in GitLab repositories (a folder whose git remote is on GitLab). The coordinator can start one in another folder that is a GitLab repo.</div>
+          <Row label="Self-managed GitLab hosts" hint="Host names of your GitLab servers when they aren't gitlab.com or named gitlab…, e.g. git.company.com. Separate several with commas."><Text f={f} path="duo.hosts" placeholder="git.company.com" /></Row>
+          <div className="warn-note">GitLab Duo runs in headless mode (no ACP) and auto-approves its own tools. Use read-only prompts or a sandbox.</div>
+        </>}
       </div>;
     })}
   </>;

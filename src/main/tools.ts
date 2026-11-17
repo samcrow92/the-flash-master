@@ -63,6 +63,7 @@ export function buildTools(d: {
         harness: { type: "string", enum: ["copilot", "opencode", "cursor", "claude", "pi", "duo"], description: "run the specialist on this agent CLI (e.g. the user asked for Pi). Default: the role's configured harness. Never start agent CLIs from a shell instead." },
         model: s("model id for that harness (optional)"),
         agentId: s("only for a follow-up: the agentId an earlier delegate returned; the same instance continues with its context. Leave out to start a new specialist"),
+        folder: s("run the specialist in this folder instead of the project folder (absolute, ~/…, or relative to the project). GitLab Duo (harness duo) only runs in GitLab repositories, so point it at one"),
       }, ["role", "goal"]),
       handler: (a, c) => d.orch.delegate(c.agentId, a),
     },

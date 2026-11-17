@@ -206,7 +206,7 @@ export function budgetState(used: number, limit: number, warnPct: number): Budge
   return "ok";
 }
 
-export interface TextDelegation { role: string; harness?: string; goal: string }
+export interface TextDelegation { role: string; harness?: string; folder?: string; goal: string }
 
 /** Instructions for a coordinator whose `delegate` tool didn't load (MCP blocked by policy, Pi without MCP…). */
 export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
@@ -214,6 +214,7 @@ In this session you delegate in plain text, not with a \`delegate\` tool. Write 
 starting at the beginning of a line:
 DELEGATE <role>: <brief: goal, the key facts, relevant files, what "done" means>
 DELEGATE <role>@<harness>: <brief>   (harness = copilot, opencode, cursor, claude, pi or duo, only when the user asked for one)
+DELEGATE <role>@<harness> in "<folder>": <brief>   (run it in that folder instead of the project, e.g. GitLab Duo, which only runs in GitLab repos)
 A brief may continue on the following lines until a blank line.
 To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
 AGENT <name>[@<harness>]: <one-line description>
@@ -231,8 +232,8 @@ export function parseTextDelegations(text: string): TextDelegation[] {
   for (const raw of text.split(/\r?\n/)) {
     if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
     if (fence) continue;
-    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?\s*:\s*(.*)$/.exec(raw);
-    if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), goal: m[3]!.trim() }; out.push(cur); continue; }
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?(?:\s+in\s+["`]([^"`]+)["`])?\s*:\s*(.*)$/.exec(raw);
+    if (m) { cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(m[3] ? { folder: m[3].trim() } : {}), goal: m[4]!.trim() }; out.push(cur); continue; }
     if (/^\s*(?:\*\*)?(?:AGENT|END)\b/.test(raw)) { cur = null; continue; }
     if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
     if (cur) cur.goal = `${cur.goal}\n${raw.trim()}`.trim();
