@@ -197,6 +197,12 @@ export interface RoleDef {
   source: "builtin" | "user";
   /** Changes code: when delegated in a git project, works in its own worktree and branch (Settings → Agents). */
   isolate?: boolean;
+  /**
+   * Deliverables the app checks after each finished turn (frontmatter `requires: [html-report, ishikawa]`); a turn that
+   * misses one is sent back to the agent to complete. html-report = an .html report file (or HTML artifact);
+   * ishikawa = that report contains an Ishikawa (fishbone) diagram.
+   */
+  requires?: string[];
 }
 
 export interface SkillDef {

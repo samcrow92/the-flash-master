@@ -132,7 +132,8 @@ export function unslopRules(skill: Pick<SkillDef, "body"> | undefined): string {
 export function rolePrefix(role: RoleDef, projectPath: string | null, o: { clean?: boolean; houseRules?: string } = {}): string {
   return [
     `# Role: ${role.title}`,
-    o.clean ? "You are running inside TheFlashMaster. These instructions are your complete operating instructions and take precedence over any other instruction files, rules or personas you may have loaded." : "",
+    o.clean ? "You are running inside TheFlashMaster. These instructions are your complete operating instructions and take precedence over any other instruction files, rules or personas you may have loaded."
+      : "You are running inside TheFlashMaster. Project and harness instruction files (AGENTS.md, CLAUDE.md, rules) may add conventions, but where they conflict with these instructions, these win: always deliver what your role requires, in the format it requires.",
     role.prompt.trim(),
     o.houseRules?.trim() ? `## Team rules\n${o.houseRules.trim()}` : "",
     projectPath ? `Project root: ${projectPath} — work only inside it.` : "No project folder is attached to this chat.",

@@ -3,6 +3,9 @@
  * without any agent CLI installed. Replies are deterministic and include a result block.
  */
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { renderDiagram } from "@shared/diagrams";
 import type { HarnessStatus } from "@shared/types";
 import { estimateTokens } from "../context";
 import type { HarnessAdapter, HarnessSession, PromptAttachment, SessionOptions, TurnResult } from "./types";
@@ -19,11 +22,26 @@ export class MockSession implements HarnessSession {
     return !this.closed;
   }
 
+  private writeReport(): string | null {
+    try {
+      const dir = join(this.o.cwd, "reports");
+      mkdirSync(dir, { recursive: true });
+      const svg = renderDiagram("ishikawa", { problem: "Brake light flickers at cold start (-20 °C)", categories: {
+        Requirements: ["No cold-start timing requirement (confirmed)"], "Design / Architecture": ["Shared PWM timer (confirmed)"],
+        "Verification & Validation": ["No test below -10 °C (confirmed)"] } });
+      writeFileSync(join(dir, "rca-mock.html"), `<!doctype html><html><head><meta charset="utf-8"><title>RCA (mock)</title></head>`
+        + `<body><h1>Root-cause analysis (mock)</h1><h2>Ishikawa</h2><figure>${svg}</figure></body></html>`);
+      return "reports/rca-mock.html";
+    } catch { return null; }
+  }
+
   async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     this.cancelled = false;
     this.turn += 1;
     const request = /## Request\n([\s\S]*)$/.exec(text)?.[1] ?? text;
     const role = /# Role: (.+)/.exec(text)?.[1] ?? "Mock agent";
+    // Sent back by the app's deliverable check: write the HTML report it asked for (shows the enforcement loop offline).
+    const report = /TheFlashMaster checked your result/.test(text) ? this.writeReport() : null;
     const reply = [
       `**${role}** (mock harness, turn ${this.turn}) received:`,
       `> ${request.trim().split("\n")[0]!.slice(0, 160)}`,
@@ -43,6 +61,7 @@ export class MockSession implements HarnessSession {
       ...(/\b(fix|implement|change|edit|debounce)\b/i.test(request) ? [
         "Proposed change (mock) — also shown in **Artifacts → Changes**:", "",
         "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
+      ...(report ? [`Report written: ${report}`, ""] : []),
       "<result>",
       // "[needs-decision]" in a request makes the mock ask back, to try (and test) decision routing.
       ...(request.includes("[needs-decision]") ? ["status: needs_decision", "question: Use calibration set A or B? I recommend A (mock)."] : []),

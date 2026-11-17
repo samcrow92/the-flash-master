@@ -23,6 +23,7 @@ import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness
 import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
 import { buildFixRequest, type ReviewComment } from "@shared/review";
 import { prepareInstructions } from "./harness/instructions";
+import { checkReports, reportFixPrompt } from "./report-check";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { slugRole, type AgentSpec } from "./roles";
 import {
@@ -153,6 +154,8 @@ interface Live {
 }
 
 const MAX_CONCURRENT_FALLBACK = 4;
+/** Times a turn that missed a required deliverable (HTML report, diagrams) is sent back before the app gives up and warns. */
+const MAX_REPORT_FIXES = 2;
 /** Results of specialists that finish within this window wake their coordinator once, together. */
 const REPORT_DEBOUNCE_MS = 1500;
 /** lastActivity of a specialist the app closed for being idle (a follow-up with its agentId brings it back). */
@@ -1122,6 +1125,8 @@ export class Orchestrator {
     borrowSlot?: boolean;
     /** Round of text delegation this turn belongs to (results fed back to the coordinator), to stop runaway loops. */
     textRound?: number;
+    /** Follow-ups sent because the turn missed a required deliverable (HTML report, diagrams); capped. */
+    reportRound?: number;
     /** The same request again after the harness was switched (the failed reply stays out of the history). */
     retry?: boolean;
     /** Harness / model for a new session (retry with another model); an existing session keeps its own. */
@@ -1140,6 +1145,8 @@ export class Orchestrator {
 
     live.busy = true;
     live.idleSince = null;
+    const turnStart = Date.now();
+    let reportFix: string | null = null;
     const borrowed = !!t.borrowSlot;
     if (!borrowed) {
       const max = s.agents.maxConcurrent || MAX_CONCURRENT_FALLBACK;
@@ -1366,7 +1373,20 @@ export class Orchestrator {
         const task = this.d.db.updateTask(t.taskId, { status: status === "error" || said !== "done" ? "blocked" : "review" });
         this.d.emit({ type: "task.updated", task });
       }
-      this.finishDelegated(live, compact);
+      // Deliverables (HTML report, diagrams) are checked by the app, so they hold on every harness and whatever instruction
+      // files the CLI loaded. A miss sends the agent back (twice at most) before its result goes to the coordinator.
+      const check = status === "done" && !redirected && said === "done" && !live.queue.length
+        ? checkReports({ workDir: this.agentWorkDir(live.agentId), since: turnStart, text, requires: t.role.requires ?? [], diagrams: s.agents.reportDiagrams !== false,
+          artifacts: this.d.db.agentArtifactsSince(live.agentId, turnStart) })
+        : null;
+      if (check?.problems.length && (t.reportRound ?? 0) < MAX_REPORT_FIXES) {
+        reportFix = reportFixPrompt(check, t.role.title);
+        this.flow(live.agentId, { kind: "status", label: `deliverable check: ${check.problems.length} item(s) missing — sent back to fix`, status: "retry" });
+        this.system(t.chat.id, t.threadRoot, `↩ **${agentLabel(live, t.role.title)}** didn't follow its instructions yet (${check.problems.map((x) => x.split(/[.:]/)[0]).join("; ")}), so it was sent back to finish them.`);
+      } else {
+        if (check?.problems.length) this.system(t.chat.id, t.threadRoot, `⚠️ **${agentLabel(live, t.role.title)}** still misses: ${check.problems.join(" ")}`, "warn");
+        this.finishDelegated(live, compact);
+      }
       // Rollover compaction: a long-lived harness session re-sends its whole history every turn. Past the
       // threshold we close it; the next turn starts fresh with summary + recent turns only.
       if (s.tokens.compactAfterTokens > 0 && live.sessionTokens > s.tokens.compactAfterTokens * 2) {
@@ -1400,6 +1420,11 @@ export class Orchestrator {
       if (live.parentAgentId) this.teamSlotFreed(live.parentAgentId);
     }
     if (crashed && !live.stopped) this.offerHarnessSwitch(live, t);
+    if (reportFix && !live.stopped && !live.paused) {
+      void this.turn({ ...t, retry: false, input: reportFix, attachments: [], skills: [], brief: null, taskId: t.taskId, liveKey: live.key, msgIds: undefined,
+        deliver: false, borrowSlot: t.borrowSlot, textRound: 0, reportRound: (t.reportRound ?? 0) + 1 });
+      return;
+    }
     if (switchedToText && finalStatus === "done" && !live.stopped && !live.paused && !parseTextDelegations(text).length) {
       // The first reply was written without the delegate tool: have the coordinator re-plan with DELEGATE lines.
       const extra = live.textTools ? this.textToolsFor(live) : "";

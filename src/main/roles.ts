@@ -36,6 +36,7 @@ export function parseRole(src: string, fallbackName: string, source: RoleDef["so
     prompt: body,
     source,
     ...(str(meta.isolate) === "true" ? { isolate: true } : {}),
+    ...(arr(meta.requires).length ? { requires: arr(meta.requires).map((x) => x.toLowerCase()) } : {}),
   };
 }
 

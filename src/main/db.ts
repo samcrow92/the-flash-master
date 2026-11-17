@@ -584,6 +584,11 @@ export class Db {
     this.run("INSERT INTO artifacts VALUES(?,?,?,?,?,?,?)", a.id, a.agentId, a.kind, a.title, a.content, a.bytes, a.createdAt);
     return a;
   }
+  /** Artifacts an agent stored at or after `since` (newest first, at most 10). */
+  agentArtifactsSince(agentId: string, since: number): Artifact[] {
+    return this.all("SELECT * FROM artifacts WHERE agent_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 10", agentId, since)
+      .map((r) => ({ id: r.id, agentId: r.agent_id, kind: r.kind, title: r.title, content: r.content, bytes: Number(r.bytes), createdAt: Number(r.created_at) }));
+  }
   getArtifact(id: string): Artifact | null {
     const r = this.get("SELECT * FROM artifacts WHERE id=?", id);
     return r ? { id: r.id, agentId: r.agent_id, kind: r.kind, title: r.title, content: r.content, bytes: Number(r.bytes), createdAt: Number(r.created_at) } : null;
