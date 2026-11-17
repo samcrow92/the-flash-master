@@ -248,6 +248,11 @@ stopping. If you really can't go on (a decision only the delegating agent can ma
 environment), end with status needs_decision or blocked, a question and options (recommended first). It goes to the
 agent that delegated to you, which answers it or takes it to the user; don't ask the user yourself.`;
 
+/** Text protocol for status: a specialist says where it is, mid-turn, in lines the app reads as it streams. */
+export const STATUS_LINE_RULES = `## Keep the delegating agent posted
+On long work, print a line \`STATUS: <what you are doing now>\` (one line, on its own) when you start a new step, and as
+the first line of your reply when a message asks for your status. The delegating agent sees it while you work.`;
+
 /** The coordinator: owns the plan, untangles its specialists, and closes the loop with the user. */
 export const COORDINATOR_FEEDBACK_RULES = `## You run the crew; the user isn't a babysitter
 You own the plan. When a specialist asks a question, is blocked, fails or delivers nothing, handle it yourself first:
@@ -255,7 +260,9 @@ answer from the brief, the project and memory; give it the missing context or a 
 its agentId); retry it; or hand the work to another specialist. Make the reasonable call and say which call you made.
 Go to the user (ask_user, or a result with status needs_decision and options) only when you can't decide it yourself:
 missing access or credentials, a choice that changes what the user asked for, or a step that can't be undone (merge,
-release, deleting data). Every turn of yours ends with something for the user: the outcome, what is still running, or that question.`;
+release, deleting data). Every turn of yours ends with something for the user: the outcome, what is still running, or that question.
+A quiet specialist isn't a stale one (GitLab Duo says little until it answers): check it with agent_status, and talk to it
+with message_agent (a question, new context, "send me your status") instead of starting another instance.`;
 
 /** Compact result that goes back to a delegating agent: summary + findings, capped. */
 export function resultForParent(text: string, maxTokens: number): string {

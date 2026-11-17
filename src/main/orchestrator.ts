@@ -29,7 +29,7 @@ import { slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
-  unslopRules, isSilentReply, NEEDS_YOU_RULES, SPECIALIST_ASK_RULES, COORDINATOR_FEEDBACK_RULES,
+  unslopRules, isSilentReply, NEEDS_YOU_RULES, SPECIALIST_ASK_RULES, STATUS_LINE_RULES, COORDINATOR_FEEDBACK_RULES,
 } from "./context";
 
 /** Outcome of closing one agent through the close_agent / close_idle_agents tools. */
@@ -94,13 +94,14 @@ interface Live {
   sessionTokens: number; // estimated tokens accumulated in the harness session (drives rollover compaction)
   busy: boolean;
   paused: boolean;
-  queue: { input: string; attachments: Attachment[]; msgIds?: string[] }[];
+  /** fromAgent: a message from the delegating agent (message_agent): the turn it starts reports back to that agent. */
+  queue: { input: string; attachments: Attachment[]; msgIds?: string[]; fromAgent?: string }[];
   /** Delivered steering/queued messages waiting to be seen: native = wait for the harness ack, else first model output. */
   awaiting: { id: string; native: boolean }[];
   /** Memory ids already shown to this harness session (reminders on later turns only add new ones). */
   memoryShown?: Set<number>;
   /** Steering by interrupt: next turn input. `toolStop` = the title of a hung tool call that was stopped (input says so as is). */
-  redirect: { input: string; attachments: Attachment[]; msgIds: string[]; toolStop?: string; nudge?: boolean } | null;
+  redirect: { input: string; attachments: Attachment[]; msgIds: string[]; toolStop?: string; nudge?: boolean; fromAgent?: string } | null;
   turnChanges?: Map<string, { id: string; oldText: string | null }>; // files changed in the current turn
   warnedTools?: boolean;
   /** The coordinator's `delegate` tool didn't load: it delegates by writing DELEGATE lines, which the app carries out. */
@@ -124,6 +125,22 @@ interface Live {
   lastOutputAt?: number;
   /** The watchdog already warned about this silence (cleared when output resumes). */
   stuckSince?: number | null;
+  /** Last heartbeat from the harness (a headless CLI like Duo whose process is alive and working): busy, not stale. */
+  heartbeatAt?: number;
+  /** When the current turn started (agent_status). */
+  turnStartedAt?: number;
+  /** The quiet-but-alive minutes last shown in the agent's status line (so it changes once a minute, not every check). */
+  quietShown?: number;
+  /** Recent progress lines (Duo's log, STATUS lines), newest last, for agent_status. */
+  recent?: string[];
+  /** The agent's last STATUS line (text protocol: `STATUS: <what I'm doing>`), with when it came. */
+  statusNote?: { text: string; at: number } | null;
+  /** Streamed text of the current turn not yet ended by a newline (STATUS lines are read per line). */
+  lineBuf?: string;
+  /** The end of the current turn's text, for agent_status. */
+  tail?: string;
+  /** Last time a progress line updated the status line (throttled). */
+  activityShownAt?: number;
   /** Waiting for the user to answer a permission request: silence is expected. */
   awaitingApproval?: boolean;
   /** When the agent last finished a turn (drives closing idle specialists); null while it works. */
@@ -192,6 +209,13 @@ const STALL_NUDGE = (mins: number) => `You have sent nothing for ${mins} min. If
 const COORD_NUDGE = "Your turn ended without a reply to the user, so they don't know where things stand. Reply now: "
   + "a bold outcome line and a few bullets (what was done, what is still running, what you're waiting for). If you need the user, ask them "
   + "(ask_user, or a result with status needs_decision, a question and options).";
+/** A heartbeat this recent means the agent's process is alive and working (headless CLIs beat every 15 s). */
+const ALIVE_WINDOW_MS = 90_000;
+const RECENT_LINES = 10;
+/** `STATUS: …` lines an agent prints while it works: the text protocol for telling its delegating agent where it is. */
+const STATUS_LINE_RE = /^\s*(?:[-*]\s+)?(?:\*\*)?STATUS(?:\*\*)?:(?:\*\*)?\s+(.{2,300})$/;
+const AGENT_MESSAGE = (from: string, text: string) => `${from}, the agent that delegated to you, sends you this message:\n${text}\n\n`
+  + "Take it into account and continue your task. If it asks for your status, start your reply with a line `STATUS: <where you are>`.";
 const MAX_TOOLS_PER_REPLY = 200;
 const MAX_TOOL_OUTPUT = 20000;
 
@@ -527,6 +551,126 @@ export class Orchestrator {
       report, chars: full.length, offset, more: offset + limit < full.length, olderReports: Math.max(0, replies.length - idx - 1) };
   }
 
+  /**
+   * The `agent_status` tool: where another agent of the project is right now, as the app sees it, without interrupting
+   * it. Covers agents that say little while they work (GitLab Duo): whether its process is alive, its latest progress
+   * lines and STATUS line, the step it is on and the end of what it has written so far.
+   */
+  agentStatus(callerId: string, agentId: string): Record<string, unknown> {
+    const target = this.projectAgent(callerId, agentId);
+    const l = this.byAgent.get(target.id);
+    const now = Date.now();
+    const ago = (t?: number | null) => (t ? `${Math.max(0, Math.round((now - t) / 1000))}s ago` : null);
+    const plan = target.plan ?? [];
+    const cur = plan.find((p) => p.status === "in_progress");
+    const working = !!l?.busy;
+    const out: Record<string, unknown> = { agentId: target.id, name: target.name, role: target.role, harness: target.harness, status: target.status,
+      working, activity: target.lastActivity };
+    if (working && l) {
+      Object.assign(out, {
+        workingFor: l.turnStartedAt ? `${Math.round((now - l.turnStartedAt) / 60_000)} min` : null,
+        lastOutput: ago(l.lastOutputAt),
+        processAlive: l.heartbeatAt ? this.alive(l, now) : null,
+        ...(l.stuckSince ? { mayBeStuck: true } : {}),
+        ...(l.awaitingApproval ? { waitingFor: "the user's approval" } : {}),
+        runningTools: [...(l.tools?.values() ?? [])].filter((r) => r.status !== "completed" && r.status !== "failed").map((r) => r.title).slice(-5),
+      });
+    }
+    if (l?.statusNote) out.statusLine = { text: l.statusNote.text, at: ago(l.statusNote.at) };
+    if (plan.length) out.step = cur ? `${plan.filter((p) => p.status === "completed").length + 1}/${plan.length}: ${cur.title}` : `${plan.filter((p) => p.status === "completed").length}/${plan.length} steps done`;
+    if (l?.recent?.length) out.recent = l.recent.slice(-6);
+    if (working && l?.tail?.trim()) out.writingNow = l.tail.trim().slice(-600);
+    if (l?.queue.length) out.queuedMessages = l.queue.length;
+    if (!working) out.result = (l?.lastResult ?? target.resultSummary ?? "").slice(0, 600) || null;
+    out.hint = working
+      ? "It is working. Quiet is not stuck while processAlive is true. To steer it or ask it something, use message_agent; don't start another instance."
+      : "It is not working. Send it a follow-up with message_agent (or delegate with its agentId).";
+    return out;
+  }
+
+  /**
+   * The `message_agent` tool: the delegating agent talks to a specialist it started, while it works or after. A working
+   * agent gets the message in its running turn where the harness can (Pi), else when its turn ends, or at once with
+   * interrupt (the turn is stopped and continues the same session with the message: GitLab Duo resumes its session).
+   * An idle one starts a follow-up. Either way its next result comes back to the sender.
+   */
+  async messageAgent(callerId: string, a: { agentId?: string; message?: string; interrupt?: boolean; wait?: boolean; timeoutSec?: number }):
+    Promise<Record<string, unknown>> {
+    const text = String(a.message ?? "").trim();
+    if (!text) throw new Error("message is empty");
+    const target = this.projectAgent(callerId, String(a.agentId ?? ""));
+    if (target.parentAgentId !== callerId)
+      throw new Error("you can only message agents you started (delegate returned their agentId); use agent_status or read_report to look at others");
+    const me = this.byAgent.get(callerId);
+    const from = me ? agentLabel(me, me.role.title) : "The delegating agent";
+    const l = this.byAgent.get(target.id);
+    const who = l ? `${l.role.icon} ${agentLabel(l, l.role.title)}` : target.name ?? target.role;
+    if (!l || !l.busy) {
+      const r = await this.delegate(callerId, { role: target.role, goal: text, agentId: target.id, wait: a.wait ?? false, timeoutSec: a.timeoutSec });
+      return { delivered: "started", ...r };
+    }
+    if (l.stopped) throw new Error(`${who} was stopped`);
+    const chatNote = (how: string) => this.system(l.chatId, l.threadRoot, `✉️ **${from}** → **${who}** (${how}): ${text.replace(/\s+/g, " ").slice(0, 300)}`);
+    const input = AGENT_MESSAGE(from, text);
+    if (l.session?.steer && (await l.session.steer(input).catch(() => false))) {
+      this.flow(l.agentId, { kind: "status", label: `message from ${from}: ${text.slice(0, 100)}`, status: "steer" });
+      chatNote("delivered into its running turn");
+      return { delivered: "steered", agentId: l.agentId, note: "It has the message in its running turn. Its result comes to you as usual." };
+    }
+    if (a.interrupt) {
+      // Without the session (a Duo run that never printed its session id) the next turn starts fresh: give it the task again.
+      const task = !l.session?.sessionId && l.task ? `Your task (you were interrupted before it was done):\n${l.task.brief ?? l.task.goal}\n\n` : "";
+      l.redirect = l.redirect ? { ...l.redirect, input: `${l.redirect.input}\n\n${input}`, fromAgent: l.redirect.fromAgent ?? from }
+        : { input: `${task}${input}`, attachments: [], msgIds: [], fromAgent: from };
+      this.flow(l.agentId, { kind: "status", label: `interrupted by ${from}: ${text.slice(0, 100)}`, status: "steer" });
+      this.setStatus(l, "running", `Interrupted by a message from ${from}…`);
+      chatNote("interrupted it");
+      await l.session?.cancel();
+      return { delivered: "interrupted", agentId: l.agentId, note: "Its turn was stopped and continues now with your message (same session). Its result comes to you as usual." };
+    }
+    l.queue.push({ input, attachments: [], fromAgent: from });
+    this.flow(l.agentId, { kind: "status", label: `message from ${from} queued: ${text.slice(0, 100)}`, status: "queued" });
+    chatNote("queued until its current turn ends");
+    return { delivered: "queued", agentId: l.agentId,
+      note: "It gets the message when its current turn ends; that reply comes back to you. Pass interrupt: true to stop the turn and deliver it now." };
+  }
+
+  /** An agent of the caller's project (or of its chat, without a project). */
+  private projectAgent(callerId: string, agentId: string): AgentRun {
+    const me = this.d.db.getAgent(callerId);
+    const a = agentId ? this.d.db.getAgent(agentId) : null;
+    if (!me || !a || a.id === callerId || (me.projectId ? a.projectId !== me.projectId : a.chatId !== me.chatId))
+      throw new Error("unknown agentId: use an id from delegate or list_agents (this project only)");
+    return a;
+  }
+
+  /** A progress line from a headless CLI (Duo's log): output, kept for agent_status and shown in the status line now and then. */
+  private noteActivity(l: Live, text: string): void {
+    this.noteOutput(l);
+    l.recent = [...(l.recent ?? []), text].slice(-RECENT_LINES);
+    const now = Date.now();
+    if (l.statusNote && now - l.statusNote.at < 60_000) return; // the agent's own STATUS line wins for a minute
+    if (l.activityShownAt && now - l.activityShownAt < 2000) return;
+    l.activityShownAt = now;
+    this.setStatus(l, "running", `▸ ${text}`);
+  }
+
+  /** Read `STATUS: …` lines from streamed text: the agent says where it is, and the app shows and keeps it. */
+  private readStatusLines(l: Live, delta: string): void {
+    l.tail = ((l.tail ?? "") + delta).slice(-2000);
+    const lines = ((l.lineBuf ?? "") + delta).split(/\r?\n/);
+    l.lineBuf = (lines.pop() ?? "").slice(-1000);
+    for (const line of lines) {
+      const m = STATUS_LINE_RE.exec(line);
+      if (!m?.[1]) continue;
+      const note = m[1].replace(/\*\*$/, "").trim();
+      l.statusNote = { text: note, at: Date.now() };
+      l.recent = [...(l.recent ?? []), `STATUS: ${note}`].slice(-RECENT_LINES);
+      this.setStatus(l, "running", `📣 ${note}`.slice(0, 300));
+      this.flow(l.agentId, { kind: "status", label: `status: ${note.slice(0, 150)}`, status: "running" });
+    }
+  }
+
   pause(agentId: string): void {
     const l = this.byAgent.get(agentId);
     if (!l) return;
@@ -707,6 +851,8 @@ export class Orchestrator {
     for (const l of this.live.values()) {
       if (!l.busy || l.paused || l.stopped || l.awaitingApproval || l.stuckSince || !l.currentMessageId || !l.lastOutputAt) continue;
       if (now - l.lastOutputAt < mins * 60_000) continue;
+      // Its process says it is alive and working (GitLab Duo thinks for minutes without a word): busy, not stuck.
+      if (this.alive(l, now)) { this.showQuietAlive(l, now); continue; }
       const waitingOnSpecialist = [...this.live.values()].some((c) => c.busy && c.key.startsWith(`${l.agentId}>`));
       if (waitingOnSpecialist) continue;
       l.stuckSince = now;
@@ -721,7 +867,7 @@ export class Orchestrator {
     // (its turn is cancelled and continues with that), and past the recovery cap stopped and reported as failed.
     for (const l of this.live.values()) {
       if (!l.busy || !l.stuckSince || l.paused || l.stopped || l.awaitingApproval || !l.delegated || l.depth === 0 || !l.currentMessageId) continue;
-      if (now - l.stuckSince < mins * 60_000 || l.redirect) continue;
+      if (now - l.stuckSince < mins * 60_000 || l.redirect || this.alive(l, now)) continue;
       // A long build or test run is a running tool call, not silence: the tool call timeout handles those.
       if ([...(l.tools?.values() ?? [])].some((r) => r.status !== "completed" && r.status !== "failed")) continue;
       if ([...this.live.values()].some((c) => c.busy && c.parentAgentId === l.agentId)) continue;
@@ -729,6 +875,19 @@ export class Orchestrator {
       flagged.push(l.agentId);
     }
     return flagged;
+  }
+
+  /** The harness reported recently that the agent's process is alive and working. */
+  private alive(l: Live, now = Date.now()): boolean {
+    return !!l.heartbeatAt && now - l.heartbeatAt < ALIVE_WINDOW_MS && (!l.turnStartedAt || l.heartbeatAt >= l.turnStartedAt);
+  }
+
+  private showQuietAlive(l: Live, now: number): void {
+    const quiet = Math.round((now - (l.lastOutputAt ?? now)) / 60_000);
+    if (l.quietShown === quiet) return;
+    l.quietShown = quiet;
+    const said = l.statusNote ? `: last status "${l.statusNote.text.slice(0, 100)}"` : "";
+    this.setStatus(l, "running", `⚙️ Working, quiet for ${quiet} min (process alive)${said}`);
   }
 
   private recoverStall(l: Live, now: number): void {
@@ -956,6 +1115,7 @@ export class Orchestrator {
 
   private noteOutput(l: Live): void {
     l.lastOutputAt = Date.now();
+    l.quietShown = undefined;
     if (!l.stuckSince) return;
     const quiet = Math.round((l.lastOutputAt - l.stuckSince) / 60_000);
     l.stuckSince = null;
@@ -1247,7 +1407,10 @@ export class Orchestrator {
     this.d.emit({ type: "message.created", message: reply });
     this.setStatus(live, "running", "Starting…");
     live.lastOutputAt = Date.now();
+    live.turnStartedAt = live.lastOutputAt;
     live.stuckSince = null;
+    live.lineBuf = "";
+    live.tail = "";
     this.flow(live.agentId, { kind: "turn", label: t.input.replace(/\s+/g, " ").slice(0, 160) });
 
     // `text` is the whole turn (results and delegations are parsed from it); the shown reply starts at `base`, which
@@ -1346,7 +1509,7 @@ export class Orchestrator {
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
-            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? STATUS_LINE_RULES : "", first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
@@ -1434,7 +1597,8 @@ export class Orchestrator {
       const status = live.stopped ? "stopped" : redirected ? "done" : res.stopReason === "error" || gaveUp ? "error" : live.paused ? "paused" : res.stopReason === "cancelled" ? "stopped" : "done";
       finalStatus = redirected ? "redirected" : status;
       if (redirected) text += live.redirect!.toolStop ? `\n\n_⏹ Stopped the hung tool call **${live.redirect!.toolStop}** — continuing without it._`
-        : live.redirect!.nudge ? "\n\n_↻ Interrupted by TheFlashMaster after a long silence: asked to deliver what it has._" : "\n\n_↪ Redirected by your steering message._";
+        : live.redirect!.nudge ? "\n\n_↻ Interrupted by TheFlashMaster after a long silence: asked to deliver what it has._"
+          : live.redirect!.fromAgent ? `\n\n_✉️ Interrupted by a message from ${live.redirect!.fromAgent}._` : "\n\n_↪ Redirected by your steering message._";
       else if (res.error) text += `\n\n⚠️ ${res.error}`;
       else if (gaveUp) text += `\n\n⚠️ Stopped by TheFlashMaster: ${gaveUp}.`;
       // Text-mode TOOL lines show in the reply's tool-call panel; don't repeat them in the prose.
@@ -1536,7 +1700,7 @@ export class Orchestrator {
     if (!next && live.redirect && !live.stopped) {
       const r = live.redirect;
       live.redirect = null;
-      next = () => void this.turn({ ...t, retry: false, input: r.toolStop || r.nudge ? r.input : `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
+      next = () => void this.turn({ ...t, retry: false, input: r.toolStop || r.nudge || r.fromAgent ? r.input : `The user interrupted you with new direction:\n${r.input}\n\nContinue the task taking this into account.`,
         attachments: r.attachments, skills: [], brief: null, taskId: undefined, liveKey: live.key, msgIds: r.msgIds, deliver: true, borrowSlot: false, textRound: 0 });
     }
     if (next) { next(); return; }
@@ -1550,6 +1714,8 @@ export class Orchestrator {
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);
+      // A message from the delegating agent (message_agent) starts a follow-up whose result goes back to it.
+      if (items.some((q) => q.fromAgent) && live.parentAgentId) { live.delegated = true; live.resultTaken = false; live.recoveries = 0; }
       void this.turn({ ...t, retry: false, input: items.map((q) => q.input).join("\n\n"), attachments: items.flatMap((q) => q.attachments), skills: [], brief: null,
         taskId: undefined, liveKey: live.key, msgIds: items.flatMap((q) => q.msgIds ?? []), deliver: true, borrowSlot: false, textRound: 0 });
     }
@@ -1781,6 +1947,8 @@ export class Orchestrator {
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
       },
       onEvent: (e) => {
+        if (e.type === "heartbeat") { live.heartbeatAt = Date.now(); return; }
+        if (e.type === "activity") { this.noteActivity(live, e.text); return; }
         this.noteOutput(live);
         if (live.awaiting.length && (e.type === "text" || e.type === "tool" || e.type === "thought")) this.markSeen(live, false);
         if (e.type === "steer_ack") { this.markSeen(live, true); live.splitPending = true; }
@@ -1789,7 +1957,7 @@ export class Orchestrator {
           live.rollover();
         }
         if (e.type === "text" || e.type === "tool") this.endThought(live);
-        if (e.type === "text") live.sink?.(e.text);
+        if (e.type === "text") { live.sink?.(e.text); this.readStatusLines(live, e.text); }
         else if (e.type === "thought") this.recordThought(live, e.text);
         else if (e.type === "tool") {
           live.textBreak = true;
