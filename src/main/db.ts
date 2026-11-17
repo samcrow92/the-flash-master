@@ -66,6 +66,8 @@ export const MIGRATIONS: string[] = [
    CREATE TABLE knowledge_sync(project_id TEXT NOT NULL, slug TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(project_id, slug));`,
   // v12: a specialist the coordinator started in another folder (e.g. a GitLab Duo agent in a GitLab repo) keeps working there
   `ALTER TABLE agents ADD COLUMN folder TEXT;`,
+  // v13: extra launch arguments the coordinator started this specialist's agent CLI with (e.g. Pi's --provider), kept for follow-ups
+  `ALTER TABLE agents ADD COLUMN launch_args TEXT;`,
 ];
 
 type Row = Record<string, any>;
@@ -415,6 +417,10 @@ export class Db {
     this.run("UPDATE agents SET folder=? WHERE id=?", folder, id);
     return this.getAgent(id)!;
   }
+  setAgentLaunchArgs(id: string, args: string | null): AgentRun {
+    this.run("UPDATE agents SET launch_args=? WHERE id=?", args, id);
+    return this.getAgent(id)!;
+  }
   setAgentWorktree(id: string, worktree: string | null, branch: string | null): AgentRun {
     this.run("UPDATE agents SET worktree=?, branch=? WHERE id=?", worktree, branch, id);
     return this.getAgent(id)!;
@@ -626,7 +632,7 @@ const toAgent = (r: Row): AgentRun => ({
   status: r.status, parentAgentId: r.parent_agent_id ?? null, brief: r.brief, resultSummary: r.result_summary ?? null,
   tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), estimated: !!r.estimated, startedAt: Number(r.started_at),
   endedAt: r.ended_at == null ? null : Number(r.ended_at), lastActivity: r.last_activity ?? null, plan: parsePlan(r.plan),
-  worktree: r.worktree ?? null, branch: r.branch ?? null, credits: Number(r.credits ?? 0), folder: r.folder ?? null,
+  worktree: r.worktree ?? null, branch: r.branch ?? null, credits: Number(r.credits ?? 0), folder: r.folder ?? null, launchArgs: r.launch_args ?? null,
 });
 function parsePlan(s: unknown): PlanStep[] {
   try { const v = JSON.parse(String(s ?? "[]")); return Array.isArray(v) ? v : []; } catch { return []; }

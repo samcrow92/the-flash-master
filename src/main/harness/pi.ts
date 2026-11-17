@@ -305,22 +305,60 @@ export class PiAdapter implements HarnessAdapter {
     }
   }
 
+  /** Starts the Pi process (tests swap in a fake Pi here). */
+  protected session(exe: string, args: string[], o: SessionOptions): PiSession {
+    return new PiSession(exe, args, o);
+  }
+
   async start(o: SessionOptions): Promise<HarnessSession> {
     const args = ["--mode", "rpc"];
-    if (o.model) args.push("--model", o.model);
+    const want = piModelArgs(o.model);
+    args.push(...want.args);
     if (o.thinking) args.push("--thinking", o.thinking);
     if (o.policy.readOnly) args.push("--tools", "read,grep,find,ls");
     if (o.resumeSessionId) args.push("--session", o.resumeSessionId);
     args.push(...splitArgs(o.extraArgs));
-    const s = new PiSession(o.executable ?? "pi", args, o);
+    const s = this.session(o.executable ?? "pi", args, o);
     try {
       await Promise.race([s.init(), new Promise((_, rej) => setTimeout(() => rej(new Error("pi did not answer within 60s")), 60000))]);
+      // Pi falls back to its default model when it can't find the one asked for: say so instead of silently running on another one.
+      const problem = piModelMismatch(want, s.currentModel);
+      if (problem) throw new Error(problem);
     } catch (e) {
       s.close();
       throw e;
     }
     return s;
   }
+}
+
+/**
+ * Pi launch arguments for a model id. `provider/model` (what Pi lists, e.g. qwen-local-8800/qwen3.8:27b) becomes
+ * `--provider <provider> --model <model>`, so a model id with a colon is never read as Pi's `model:thinking` shorthand.
+ */
+export function piModelArgs(model: string | null | undefined): { provider: string | null; model: string | null; args: string[] } {
+  const m = model?.trim();
+  if (!m) return { provider: null, model: null, args: [] };
+  const slash = m.indexOf("/");
+  if (slash > 0 && slash < m.length - 1) {
+    const provider = m.slice(0, slash), id = m.slice(slash + 1);
+    return { provider, model: id, args: ["--provider", provider, "--model", id] };
+  }
+  return { provider: null, model: m, args: ["--model", m] };
+}
+
+/** Why Pi is not running on the model that was asked for (null when it is, or when Pi didn't say). */
+export function piModelMismatch(want: { provider: string | null; model: string | null }, current: string | null): string | null {
+  if (!want.model || !current) return null;
+  const slash = current.indexOf("/");
+  const provider = slash > 0 ? current.slice(0, slash) : "";
+  const id = slash > 0 ? current.slice(slash + 1) : current;
+  const okProvider = !want.provider || provider.toLowerCase() === want.provider.toLowerCase();
+  const okModel = id.toLowerCase() === want.model.toLowerCase() || id.toLowerCase().includes(want.model.toLowerCase());
+  if (okProvider && okModel) return null;
+  const asked = want.provider ? `${want.provider}/${want.model}` : want.model;
+  return `Pi started on ${current} instead of ${asked}: Pi doesn't know that model or provider. `
+    + "Check the provider name and model id in Pi's models.json (Pi lists them with `pi --list-models`), then try again.";
 }
 
 /** Pi tool arguments as shown when the call is expanded: the bash command as is, other tools as JSON. */
