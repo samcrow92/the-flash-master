@@ -28,7 +28,7 @@ export interface ReportCheckResult {
   problems: string[];
 }
 
-const SKIP = new Set(["node_modules", ".git", ".svn", "out", "dist", "build", ".venv", "venv", "__pycache__", ".next", "target", "coverage"]);
+const SKIP = new Set(["node_modules", ".git", ".wt", ".svn", "out", "dist", "build", ".venv", "venv", "__pycache__", ".next", "target", "coverage"]);
 const MAX_FILES = 4000, MAX_DEPTH = 5, MAX_READ = 2_000_000;
 
 /** .html files under dir modified at or after `since` (bounded walk; build output and dependencies are skipped). */

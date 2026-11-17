@@ -3,8 +3,8 @@
  * running in parallel on one project never overwrite each other. Nothing here deletes work that isn't merged:
  * removing a worktree with uncommitted changes or unmerged commits is refused unless the user forces it.
  */
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runCapture } from "./harness/process";
 
 export type Git = (cwd: string, args: string[]) => Promise<{ code: number | null; out: string }>;
@@ -29,7 +29,39 @@ export async function canIsolate(repo: string, git: Git = defaultGit): Promise<b
   return (await git(repo, ["rev-parse", "--verify", "--quiet", "HEAD"])).code === 0;
 }
 
+/** Agent worktrees live in `<project>/.wt/<name>`; the folder ignores itself, so the project's git never sees them. */
+export const WORKTREE_FOLDER = ".wt";
+/** Same convention as `.flashmaster/.gitignore`: the folder carries its own ignore file, the project's .gitignore is left alone. */
+export const WORKTREE_GITIGNORE = "# TheFlashMaster: agent worktrees (one folder per agent branch) stay out of git.\n*\n";
+
+export function projectWorktreeDir(projectPath: string, name: string): string {
+  return join(projectPath, WORKTREE_FOLDER, name);
+}
+
+/** Create `<root>/.wt` with its ignore file (kept if the team already wrote one). */
+export function ensureWorktreeFolder(projectPath: string): string {
+  const dir = join(projectPath, WORKTREE_FOLDER);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, ".gitignore");
+  if (!existsSync(file)) writeFileSync(file, WORKTREE_GITIGNORE);
+  return dir;
+}
+
+/** Where agents work when a chat has no project: `C:\Data\.wt` on Windows, `~/Data/.wt` elsewhere. */
+export function defaultNoProjectFolder(platform: NodeJS.Platform, home: string): string {
+  return platform === "win32" ? "C:\\Data\\.wt" : join(home, "Data", WORKTREE_FOLDER);
+}
+
+/** The no-project folder from settings (empty = the platform default; `~` = home). */
+export function noProjectFolder(setting: string, platform: NodeJS.Platform, home: string): string {
+  const f = setting.trim().replace(/^["']|["']$/g, "");
+  if (!f) return defaultNoProjectFolder(platform, home);
+  return /^~([\\/]|$)/.test(f) ? join(home, f.slice(1)) : f;
+}
+
 export async function createWorktree(repo: string, dir: string, branch: string, git: Git = defaultGit): Promise<WorkResult> {
+  const rel = relative(resolve(repo), resolve(dir));
+  if (rel.split(/[\\/]/)[0] === WORKTREE_FOLDER) ensureWorktreeFolder(repo);
   mkdirSync(dirname(dir), { recursive: true });
   const r = await git(repo, ["worktree", "add", "-b", branch, dir, "HEAD"]);
   return r.code === 0 ? { ok: true, message: `branch ${branch}` } : { ok: false, message: r.out.trim() || "git worktree add failed" };

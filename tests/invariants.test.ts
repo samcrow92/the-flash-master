@@ -305,3 +305,14 @@ describe("EWM source control stays read-only", () => {
     expect(read("src/main/scm-cli.ts")).not.toMatch(/checkin|deliver|"(load|share)"/);
   });
 });
+
+describe("worktree placement", () => {
+  // Mari: new worktrees go in the project's own .wt folder; without a project agents work in C:\Data\.wt (a setting).
+  it("agent worktrees are made in <project>/.wt, never in the app's data folder", () => {
+    const orch = read("src/main/orchestrator.ts");
+    expect(orch).toMatch(/projectWorktreeDir\(projectPath, /);
+    expect(orch).not.toMatch(/"worktrees"/);
+    expect(read("src/main/worktree.ts")).toMatch(/platform === "win32" \? "C:\\\\Data\\\\.wt"/);
+    expect(read("src/main/index.ts")).toMatch(/noProjectDir: \(\) => noProjectFolder\(settings\.get\(\)\.agents\.noProjectFolder/);
+  });
+});

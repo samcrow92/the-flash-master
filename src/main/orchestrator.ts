@@ -5,7 +5,7 @@
  * named with @mention. Delegated specialists run as thread replies under the delegating message, so the
  * user sees them without the coordinator's context ever containing their transcript.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
@@ -20,7 +20,7 @@ import type { MemoryStore } from "./memory";
 import { describeSync, type KnowledgeBase } from "./knowledge";
 import type { HarnessRegistry } from "./harness/registry";
 import type { HarnessSession, McpServerSpec, PermissionRequest } from "./harness/types";
-import { canIsolate, createWorktree, defaultGit, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
+import { canIsolate, createWorktree, defaultGit, projectWorktreeDir, mergeWorktree, removeWorktree, worktreeChanges, worktreeFileDiff, worktreeState, type Git, type WorkResult } from "./worktree";
 import { buildFixRequest, type ReviewComment } from "@shared/review";
 import { prepareInstructions } from "./harness/instructions";
 import { checkReports, reportFixPrompt } from "./report-check";
@@ -46,6 +46,8 @@ export interface CloseResult {
 export interface OrchestratorDeps {
   /** Git runner for agent worktrees (tests inject a fake). */
   git?: Git;
+  /** Folder agents work in when their chat has no project (Settings → Agents; C:\\Data\\.wt by default on Windows). Unset: the home folder. */
+  noProjectDir?: () => string;
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
   harnessEnv?: (harness: HarnessId) => Record<string, string>;
   /** Extra environment per role (e.g. FLASH_EXAM_CLI for agents that call bundled tools from a shell). */
@@ -391,7 +393,7 @@ export class Orchestrator {
     const launchArgs = checkLaunchArgs(a.args);
     // GitLab Duo only works in GitLab repos: say so now, before an agent is created that could never start.
     if (want === "duo" && !a.agentId && this.d.harnesses.resolve("duo", s) === "duo") {
-      const problem = await gitlabRepoProblem(folder ?? projectPath ?? this.d.homeDir, duoGitlabHosts(s.duo));
+      const problem = await gitlabRepoProblem(folder ?? projectPath ?? this.noProjectDir() ?? this.d.homeDir, duoGitlabHosts(s.duo));
       if (problem) throw new Error(`${problem} Pass folder = a GitLab repository to run it there.`);
     }
     // Every delegation starts a new instance (own session, worktree and task), so two Coders never share one
@@ -578,11 +580,21 @@ export class Orchestrator {
 
   private get git(): Git { return this.d.git ?? defaultGit; }
 
+  /** Where agents without a project work (created on first use); null when the app gives none (tests) or it can't be created. */
+  private noProjectDir(): string | null {
+    const dir = this.d.noProjectDir?.();
+    if (!dir) return null;
+    try { mkdirSync(dir, { recursive: true }); return dir; } catch (e) {
+      this.d.log?.("warn", `can't create the no-project folder ${dir}: ${String((e as Error)?.message ?? e)}`);
+      return null;
+    }
+  }
+
   /** A delegated code-writing specialist in a git project gets its own worktree and branch; anyone else works in the project folder. */
   /** A delegate `folder`: absolute, ~/…, or relative to the project. It must exist. */
   private resolveFolder(folder: string, projectPath: string | null): string {
     const f = folder.replace(/^["']|["']$/g, "");
-    const dir = /^~([\\/]|$)/.test(f) ? join(this.d.homeDir, f.slice(1)) : isAbsolute(f) ? f : resolvePath(projectPath ?? this.d.homeDir, f);
+    const dir = /^~([\\/]|$)/.test(f) ? join(this.d.homeDir, f.slice(1)) : isAbsolute(f) ? f : resolvePath(projectPath ?? this.noProjectDir() ?? this.d.homeDir, f);
     let ok = false;
     try { ok = statSync(dir).isDirectory(); } catch { /* missing */ }
     if (!ok) throw new Error(`folder not found: ${dir}`);
@@ -596,7 +608,7 @@ export class Orchestrator {
     if (!(await canIsolate(projectPath, this.git))) return;
     const short = l.agentId.slice(0, 8);
     const branch = `flash/${l.role.name}-${short}`;
-    const dir = join(this.d.dataDir ?? this.d.homeDir, "worktrees", short);
+    const dir = projectWorktreeDir(projectPath, short); // <project>/.wt/<id>, git-ignored by its own .gitignore
     const r = await createWorktree(projectPath, dir, branch, this.git);
     if (!r.ok) {
       this.system(chatId, threadRoot, `⚠️ Couldn't give ${agentLabel(l, l.role.title)} its own copy of the project (${r.message.split("\n")[0]}); it works in the project folder.`, "warn");
@@ -1277,7 +1289,8 @@ export class Orchestrator {
         this.d.emit({ type: "message.created", message: reply });
       };
       if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
-      const workDir = live.worktree ?? live.folder ?? project?.path ?? null;
+      // No project: work in the no-project folder (C:\\Data\\.wt by default on Windows) rather than the home folder.
+      const workDir = live.worktree ?? live.folder ?? project?.path ?? this.noProjectDir();
       if (firstTurn) {
         // A CLI that dies while starting gets one more try before the turn fails.
         live.session = await this.openSession(live, workDir, t.chat).catch((e) => {
@@ -2311,12 +2324,12 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     return this.d.db.getAgent(agentId)?.projectId ?? null;
   }
 
-  /** Folder an agent works in (its worktree, delegated folder or the project root); null when it has none. */
+  /** Folder an agent works in (its worktree, delegated folder, the project root, or the no-project folder); null when it has none. */
   agentWorkDir(agentId: string): string | null {
     const live = [...this.live.values()].find((l) => l.agentId === agentId);
     const a = this.d.db.getAgent(agentId);
     const project = a?.projectId ? this.d.db.getProject(a.projectId)?.path ?? null : null;
-    return live?.worktree ?? live?.folder ?? project;
+    return live?.worktree ?? live?.folder ?? project ?? (a && !a.projectId ? this.noProjectDir() : null);
   }
 
   runTask(task: Task, roleName?: string): Promise<AgentRun> {

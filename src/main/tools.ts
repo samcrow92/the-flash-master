@@ -46,10 +46,10 @@ export function buildTools(d: {
     if (!c) throw new Error("EWM source control is not configured (Settings → Integrations → IBM Jazz → Source control)");
     return c;
   };
-  /** Folder an agent works in: its worktree, else its project folder. */
+  /** Folder an agent works in: its worktree, else its project folder, else the no-project folder (C:\\Data\\.wt by default). */
   const agentDir = (agentId: string): string => {
     const a = agentId ? d.db.getAgent(agentId) : null;
-    const dir = a?.worktree ?? (a?.projectId ? d.db.getProject(a.projectId)?.path : null);
+    const dir = a?.worktree ?? (a?.projectId ? d.db.getProject(a.projectId)?.path : a ? d.orch.agentWorkDir(agentId) : null);
     if (!dir) throw new Error("this chat has no project folder to download into — read files with scm_read_file instead");
     return dir;
   };
