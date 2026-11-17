@@ -235,6 +235,11 @@ export class Db {
       : this.all("SELECT * FROM messages WHERE chat_id=? AND (parent_id=? OR id=?) AND seq>? ORDER BY seq", chatId, parentId, parentId, afterSeq);
     return rows.map((r) => this.hydrate(r));
   }
+  /** An agent's finished replies, newest first (its reports: what read_report returns). */
+  agentReplies(agentId: string, limit = 5): Message[] {
+    return this.all("SELECT * FROM messages WHERE agent_id=? AND author='agent' AND status='done' AND content<>'' ORDER BY seq DESC LIMIT ?", agentId, limit)
+      .map((r) => this.hydrate(r));
+  }
   getMessage(id: string): Message | null {
     const r = this.get("SELECT * FROM messages WHERE id=?", id);
     return r ? this.hydrate(r) : null;

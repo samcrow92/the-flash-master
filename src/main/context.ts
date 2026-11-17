@@ -187,13 +187,16 @@ export function resultForParent(text: string, maxTokens: number): string {
   return body.length > maxChars ? body.slice(0, maxChars) + "\n…[truncated to result budget]" : body;
 }
 
-export function buildBrief(i: { goal: string; context?: string; files?: string[]; acceptance?: string; parentRole?: string }): string {
+export function buildBrief(i: { goal: string; context?: string; files?: string[]; acceptance?: string; parentRole?: string; helperLevels?: number }): string {
   return [
     `Goal: ${i.goal.trim()}`,
     i.context ? `Context: ${i.context.trim()}` : "",
     i.files?.length ? `Relevant files: ${i.files.join(", ")}` : "",
     i.acceptance ? `Done when: ${i.acceptance.trim()}` : "",
     i.parentRole ? `Delegated by: ${i.parentRole}. Report back with the result block only — they do not see your working.` : "",
+    i.parentRole && i.helperLevels !== undefined ? (i.helperLevels > 0
+      ? "Need a hand? You may hand a focused sub-task to a helper with delegate (it waits for the result). To get another agent's earlier report, call read_report instead of delegating or redoing it."
+      : "You can't delegate further (delegation depth). To get another agent's earlier report, call read_report.") : "",
   ].filter(Boolean).join("\n");
 }
 
