@@ -45,17 +45,26 @@ describe.skipIf(!python)("app ↔ real Flash server", () => {
   };
 
   beforeAll(async () => {
+    const t0 = Date.now();
     admin = cli("init", "--admin-name", "mari").adminToken;
+    const tInit = Date.now() - t0;
     const port = await freePort();
     const [cmd, ...pre] = python!;
-    proc = spawn(cmd!, [...pre, "-m", "flashserver", "serve", "--data-dir", data, "--host", "127.0.0.1", "--port", String(port)], { env, stdio: "ignore" });
+    let log = "";
+    proc = spawn(cmd!, [...pre, "-m", "flashserver", "serve", "--data-dir", data, "--host", "127.0.0.1", "--port", String(port)], { env, stdio: ["ignore", "pipe", "pipe"] });
+    proc.stdout?.on("data", (b) => { log += b; });
+    proc.stderr?.on("data", (b) => { log += b; });
     base = `http://127.0.0.1:${port}`;
-    for (let i = 0; i < 100; i++) {
-      try { if ((await fetch(`${base}/api/v1/health`)).ok) return; } catch { /* starting */ }
-      await new Promise((r) => setTimeout(r, 100));
+    let last = "";
+    while (Date.now() - t0 < 60000) {
+      try {
+        if ((await fetch(`${base}/api/v1/health`, { signal: AbortSignal.timeout(2000) })).ok) return;
+      } catch (e: any) { last = String(e?.cause?.code ?? e?.name ?? e); }
+      if (proc.exitCode !== null) break;
+      await new Promise((r) => setTimeout(r, 200));
     }
-    throw new Error("server did not start");
-  }, 30000);
+    throw new Error(`server did not start (init ${tInit} ms, waited ${Date.now() - t0} ms, last error ${last}, exit ${proc.exitCode}):\n${log.slice(-2000)}`);
+  }, 90000);
   afterAll(() => { proc?.kill(); });
 
   it("submit → review with feedback → install from the private marketplace", async () => {

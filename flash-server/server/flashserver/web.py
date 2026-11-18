@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import socketserver
 import sys
 import time
 import traceback
@@ -356,9 +357,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         pass
 
 
+class _Server(ThreadingHTTPServer):
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind resolves the host name with socket.getfqdn(), a reverse DNS lookup that can stall for
+        # many seconds (seen on macOS). The name is only used for SERVER_NAME in CGI, so skip it.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = str(host), port
+
+
 def make_server(svc: Service, host: str, port: int, quiet: bool = False) -> ThreadingHTTPServer:
     handler = type("Handler", (RequestHandler,), {"api": Handlers(svc), "quiet": quiet})
-    srv = ThreadingHTTPServer((host, port), handler)
+    srv = _Server((host, port), handler)
     srv.daemon_threads = True
     return srv
 
