@@ -76,7 +76,9 @@ describe("Duo progress", () => {
       const events: HarnessEvent[] = [];
       const s = new DuoSession(process.execPath, [FAKE_DUO], { cwd: tmpdir(), env: {}, extraArgs: "", model: null, onEvent: (e: HarnessEvent) => events.push(e) } as unknown as SessionOptions);
       const turn = s.prompt("QUIET think");
-      await until(() => events.filter((e) => e.type === "heartbeat").length >= 3);
+      // Wait for the log lines too: on a slow or busy machine (antivirus on Windows) the process can take longer to
+      // start than three heartbeats, and the test used to fail with no activity yet.
+      await until(() => events.filter((e) => e.type === "heartbeat").length >= 3 && events.filter((e) => e.type === "activity").length >= 2);
       expect(events.filter((e) => e.type === "activity").map((e) => (e as { text: string }).text)).toEqual(["Session ID: fakesession42", "Reading src/brake_light.c"]);
       await s.cancel();
       expect((await turn).stopReason).toBe("cancelled");

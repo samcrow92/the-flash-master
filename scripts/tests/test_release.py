@@ -228,3 +228,13 @@ def test_choose_remote(monkeypatch, capsys):
     assert "1) origin" in out and "2) corporate" in out and "forvia-hella.ghe.com/team/the-flash-master" in out
     monkeypatch.setattr("builtins.input", lambda _prompt: "")
     assert release.choose_remote(remotes, None, interactive=True, ui=ui) == "origin"  # Enter = origin
+
+
+def test_summarize_check_runs():
+    ok = lambda n: {"name": n, "status": "completed", "conclusion": "success"}  # noqa: E731
+    assert release.summarize_check_runs([ok("ci (windows-latest)"), ok("ci (macos-latest)"), ok("ci (ubuntu-latest)")]) == (
+        True, "CI passed on GitHub for this commit (3 checks)")
+    passed, note = release.summarize_check_runs([ok("a"), {"name": "ci (windows-latest)", "status": "completed", "conclusion": "failure"}])
+    assert not passed and "ci (windows-latest)" in note
+    assert release.summarize_check_runs([ok("a"), {"name": "b", "status": "in_progress"}])[0] is False
+    assert release.summarize_check_runs([]) == (False, "No CI results on GitHub for this commit")
