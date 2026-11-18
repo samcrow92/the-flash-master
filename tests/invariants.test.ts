@@ -316,3 +316,20 @@ describe("worktree placement", () => {
     expect(read("src/main/index.ts")).toMatch(/noProjectDir: \(\) => noProjectFolder\(settings\.get\(\)\.agents\.noProjectFolder/);
   });
 });
+
+describe("local release script", () => {
+  // scripts/release.py publishes a finished release from Mari's machine; publishing pushes the tag, which starts
+  // release.yml. The workflow must see that release.py already uploaded latest.json and not rebuild over it.
+  it("release.yml skips the rebuild for a release that already carries latest.json", () => {
+    const wf = read(".github/workflows/release.yml");
+    expect(wf).toMatch(/grep -qx latest\.json/);
+    expect(wf).toMatch(/needs: guard\n\s+if: needs\.guard\.outputs\.published-locally != 'true'/);
+  });
+  it("release.py runs only on the Python standard library and its tests run in CI", () => {
+    const imports = [...read("scripts/release.py").matchAll(/^(?:from|import) (\w+)/gm)].map((m) => m[1]!);
+    const stdlib = new Set(["__future__", "argparse", "hashlib", "json", "os", "re", "shutil", "ssl", "subprocess", "sys",
+      "threading", "time", "urllib", "collections", "dataclasses", "pathlib", "typing", "ctypes"]);
+    expect(imports.filter((m) => !stdlib.has(m)), "third-party import in scripts/release.py").toEqual([]);
+    expect(read("scripts/run-pytest.mjs")).toMatch(/"scripts\/tests"/);
+  });
+});

@@ -12,7 +12,29 @@ permissions:
   contents: write
 
 jobs:
+  # scripts/release.py builds locally and publishes a finished release; publishing creates the tag, which
+  # lands here. Skip the rebuild then, or this workflow would clobber the uploaded files with new ones.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      published-locally: ${{ steps.check.outputs.published }}
+    steps:
+      - id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          published=false
+          if [[ "$GITHUB_REF" == refs/tags/* ]] && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx latest.json; then
+            published=true
+            echo "::notice::Release $TAG already carries latest.json (published by scripts/release.py); skipping the build."
+          fi
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+
   windows-x64:
+    needs: guard
+    if: needs.guard.outputs.published-locally != 'true'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:

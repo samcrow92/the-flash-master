@@ -48,6 +48,33 @@ With the GitHub CLI against an Enterprise host, set `GH_HOST=github.company.com`
 
 Pre-releases are only offered to users who choose **Include pre-releases**.
 
+## 3b. Release from your own Windows machine
+
+`scripts/release.py` does the whole release locally, standard library only (Python 3.9+):
+
+```powershell
+py -3 scripts/release.py --dry-run   # check tools, auth and version; build and change nothing
+py -3 scripts/release.py             # suggests the next version, builds, uploads, publishes
+```
+
+1. **Preflight**: Windows, git, Node 22.13+, `node_modules`, a clean working tree, the commit already pushed to the
+   remote, and write access to the repository. Credentials come from `GH_TOKEN` / `GITHUB_TOKEN`
+   (`GH_ENTERPRISE_TOKEN` for Enterprise hosts) or the GitHub CLI login (`gh auth login --hostname <host>`).
+2. **Version**: the newest release on the git remote (`--remote`, default `origin`) is the current version;
+   package.json is used when there is none. It suggests the patch bump and offers minor, major or a custom version
+   (`--bump minor`, `--version 1.0.0-beta.1`). Versions with a suffix are published as pre-releases.
+3. **Build**: stamps the version into package.json for the build only (restored afterwards), runs `npm run ci`
+   (`--skip-checks` to skip), `electron-builder --win --x64`, `release-manifest.mjs` and writes `SHA256SUMS.txt`.
+   Set `CSC_LINK` / `CSC_KEY_PASSWORD` to sign. Full output goes to `release/release-script.log`.
+4. **Publish**: creates a draft release on the pushed commit, uploads the executables, `latest.json`,
+   `SHA256SUMS.txt` (and `.blockmap` / `latest.yml` when the build makes them) with progress bars, checks every file
+   arrived, then publishes. The tag only appears at that last step. If an upload fails the draft is kept:
+   `py -3 scripts/release.py --skip-build --version <version>` resumes it.
+
+Publishing creates the tag, which starts `release.yml`; it sees that the release already has `latest.json` and
+skips its own build. Other options: `--notes` / `--notes-file`, `--draft`, `--no-publish`, `--yes`, `--help`.
+Behind a TLS-inspecting proxy, set `HTTPS_PROXY` and point `SSL_CERT_FILE` at the company root CA if needed.
+
 ## 4. Private or internal repositories
 
 Users need read access to the releases. Two ways, both in **Settings → About**:
