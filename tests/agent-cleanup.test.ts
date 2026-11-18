@@ -71,7 +71,11 @@ describe("Flash Master cleans up agents", { timeout: 90000 }, () => {
     expect(r.closed.map((x) => x.agentId)).toEqual([clean.agentId]);
     expect(r.kept).toEqual([expect.objectContaining({ agentId: wip.agentId, closed: false, reason: expect.stringMatching(/1 unmerged commit/) })]);
     expect(db.getAgent(clean.agentId)).toMatchObject({ status: "done", worktree: null, lastActivity: expect.stringMatching(/^Closed by/) });
-    expect(db.getAgent(leadId)!.status).toBe("idle");
+    // The coordinator is never closed. It can be idle or already "running": the two finished specialists wake it for a
+    // new turn, which on a slow Windows runner is still going at this point (CI failed on that), so check it wasn't closed.
+    expect(r.closed.map((x) => x.agentId)).not.toContain(leadId);
+    expect(db.getAgent(leadId)!.status).not.toBe("done");
+    expect(db.getAgent(leadId)!.lastActivity ?? "").not.toMatch(/^Closed by/);
     expect(existsSync(w.worktree!)).toBe(true);
 
     // force stops it but never throws its work away: the branch stays for review.
