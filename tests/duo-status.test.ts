@@ -156,7 +156,7 @@ describe("the coordinator and a Duo specialist", () => {
     await until(() => inputs.some((i) => /## Specialist results[\s\S]*Mock run for "TheFlashMaster, the agent that delegated/.test(i)), 20000);
   }, 30000);
 
-  it("Duo specialists get Duo's own reporting guidelines on their first turn; other specialists the general STATUS rule", async () => {
+  it("Duo specialists get Duo's own specialist and reporting guidelines on their first turn; other specialists the general STATUS rule", async () => {
     const duoPrompts: string[] = [];
     const real = DuoSession.prototype.prompt;
     const spy = vi.spyOn(DuoSession.prototype, "prompt").mockImplementation(function (this: DuoSession, text: string, att?: any) {
@@ -171,6 +171,10 @@ describe("the coordinator and a Duo specialist", () => {
       expect(duoPrompts[0]).toContain("## Reporting back from GitLab Duo");
       expect(duoPrompts[0]).toMatch(/STATUS: <state> \| <what you are doing> \| <next>/);
       expect(duoPrompts[0]).not.toContain("## Keep the delegating agent posted");
+      // Duo is told it is a specialist: the delegating agent is the orchestrator, blockers go to it, no delegating unasked.
+      expect(duoPrompts[0]).toContain("## You are a specialist, not the orchestrator");
+      expect(duoPrompts[0]).toMatch(/never to the user/);
+      expect(duoPrompts[0]).toMatch(/Don't plan work for other agents and don't delegate to them, unless the orchestrator asks/);
       const inputs: string[] = [];
       const mockProto = Object.getPrototypeOf((orch as any).byAgent.get(parentId).session);
       const mockReal = mockProto.prompt;
@@ -182,6 +186,7 @@ describe("the coordinator and a Duo specialist", () => {
       mspy.mockRestore();
       expect(inputs[0]).toContain("## Keep the delegating agent posted");
       expect(inputs[0]).not.toContain("Reporting back from GitLab Duo");
+      expect(inputs[0]).not.toContain("You are a specialist, not the orchestrator");
     } finally { spy.mockRestore(); }
   }, 30000);
 
