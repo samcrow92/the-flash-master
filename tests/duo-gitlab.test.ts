@@ -54,7 +54,7 @@ describe("what counts as a GitLab repo", () => {
     expect(hasGitLabRemote("origin\thttps://git.corp/g/p.git (fetch)", ["git.corp"])).toBe(true);
     expect(hostList("https://Git.Corp/x, code.lab:8443 git@other.host")).toEqual(["git.corp", "code.lab", "other.host"]);
     expect(duoGitlabHosts({ hosts: "git.corp" }, { GITLAB_BASE_URL: "https://lab.internal" })).toEqual(["git.corp", "lab.internal"]);
-    expect(DEFAULT_SETTINGS.duo).toEqual({ hosts: "" });
+    expect(DEFAULT_SETTINGS.duo).toEqual({ hosts: "", coordinator: false, coordinatorModel: "claude-opus-5-5" });
   });
 
   it("explains why a folder isn't one", async () => {

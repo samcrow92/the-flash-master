@@ -661,6 +661,7 @@ const api: FlashApi = {
     return c;
   },
   deleteChat: async (id) => { await orch.stopChat(id); db.deleteChat(id); },
+  prepareChat: async (chatId) => orch.prepareChat(chatId),
   resetContext: async (chatId) => orch.resetContext(chatId),
   exportChat: async (chatId) => {
     const c = db.getChat(chatId);

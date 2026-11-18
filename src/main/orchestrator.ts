@@ -136,6 +136,15 @@ interface Live {
   quietShown?: number;
   /** Recent progress lines (Duo's log, STATUS lines), newest last, for agent_status. */
   recent?: string[];
+  /**
+   * The chat's coordinator runs on GitLab Duo (Settings → Harnesses → GitLab Duo, or Duo picked for the chat): the harness
+   * it falls back to when the project isn't a GitLab repo, and whether Duo was picked for this chat (then it isn't replaced).
+   */
+  duoCoordinator?: { fallback: HarnessId; explicit: boolean } | null;
+  /** Duo was started ahead of the first message (prepareChat): the session is open, but the first turn's brief isn't sent yet. */
+  prestarted?: boolean;
+  /** prepareChat is starting the session: a turn waits for it instead of starting a second one. */
+  starting?: Promise<unknown> | null;
   /** The agent's last STATUS line (text protocol: `STATUS: <what I'm doing>`), with when it came. */
   statusNote?: { text: string; at: number } | null;
   /** Streamed text of the current turn not yet ended by a newline (STATUS lines are read per line). */
@@ -288,6 +297,41 @@ export class Orchestrator {
     if (steer && busyLive) { await this.steer(busyLive, content, attachments, userMsg.id); return userMsg; }
     await this.dispatch(chat, threadRoot, userMsg, content, attachments);
     return userMsg;
+  }
+
+  /**
+   * A chat was opened or its harness changed. When its coordinator runs on GitLab Duo (project chats only), Duo starts
+   * now in the project folder, so the chat is ready before the first message and a non-GitLab folder shows up at once.
+   */
+  async prepareChat(chatId: string): Promise<{ harness: HarnessId | null; folder: string | null; ready: boolean; error?: string }> {
+    const none = { harness: null, folder: null, ready: false };
+    const chat = this.d.db.getChat(chatId);
+    const s = this.d.settings();
+    if (!chat?.projectId || chat.archived || (!s.duo.coordinator && chat.harness !== "duo")) return none;
+    const project = this.d.db.getProject(chat.projectId);
+    const role = this.d.roles().find((r) => r.name === chat.agentRole);
+    if (!project || !role) return none;
+    const live = this.ensureLive(chat, null, role, 0);
+    if (!live.duoCoordinator || live.harness !== "duo") return { ...none, harness: live.harness };
+    if (live.busy || live.session?.alive) return { harness: live.harness, folder: project.path, ready: !!live.session?.alive };
+    if (live.starting) { await live.starting.catch(() => undefined); return { harness: live.harness, folder: project.path, ready: !!live.session?.alive }; }
+    const start = (async () => {
+      await this.duoCoordinatorFallback(live, project.path, chat);
+      if (live.harness !== "duo") return;
+      live.session = await this.openSession(live, project.path, chat);
+      live.prestarted = true;
+      this.setStatus(live, "idle", `GitLab Duo ready in ${project.path}`);
+    })();
+    live.starting = start;
+    try {
+      await start;
+      return { harness: live.harness, folder: project.path, ready: !!live.session?.alive };
+    } catch (e) {
+      const error = String((e as Error)?.message ?? e);
+      this.setStatus(live, "error", error.slice(0, 200));
+      this.system(chat.id, null, `⚠️ GitLab Duo didn't start in ${project.path}: ${error}`, "warn");
+      return { harness: live.harness, folder: project.path, ready: false, error };
+    } finally { live.starting = null; }
   }
 
   /**
@@ -1441,7 +1485,9 @@ export class Orchestrator {
     const project = t.chat.projectId ? this.d.db.getProject(t.chat.projectId) : null;
     let promptText: string;
     try {
-      const firstTurn = !live.session || !live.session.alive;
+      if (live.starting) await live.starting.catch(() => undefined);
+      const firstTurn = !live.session || !live.session.alive || !!live.prestarted;
+      live.prestarted = false;
       live.turnChanges = new Map();
       live.sink = (delta) => {
         if (live.textBreak) { delta = paragraphBreak(text.slice(base)) + delta; live.textBreak = false; }
@@ -1469,7 +1515,8 @@ export class Orchestrator {
       if (firstTurn && live.worktree === undefined) await this.prepareWorktree(live, project?.path ?? null, t.chat.id, t.threadRoot);
       // No project: work in the no-project folder (C:\\Data\\.wt by default on Windows) rather than the home folder.
       const workDir = live.worktree ?? live.folder ?? project?.path ?? this.noProjectDir();
-      if (firstTurn) {
+      if (firstTurn && live.duoCoordinator && !live.session?.alive) await this.duoCoordinatorFallback(live, workDir ?? this.d.homeDir, t.chat);
+      if (firstTurn && !live.session?.alive) {
         // A CLI that dies while starting gets one more try before the turn fails.
         live.session = await this.openSession(live, workDir, t.chat).catch((e) => {
           if (live.stopped || !HARNESS_EXIT.test(String(e?.message ?? e))) throw e;
@@ -2055,15 +2102,26 @@ export class Orchestrator {
     if (localPick && "error" in localPick) throw new Error(`${role.title} was not started: ${localPick.error}`);
     const override = s.agents.roleOverrides[role.name];
     const mode = chat.mode ? s.modes[chat.mode] : null;
-    const requested = (mode?.harness || null) ?? (chat.agentRole === role.name ? chat.harness : null) ?? override?.harness ?? role.harness ?? null;
+    let requested = (mode?.harness || null) ?? (chat.agentRole === role.name ? chat.harness : null) ?? override?.harness ?? role.harness ?? null;
+    // The chat's own coordinator on GitLab Duo: only in project chats, where Duo starts in the project folder.
+    const duoMain = depth === 0 && !parentAgentId && !pick && !keyOverride && chat.agentRole === role.name && !mode?.harness;
+    const usual = this.d.harnesses.resolve((chat.harness !== "duo" ? chat.harness : null) ?? override?.harness ?? role.harness ?? null, s);
+    const duoCoord = duoMain && !role.local && (s.duo.coordinator || chat.harness === "duo");
+    if (duoCoord && !chat.projectId) {
+      if (chat.harness === "duo") this.system(chat.id, threadRoot, `GitLab Duo runs the coordinator only in chats with a project folder, so ${role.title} runs on **${usual}** here.`);
+      requested = usual;
+    } else if (duoCoord) requested = "duo";
     // Economy routing: delegated specialists can run on a cheaper harness/model.
     const economy = !!parentAgentId && s.tokens.economyForDelegated && !!s.tokens.economyHarness;
     // An explicit harness from the coordinator (the user asked for "the Pi agent") wins over economy routing.
     const harness = localPick ? localPick.harness : this.d.harnesses.resolve(pick?.harness ?? (economy ? (s.tokens.economyHarness as HarnessId) : requested), s);
     // The coordinator's model goes with its harness (or with whatever harness runs the role when it named none);
     // a harness it asked for that isn't available drops the model, which belongs to that harness.
-    const model = localPick ? localPick.model : pick?.model && (!pick.harness || harness === pick.harness) ? pick.model
+    const baseModel = localPick ? localPick.model : pick?.model && (!pick.harness || harness === pick.harness) ? pick.model
       : pick?.harness && harness === pick.harness ? null : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
+    const onDuo = duoCoord && !!chat.projectId && harness === "duo" && !localPick;
+    // Opus 5.5 by default (Settings → Harnesses → GitLab Duo); a model picked for the chat on Duo wins.
+    const model = onDuo ? (chat.harness === "duo" && chat.model ? chat.model : s.duo.coordinatorModel.trim() || null) : baseModel;
     const askedFor = pick?.harness ?? requested;
     if (localPick && askedFor && askedFor !== harness)
       this.system(chat.id, threadRoot, `🏠 ${role.title} must run on a local model, so it runs on **${harness}** · ${model} instead of ${askedFor}.`);
@@ -2073,7 +2131,8 @@ export class Orchestrator {
       parentAgentId: parentAgentId ?? null, brief: brief ?? `Chat: ${chat.title}`, name });
     const l: Live = { key, agentId: agent.id, name, chatId: chat.id, threadRoot, role, harness, model, session: null, sessionTokens: 0, busy: false,
       paused: false, queue: [], depth, currentMessageId: null, waiters: [], lastResult: null, stopped: false, sink: null, redirect: null, awaiting: [],
-      parentAgentId: parentAgentId ?? null, local: localPick ? { source: localPick.source } : null };
+      parentAgentId: parentAgentId ?? null, local: localPick ? { source: localPick.source } : null,
+      duoCoordinator: onDuo ? { fallback: usual !== "duo" ? usual : this.d.harnesses.alternative("duo", s) ?? "mock", explicit: chat.harness === "duo" } : null };
     this.live.set(key, l);
     this.byAgent.set(agent.id, l);
     this.emitAgent(agent);
@@ -2091,6 +2150,22 @@ export class Orchestrator {
     return "error" in p
       ? `\nLocality: it refused because it ran on ${live.harness} (hosted) and its work must stay on a local model, but no local model is set up. That is a setup step only the user can do: ask them to set Settings → Modes → LOCAL to Pi or OpenCode with their local model.`
       : `\nLocality: it refused because it ran on ${live.harness} (hosted) and its work must stay on a local model. Re-delegate the same brief now with local: true (text mode: DELEGATE ${live.role.name}@${p.harness} model "${p.model}": …); it will run on ${p.harness} · ${p.model}. Don't ask the user.`;
+  }
+
+  /**
+   * A coordinator put on GitLab Duo by the setting, in a project that isn't a GitLab repo: it runs on its usual harness
+   * instead (Duo would only refuse the folder). Picking Duo for the chat keeps Duo, and its start explains the problem.
+   */
+  private async duoCoordinatorFallback(live: Live, folder: string, chat: Chat): Promise<void> {
+    const dc = live.duoCoordinator;
+    if (!dc || dc.explicit || live.harness !== "duo") return;
+    const problem = await gitlabRepoProblem(folder, duoGitlabHosts(this.d.settings().duo));
+    if (!problem) return;
+    live.duoCoordinator = null;
+    live.harness = dc.fallback;
+    live.model = null;
+    this.emitAgent(this.d.db.updateAgent(live.agentId, { harness: dc.fallback, model: null }));
+    this.system(chat.id, live.threadRoot, `This project isn't a GitLab repository, so ${live.role.title} runs on **${dc.fallback}** here instead of GitLab Duo.`);
   }
 
   /** Agents expected to hand work to specialists: the coordinator (and its custom copies at depth 0). */
