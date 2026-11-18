@@ -10,6 +10,8 @@ install plugins in **🧩 Marketplace** in the sidebar.
 |---|---|
 | `agents/*.md` | Specialists in the sidebar, `@mention`-able, and available to the coordinator for delegation (same format as `agents/_template.md`) |
 | `workflows/*.md` | Slash commands in every chat (`/command`). The header needs `name:`, `command:` and `description:` |
+| `skills/*.md` | Skills, installed like workflows (`/command`); the command is the header's `command:` or the file name |
+| `scripts/*` | Helper scripts (`.py .ps1 .sh .js .mjs .bat .cmd .txt .json .yml .yaml`, ≤ 200 KB each), stored in `<data folder>/plugins/<id>/scripts/`; agents get a line listing their paths so they can run them |
 | `instructions.md` | Team rules added to every agent while the plugin is installed. Users can switch this off per plugin |
 | `mcp.json` | Tool servers (`[{ "id", "label", "command", "args", "env" }]`). They run programs, so they are only enabled when policy allows; otherwise they are added disabled under Settings → MCP |
 
@@ -22,6 +24,8 @@ my-marketplace/
       plugin.json        { "id": "body-sw-test-pack", "name": "…", "version": "1.0.0", "description": "…", "team": "…", "tags": [] }
       agents/hil-tester.md
       workflows/hil-campaign.md
+      skills/hil-report.md    (optional)
+      scripts/collect-logs.py (optional)
       instructions.md    (optional)
       mcp.json           (optional)
 ```
@@ -46,3 +50,19 @@ Users add `http://<server-ip>:8080` in Settings → Marketplace. See `marketplac
 - Marketplace hosts always bypass the corporate proxy (they are internal servers).
 - Administrators can preset and lock the marketplace list in `%PROGRAMDATA%\TheFlashMaster\policy.json`:
   `{"settings":{"marketplace":{"sources":[{"id":"body","name":"Body Electronics","department":"Body","url":"http://10.1.2.3:8080","enabled":true}]}},"lock":["marketplace.sources"]}`
+
+## Flash server
+
+A Flash server (`flash-server/`, contract in `flash-server/API.md`) is a private marketplace with review. Set its URL and your
+token in **Settings → Flash server** (or ship the URL in `package.json → flashmaster.server.url`, or preset/lock `server.url`
+by policy) and press **Test connection**. Then:
+
+- The server's catalogue appears in the Marketplace as the source **flash-server** (named after the server). Its requests carry
+  your token; plugins install exactly like the ones above.
+- **Submit** sends a plugin for review: pick a folder in the `plugins-src/<id>/` layout above, or single files (an agent, a
+  workflow or skill `.md`, a script) and fill id / name / version. **Check** validates it with the same rules install uses
+  (nothing is sent); **Submit** posts it. Errors are listed one per line.
+- **My submissions** shows each submission's status (pending, approved, changes requested, rejected, withdrawn), the reviewer's
+  feedback, and lets you withdraw a pending one or resubmit after *changes requested*. The app checks every 15 minutes and on
+  Refresh, and shows a notice when a status changes.
+

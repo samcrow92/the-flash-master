@@ -41,7 +41,10 @@ import { networkEnv } from "./orchestrator";
 import { prepareInstructions } from "./harness/instructions";
 import { makeLogger } from "./log";
 import { guardWebContents } from "./crash-guard";
-import { Marketplace, normaliseUrl } from "./marketplace";
+import { Marketplace, normaliseUrl, validatePackage, type MarketplaceSource } from "./marketplace";
+import { FlashServerClient, SubmissionWatcher, serverBase } from "./flash-server";
+import { buildPackage, draftFor, guessKind } from "./plugin-builder";
+import type { Submission, SubmitResult } from "@shared/types";
 import { runSmoke } from "./smoke";
 import { iconCandidates, windowsAppDetails } from "./app-icon";
 import { Terminals } from "./terminal";
@@ -526,6 +529,35 @@ const scheduleUsage = () => {
   usageTimer = setInterval(() => void refreshCopilotUsage(), Math.max(5, u.refreshMinutes) * 60000);
 };
 
+// ---------------- Flash server (flash-server/API.md) ----------------
+const serverSecret = join(dataDir, "server.secret");
+/** Built-in default: package.json → flashmaster.server.url (a setting or policy `server.url` overrides it). */
+const repoServer = (() => { try { return JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8"))?.flashmaster?.server ?? {}; } catch { return {}; } })();
+const serverDefaultUrl = String(process.env.FLASH_SERVER_URL || repoServer.url || "").trim();
+const serverConfig = () => ({ url: serverBase(settings.get().server.url || serverDefaultUrl), token: secrets.get(serverSecret) });
+const flashServer = new FlashServerClient({
+  fetch: (url, init) => withProxyFallback(() => session.defaultSession, (u, i) => session.defaultSession.fetch(u, { ...i, redirect: "follow" } as any) as any)(url, init) as any,
+  config: serverConfig,
+});
+const submissionWatcher = new SubmissionWatcher(join(dataDir, "server", "submissions-seen.json"));
+let serverName = "";
+/** The server's display name (from /api/v1/health), refreshed now and then; "Flash server" until known. */
+async function refreshServerName(): Promise<void> {
+  if (!flashServer.configured()) return;
+  try { serverName = String((await flashServer.health()).name ?? "").trim(); } catch { /* keep the last one */ }
+}
+/** My submissions; status changes since last seen become notices. Concurrent callers share one request (one notice each). */
+let pollInFlight: Promise<Submission[]> | null = null;
+function pollSubmissions(): Promise<Submission[]> {
+  const cfg = serverConfig();
+  if (!cfg.url || !cfg.token) return Promise.resolve([]);
+  pollInFlight ??= flashServer.submissions().then((list) => {
+    for (const n of submissionWatcher.update(list)) emit({ type: "notice", level: n.level, text: n.text });
+    return list;
+  }).finally(() => { pollInFlight = null; });
+  return pollInFlight;
+}
+
 // ---------------- app updates (repository releases with latest.json) ----------------
 const updatesSession = () => session.fromPartition("persist:updates");
 const updateSecret = join(dataDir, "updates.secret");
@@ -533,7 +565,8 @@ const updateSecret = join(dataDir, "updates.secret");
 const repoUpdates = (() => { try { return JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8"))?.flashmaster?.updates ?? {}; } catch { return {}; } })();
 const updateFeed = () => {
   const u = settings.get().updates;
-  return { url: (u.feedUrl || process.env.FLASH_UPDATE_URL || repoUpdates.url || "").trim(), channel: (u.channel || repoUpdates.channel || "stable") as "stable" | "beta", token: secrets.get(updateSecret) };
+  return { url: (u.feedUrl || process.env.FLASH_UPDATE_URL || repoUpdates.url || "").trim(), channel: (u.channel || repoUpdates.channel || "stable") as "stable" | "beta", token: secrets.get(updateSecret),
+    server: serverConfig() };
 };
 const updater = new Updater({
   fetch: withProxyFallback(() => updatesSession(), (url, init) => updatesSession().fetch(url, { ...init, redirect: "follow", credentials: "include" } as any) as any) as any,
@@ -542,6 +575,7 @@ const updater = new Updater({
   portablePath: process.env.PORTABLE_EXECUTABLE_FILE,
   dataDir, feed: updateFeed,
   emit: (state) => emit({ type: "update.state", state }),
+  log: (m) => log("warn", m),
   spawnDetached: (cmd, args) => {
     void import("node:child_process").then(({ spawn }) => spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: false }).unref());
   },
@@ -596,7 +630,12 @@ const marketplace = new Marketplace({
     settings.update({ mcp: { external: s.external.filter((e) => !ids.includes(e.id)), disabled: s.disabled.filter((d) => !ids.includes(d)) } });
   },
 });
-const mpSources = () => settings.get().marketplace.sources;
+/** Settings marketplaces plus the Flash server (automatic source "flash-server", requests carry its token). */
+const mpSources = (): MarketplaceSource[] => {
+  const cfg = serverConfig();
+  const own = settings.get().marketplace.sources.filter((x) => x.id !== "flash-server");
+  return cfg.url ? [...own, { id: "flash-server", name: serverName || "Flash server", url: `${cfg.url}/marketplace`, department: "", enabled: true, token: cfg.token }] : own;
+};
 const mpSource = (id: string) => {
   const src = mpSources().find((x) => x.id === id);
   if (!src) throw new Error("unknown marketplace");
@@ -613,9 +652,10 @@ const mpState = () => ({
   updates: marketplace.updates().map((u) => ({ id: u.plugin.id, from: u.plugin.version, to: u.entry.version })),
 });
 async function checkPluginUpdates(): Promise<void> {
-  const m = settings.get().marketplace;
-  if (!m.sources.some((x) => x.enabled)) return;
-  await marketplace.refresh(m.sources);
+  const sources = mpSources();
+  if (!sources.some((x) => x.enabled)) return;
+  await refreshServerName();
+  await marketplace.refresh(mpSources());
   const ups = marketplace.updates();
   if (ups.length) emit({ type: "notice", level: "info", text: `${ups.length} plugin update(s) available — see Marketplace` });
 }
@@ -902,9 +942,44 @@ const api: FlashApi = {
   },
   copilotTokenSet: async () => existsSync(copilotSecret),
   marketplaceList: async (refresh) => {
-    if (refresh || !marketplace.cached().length) await marketplace.refresh(mpSources());
+    if (refresh || !marketplace.cached().length) {
+      await refreshServerName();
+      await marketplace.refresh(mpSources());
+      if (refresh) void pollSubmissions().catch((e) => log("warn", `submissions: ${String(e?.message ?? e)}`));
+    }
     return mpState();
   },
+  marketplaceSubmitPick: async (mode) => {
+    const smokePick = process.env.FLASH_SMOKE_SERVER ? process.env.FLASH_SMOKE_PICK : undefined; // screenshots: no native dialog
+    let paths: string[];
+    if (smokePick) paths = [smokePick];
+    else {
+      const r = mode === "folder"
+        ? await dialog.showOpenDialog(win!, { title: "Plugin folder (plugin.json, agents/, workflows/, skills/, scripts/ …)", properties: ["openDirectory"] })
+        : await dialog.showOpenDialog(win!, { title: "Agent, workflow or skill (.md) and scripts", properties: ["openFile", "multiSelections"],
+          filters: [{ name: "Plugin files", extensions: ["md", "py", "ps1", "sh", "js", "mjs", "bat", "cmd", "txt", "json", "yml", "yaml"] }] });
+      if (r.canceled || !r.filePaths.length) return null;
+      paths = r.filePaths;
+    }
+    return draftFor(mode === "folder" ? { kind: "folder", path: paths[0]! } : { kind: "files", files: paths.map((p) => ({ path: p, name: basename(p), kind: guessKind(p) })) });
+  },
+  marketplaceSubmit: async ({ source, meta, notes, dryRun }) => {
+    const { pkg, problems } = buildPackage(source, meta);
+    const v = validatePackage(pkg, { knownTools: knownTools(), builtinRoles: builtinNames(), submit: true });
+    const res: SubmitResult = { ok: false, errors: [...problems, ...v.errors], kinds: v.kinds, items: v.items };
+    if (res.errors.length || dryRun) return { ...res, ok: !res.errors.length };
+    if (!flashServer.configured()) return { ...res, errors: ["No Flash server configured (Settings → Flash server)"] };
+    try {
+      const submission = await flashServer.submit(pkg, notes);
+      log("info", `submitted ${pkg.id}@${pkg.version} to the Flash server (#${submission.id})`);
+      void pollSubmissions().catch(() => undefined);
+      return { ...res, ok: true, submission };
+    } catch (e: any) {
+      return { ...res, errors: [String(e?.message ?? e)] };
+    }
+  },
+  marketplaceSubmissions: async () => pollSubmissions(),
+  marketplaceWithdraw: async (id) => { const s = await flashServer.withdraw(id); void pollSubmissions().catch(() => undefined); return s; },
   marketplaceInstall: async (sourceId, pluginId) => {
     const rec = await marketplace.install(mpSource(sourceId), pluginId);
     log("info", `plugin installed: ${rec.id}@${rec.version} from ${rec.sourceName}`);
@@ -983,7 +1058,9 @@ const api: FlashApi = {
   updateInstall: async () => updater.install(),
   updateSignIn: async () => updateSignIn(),
   updateSetToken: async (token) => { await secrets.set(updateSecret, token.trim()); settings.update({ updates: { hasToken: !!token.trim() } }); void updater.check(); },
-  appInfo: async () => ({ version: app.getVersion(), dataDir, platform: `${process.platform}-${process.arch}` }),
+  serverTest: async () => { const r = await flashServer.test(); if (r.serverName) serverName = r.serverName; return r; },
+  serverSetToken: async (token) => { await secrets.set(serverSecret, token.trim()); settings.update({ server: { hasToken: !!token.trim() } }); },
+  appInfo: async () => ({ version: app.getVersion(), dataDir, platform: `${process.platform}-${process.arch}`, serverDefault: serverDefaultUrl }),
   windowState: async () => windowState(),
   windowControl: async (action) => {
     if (!win || win.isDestroyed()) return;
@@ -1007,7 +1084,7 @@ for (const [name, fn] of Object.entries(api)) {
  * Older Windows and Linux get an opaque window; the renderer then paints its own backdrop under the glass panels.
  */
 function windowMaterial(): WindowState["material"] {
-  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH) return "none";
+  if (!settings.get().general.windowGlass || process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER) return "none";
   if (process.platform === "darwin") return "vibrancy";
   if (process.platform === "win32") {
     const build = Number(process.getSystemVersion().split(".")[2] ?? 0);
@@ -1047,7 +1124,7 @@ function createWindow(): void {
   // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
-  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
+  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });
@@ -1122,7 +1199,7 @@ async function applyProxy(): Promise<void> {
   const fromEnv = envProxy();
   const value = n.proxy || fromEnv.proxy;
   // Marketplaces are internal servers (IP:port): never send them through the corporate proxy.
-  const mpHosts = settings.get().marketplace.sources.map((x) => { try { return new URL(normaliseUrl(x.url)).hostname; } catch { return ""; } }).filter(Boolean);
+  const mpHosts = mpSources().map((x) => { try { return new URL(normaliseUrl(x.url)).hostname; } catch { return ""; } }).filter(Boolean);
   const bypass = [n.noProxy || fromEnv.noProxy, ...mpHosts, "<local>"].filter(Boolean).join(",");
   const parsed = parseProxy(value, bypass);
   proxyPrimary = parsed?.config ?? { mode: "system" };
@@ -1182,7 +1259,7 @@ settings.onChange(() => void applyProxy());
 app.whenReady().then(async () => {
   // Self-signed / company-CA Jazz servers: accept their certificate only when the user turned it on, only for Jazz hosts.
   jazzSession().setCertificateVerifyProc((req, cb) => cb(settings.get().jazz.trustServerCert && jazzHosts().has(req.hostname) ? 0 : -3));
-  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret)]);
+  await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret), secrets.load(serverSecret)]);
   await applyProxy();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
@@ -1197,6 +1274,10 @@ app.whenReady().then(async () => {
   });
   void mcp.ensure().then((servers) => { emit({ type: "mcp.status", servers }); if (settings.get().exam.autoSetup) void runExamSetup(true, true); });
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
+  // Review status of my Flash server submissions: at start and every 15 minutes (status changes become notices).
+  const pollQuietly = () => void pollSubmissions().catch((e) => log("warn", `submissions: ${String(e?.message ?? e)}`));
+  setTimeout(pollQuietly, 8000);
+  setInterval(pollQuietly, 15 * 60000);
 });
 
 app.on("before-quit", () => { terminals.closeAll(); void orch.stopAll(); bridge.stop(); db.close(); });

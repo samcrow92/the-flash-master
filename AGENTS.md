@@ -6,6 +6,7 @@ TheFlashMaster = an Electron (main: TypeScript) + React desktop app that orchest
 - Backend: `src/main/orchestrator.ts` (turn engine), `src/main/harness/*` (ACP: Copilot, OpenCode, Cursor, Claude Code · Pi RPC · Duo · mock; `registry.ts` lists them), `src/main/db.ts` (node:sqlite, append migrations — never edit old ones; append the new hash to `tests/fixtures/migrations.sha256`), `src/main/tools.ts` (MCP tools exposed through `bridge.ts`), `src/main/mcp.ts` (server bootstrap), `src/main/index.ts` (wiring + IPC).
 - UI: `src/renderer/store.ts` (state + event reducer), `views/*`, `components/*`, `styles.css` (CSS variables, dark/light).
 - Python MCP servers: `mcp-servers/{vector-autosar,winidea,office,exam}`; shared stdio base in `mcp-servers/pycommon/mcp_stdio.py`.
+- Private release/update/marketplace server: `flash-server/` (contract `flash-server/API.md`; guide `docs/flash-server.md`). Its admin GUI lives in `flash-server/admin/`.
 - Roles: `agents/*.md`. Superpowers skills: `skills/superpowers/*.md`.
 
 Verify before claiming done: `npm run ci` (add `-- --smoke` to launch the app headlessly).

@@ -333,3 +333,67 @@ describe("local release script", () => {
     expect(read("scripts/run-pytest.mjs")).toMatch(/"scripts\/tests"/);
   });
 });
+
+describe("Flash server deploys on a stock Ubuntu", () => {
+  // install.sh copies flash-server/server to the box and runs it with the system python3: nothing is pip-installed there.
+  // The admin GUI and the app may only depend on the HTTP contract, and its tests run in CI with the other Python tests.
+  it("the server and the release publisher use only the Python standard library", () => {
+    const stdlib = new Set(["__future__", "argparse", "base64", "contextlib", "dataclasses", "datetime", "difflib", "email", "errno",
+      "functools", "hashlib", "hmac", "http", "io", "itertools", "json", "logging", "mimetypes", "os", "pathlib", "posixpath", "re",
+      "secrets", "shutil", "signal", "socket", "socketserver", "sqlite3", "stat", "sys", "tarfile", "tempfile", "threading", "time",
+      "typing", "urllib", "uuid", "importlib", "collections", "flashserver", "string", "math", "platform", "traceback", "copy", "enum", "textwrap"]);
+    const files = [...readdirSync(join(root, "flash-server/server/flashserver")).filter((f) => f.endsWith(".py")).map((f) => `flash-server/server/flashserver/${f}`),
+      "flash-server/tools/publish_release.py"];
+    for (const f of files) {
+      const mods = [...read(f).matchAll(/^\s*(?:from|import) (\w+)/gm)].map((m) => m[1]!).filter((m) => m !== "." );
+      expect(mods.filter((m) => !stdlib.has(m)), `third-party import in ${f}`).toEqual([]);
+    }
+    expect(read("scripts/run-pytest.mjs")).toMatch(/"flash-server"/);
+  });
+});
+
+describe("Flash server credentials", () => {
+  // flash-server/API.md: the server token (Bearer) and the GitHub token belong to different hosts. A token sent to the
+  // wrong host leaks it, so every update request is checked against the host it goes to — server up and server down.
+  it("the updater sends the server token only to the server and the GitHub token only to the repository feed", async () => {
+    const { Updater } = await import("../src/main/updater");
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const exe = Buffer.from("MZ");
+    const sha = createHash("sha256").update(exe).digest("hex");
+    const m = JSON.stringify({ version: "9.0.0", files: [{ kind: "setup", name: "TheFlashMaster-9.0.0-x64-setup.exe", sha256: sha, size: exe.length }] });
+    const rel = JSON.stringify({ tag_name: "v9.0.0", assets: [{ name: "latest.json", url: "https://gh.corp/api/v3/a/1" }, { name: "TheFlashMaster-9.0.0-x64-setup.exe", url: "https://gh.corp/api/v3/a/2" }] });
+    for (const serverUp of [true, false]) {
+      const calls: { url: string; auth?: string }[] = [];
+      const fetch = async (url: string, init?: { headers?: Record<string, string> }) => {
+        calls.push({ url, auth: init?.headers?.Authorization });
+        const r = (s: number, b: string | Buffer) => ({ ok: s < 400, status: s, headers: { get: () => "application/json" }, text: async () => b.toString(), arrayBuffer: async () => new Uint8Array(Buffer.from(b)).buffer, body: null });
+        if (url.startsWith("http://flash.corp")) return serverUp ? r(200, url.endsWith("latest.json") ? m : exe) : r(502, "{}");
+        return url.endsWith("/releases/latest") ? r(200, rel) : url.endsWith("/a/1") ? r(200, m) : r(200, exe);
+      };
+      const u = new Updater({ fetch, version: "0.1.0", mode: "installer", dataDir: mkdtempSync(join(tmpdir(), "inv-")), emit: () => {}, spawnDetached: () => {}, quit: () => {},
+        feed: () => ({ url: "https://gh.corp/team/tfm", channel: "stable", token: "GH-SECRET", server: { url: "http://flash.corp", token: "FS-SECRET" } }) });
+      await u.check();
+      await u.download();
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      for (const c of calls) {
+        if (c.url.startsWith("http://flash.corp/")) expect(c.auth, c.url).toBe("Bearer FS-SECRET");
+        else expect(c.auth ?? "", c.url).not.toMatch(/FS-SECRET/);
+        if (c.url.startsWith("http://flash.corp/")) expect(c.auth ?? "", c.url).not.toMatch(/GH-SECRET/);
+      }
+    }
+  });
+
+  it("the marketplace sends a source's token only to URLs under that source", () => {
+    const src = read("src/main/marketplace.ts");
+    expect(src).toMatch(/const own = !!src\.token && url\.startsWith\(`\$\{normaliseUrl\(src\.url\)\}\/`\)/);
+    expect(src).toMatch(/\.\.\.\(own \? \{ Authorization: `Bearer \$\{src\.token\}` \} : \{\}\)/);
+  });
+
+  it("build-index.mjs and the app accept the same script and file names", async () => {
+    const { SCRIPT_RE, FILE_RE } = await import("../src/main/marketplace");
+    const bi = read("scripts/marketplace/build-index.mjs");
+    expect(bi).toContain(`const SCRIPT_RE = /${SCRIPT_RE.source}/;`);
+    expect(bi).toContain(`const FILE_RE = /${FILE_RE.source}/;`);
+  });
+});

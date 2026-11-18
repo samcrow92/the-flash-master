@@ -1,0 +1,33 @@
+[Unit]
+Description=Flash Server (TheFlashMaster releases, update feed and marketplace)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=flash
+Group=flash
+Environment=PYTHONPATH=/opt/flash-server
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/var/lib/flash-server
+ExecStart=/usr/bin/python3 -m flashserver serve --config /etc/flash-server/config.json
+Restart=on-failure
+RestartSec=3
+# Hardening. If you move dataDir in config.json, add it to ReadWritePaths.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/flash-server
+UMask=0027
+# Ports below 1024 (e.g. "port": 80) need: AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

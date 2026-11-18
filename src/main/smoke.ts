@@ -5,12 +5,15 @@
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
+ *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
+ *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
  */
 import { app, BrowserWindow, type NativeImage } from "electron";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Orchestrator } from "./orchestrator";
 import type { Db } from "./db";
+import { startStubServer, STUB_TOKEN } from "./smoke-server";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -123,6 +126,63 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`document.querySelector('.memory-card')?.click()`);
       await sleep(800);
       await shot(join(graphDir, "5-code-map-entry.png"));
+      app.exit(0);
+      return;
+    }
+    const serverDir = process.env.FLASH_SMOKE_SERVER;
+    if (ok && serverDir) {
+      mkdirSync(serverDir, { recursive: true });
+      const stub = await startStubServer(join(app.getAppPath(), "marketplace-example"));
+      const setVal = (sel: string, v: string) => js(`(()=>{const el=document.querySelector(${JSON.stringify(sel)});if(!el)return false;const proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,${JSON.stringify(v)});el.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+      const step = async (name: string) => { await shot(join(serverDir, `${name}.png`)); log("info", `smoke-server: ${name}`); };
+      await js(`window.flash.api.updateSettings({ server: { url: ${JSON.stringify(stub.url)} } })`);
+      const tok = await js<string>(`window.flash.api.serverSetToken(${JSON.stringify(STUB_TOKEN)}).then(() => "ok", (e) => String(e?.message ?? e))`);
+      log("info", `smoke-server: stub ${stub.url}, token ${tok}`);
+      win.webContents.reload();
+      await sleep(2500);
+      await click("Settings", ".sidebar button");
+      await sleep(600);
+      await click("Flash server", ".tabs button");
+      await sleep(400);
+      await click("Test connection");
+      await sleep(1200);
+      await step("app-settings-server");
+      await click("Marketplace", ".sidebar button");
+      await sleep(2500);
+      await js(`[...document.querySelectorAll('.mp-card')].find(c=>c.textContent.includes('HIL test pack'))?.querySelector('button.primary')?.click()`);
+      await sleep(1500);
+      await js(`[...document.querySelectorAll('.mp-card')].find(c=>c.textContent.includes('HIL test pack'))?.click()`);
+      await sleep(600);
+      await step("app-marketplace-browse");
+      await click("Submit", ".page-header button");
+      await sleep(500);
+      await click("Choose folder");
+      await sleep(800);
+      await setVal(".submit-dialog input[placeholder='1.0.0']", "1.2.0");
+      await setVal(".submit-dialog textarea", "Adds the /hil-report skill and the collect-logs.py helper; tested on HIL rack 01.");
+      await click("Check", ".submit-dialog button");
+      await sleep(800);
+      await step("app-submit-dialog");
+      await click("Cancel", ".submit-dialog button");
+      await sleep(300);
+      await click("My submissions", ".seg button");
+      await sleep(1500);
+      await step("app-submissions");
+      // The reviewer asks for changes: the next refresh shows the feedback and a notice.
+      stub.setStatus(14, { status: "changes_requested", reviewer: "mari", reviewedAt: new Date(Date.UTC(2026, 10, 18, 10, 5)).toISOString(),
+        feedback: "Please make flash.ps1 stop after 3 retries and print the ECU's answer.\nAlso mention the required PowerShell version in the instructions." });
+      await click("Refresh", ".page-header button");
+      await sleep(2000);
+      await step("app-submission-changes-requested");
+      await js(`window.flash.api.updateCheck()`);
+      await sleep(5500); // let the notice toast fade
+
+      await click("Settings", ".sidebar button");
+      await sleep(600);
+      await click("About", ".tabs button");
+      await sleep(800);
+      await step("app-about-updates");
+      stub.server.close();
       app.exit(0);
       return;
     }

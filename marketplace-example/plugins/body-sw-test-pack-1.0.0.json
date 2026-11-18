@@ -15,5 +15,17 @@
       "file": "hil-campaign.md",
       "content": "---\nname: HIL campaign\ncommand: hil-campaign\ndescription: Prepare, run and report a HIL test campaign\n---\n1. List the requirements in scope and the matching CANoe test modules; flag requirements without coverage.\n2. Check the bench configuration (CANoe config, ECU software version) before running.\n3. Run the campaign, then report: pass/fail per module, new failures vs. the last campaign, and blocking defects with Jazz IDs.\n"
     }
+  ],
+  "skills": [
+    {
+      "file": "hil-report.md",
+      "content": "---\nname: HIL report\ndescription: Turn a HIL campaign result into the team's report format\n---\nWrite the campaign report in this order:\n1. Summary line: bench, ECU software version, pass/fail counts.\n2. New failures since the last campaign, each with the CANoe test module, the failing step and a Jazz defect ID (or \"no defect yet\").\n3. Requirements without coverage.\nKeep it under one page. Use `collect-logs.py` (listed in this plugin's scripts) to gather the CANoe logs first.\n"
+    }
+  ],
+  "scripts": [
+    {
+      "file": "collect-logs.py",
+      "content": "\"\"\"Collect the newest CANoe test logs into one folder for a HIL report.\n\nUsage: python collect-logs.py <canoe-log-folder> <output-folder> [--last N]\n\"\"\"\nimport shutil\nimport sys\nfrom pathlib import Path\n\n\ndef main(argv: list[str]) -> int:\n    if len(argv) < 2:\n        print(__doc__)\n        return 2\n    src, out = Path(argv[0]), Path(argv[1])\n    last = int(argv[argv.index(\"--last\") + 1]) if \"--last\" in argv else 20\n    logs = sorted(src.glob(\"**/*.blf\"), key=lambda p: p.stat().st_mtime, reverse=True)[:last]\n    out.mkdir(parents=True, exist_ok=True)\n    for p in logs:\n        shutil.copy2(p, out / p.name)\n    print(f\"copied {len(logs)} log(s) to {out}\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n"
+    }
   ]
 }

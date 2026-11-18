@@ -16,6 +16,9 @@ the same way .github/workflows/release.yml does it.
 
 Auth: GH_TOKEN / GITHUB_TOKEN (GH_ENTERPRISE_TOKEN for Enterprise hosts), else `gh auth token`.
 Works with github.com, GitHub Enterprise Server and <name>.ghe.com remotes. Standard library only.
+
+Private Flash server (flash-server/): --server URL --server-token TOKEN (or FLASH_SERVER_URL / FLASH_SERVER_TOKEN)
+publishes the same files there too (stable, or beta for pre-releases). --target server skips GitHub entirely.
 """
 from __future__ import annotations
 
@@ -40,6 +43,26 @@ from typing import Any, Callable, Iterable, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_DIR = ROOT / "release"
+SERVER_TOOLS = ROOT / "flash-server" / "tools"
+
+
+def flash_server_publisher() -> Any:
+    """flash-server/tools/publish_release.py (stdlib only), loaded on demand for --server releases."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("publish_release", SERVER_TOOLS / "publish_release.py")
+    if not spec or not spec.loader:
+        raise ReleaseError("flash-server/tools/publish_release.py is missing")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def release_targets(args: argparse.Namespace) -> tuple[bool, bool]:
+    """(github, server): --target wins; by default a configured server is published to as well as GitHub."""
+    target = args.target or ("both" if args.server else "github")
+    if target in ("server", "both") and not args.server:
+        raise ReleaseError("--target server needs a server", "Pass --server https://host or set FLASH_SERVER_URL.")
+    return target in ("github", "both"), target in ("server", "both")
 PRODUCT = "TheFlashMaster"
 MIN_NODE = (22, 13, 0)
 MIN_PYTHON = (3, 9)
@@ -654,6 +677,7 @@ class Plan:
     prerelease: bool = False
     notes: str = ""
     existing_draft: Optional[dict] = None
+    server_version: Optional[str] = None
     cleanups: list[Callable[[], None]] = field(default_factory=list)
 
 
@@ -663,6 +687,7 @@ class Release:
         self.ui = ui
         self.plan = Plan(remote_name=args.remote)
         self.gh: Optional[GitHub] = None
+        self.to_github, self.to_server = release_targets(args)
         self.log_path = RELEASE_DIR / "release-script.log"
 
     # 1 ── preflight
@@ -783,10 +808,28 @@ class Release:
                 check("Dependencies", deps)
         if not a.skip_checks and not a.dry_run and not which("py") and not which("python"):
             ui.warn("Python tests in `npm run ci` look for `py -3` / `python` with pytest; pass --skip-checks if missing")
+        def server() -> str:
+            pub = flash_server_publisher()
+            if not a.server_token:
+                raise ReleaseError("no admin token for the Flash server",
+                                   "Pass --server-token or set FLASH_SERVER_TOKEN (admin GUI → Connections → copy admin token).")
+            try:
+                current = pub.current_versions(a.server, a.server_token)
+            except pub.PublishError as e:
+                raise ReleaseError(f"Flash server: {e}")
+            self.plan.server_version = current.get("stable")
+            return f"({a.server}, stable {current.get('stable') or 'none'}, beta {current.get('beta') or 'none'})"
+
         check("Working tree", clean_tree)
-        if check("Remote", remote):
-            if check("Commit pushed", pushed):
-                check("GitHub access", auth)
+        if self.to_github:
+            if check("Remote", remote):
+                if check("Commit pushed", pushed):
+                    check("GitHub access", auth)
+        else:
+            self.plan.head_sha = capture(["git", "rev-parse", "HEAD"], check=False) or "local"
+            self.plan.branch = capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False)
+        if self.to_server:
+            check("Flash server", server)
         if not os.environ.get("CSC_LINK"):
             ui.info("CSC_LINK not set: the executables will be unsigned (Windows SmartScreen may warn users)")
         if problems:
@@ -796,9 +839,12 @@ class Release:
     # 2 ── version
     def choose_version(self) -> None:
         ui, a, gh = self.ui, self.args, self.gh
-        assert gh and self.plan.remote
         ui.step("Choose the release version")
-        releases = gh.releases()
+        if gh:
+            releases = gh.releases()
+        else:  # server-only: the server's stable release counts like a GitHub release
+            sv = self.plan.server_version
+            releases = [{"tag_name": f"v{sv}", "draft": False}] if sv else []
         pkg = json.loads((ROOT / "package.json").read_text("utf-8")).get("version")
         base = pick_base_version(releases, pkg)
         self.plan.base = base
@@ -842,7 +888,7 @@ class Release:
 
         # The tag must be free on the remote, and no published release may use it. A draft for it can be resumed.
         tag = version.tag
-        if capture(["git", "ls-remote", "--tags", self.plan.remote_name, f"refs/tags/{tag}"], check=False):
+        if gh and capture(["git", "ls-remote", "--tags", self.plan.remote_name, f"refs/tags/{tag}"], check=False):
             raise ReleaseError(f"tag {tag} already exists on {self.plan.remote_name}", "Choose another version.")
         same = [r for r in releases if r.get("tag_name") == tag]
         for r in same:
@@ -968,10 +1014,28 @@ class Release:
         ui.success(f"Published {ui.bold(v.tag)}")
         return rel["html_url"]
 
+    # 5b ── publish on the private Flash server (flash-server/)
+    def publish_server(self) -> str:
+        ui, a, v = self.ui, self.args, self.plan.version
+        assert v
+        channel = "beta" if self.plan.prerelease else "stable"
+        ui.step(f"Publish on the Flash server ({channel})")
+        if a.draft:
+            ui.info("--draft: the files are not sent to the Flash server (it has no drafts)")
+            return f"{a.server} (skipped: --draft)"
+        if not self.to_github and not a.yes and not ui.confirm(f"Publish {v} on {a.server}?"):
+            raise ReleaseError("cancelled before publishing", f"Nothing was sent. The build is in {RELEASE_DIR}.")
+        pub = flash_server_publisher()
+        try:
+            pub.publish(a.server, a.server_token, RELEASE_DIR, str(v), channel, self.plan.notes, log=ui.success)
+        except pub.PublishError as e:
+            raise ReleaseError(f"Flash server: {e}", f"Fix it and run again with --skip-build --version {v} --target server.")
+        return f"{a.server.rstrip('/')}/updates/{channel}/latest.json"
+
     # dry run
     def show_plan(self) -> None:
         ui, v, a = self.ui, self.plan.version, self.args
-        assert v and self.plan.remote
+        assert v
         ui.step("Plan (dry run, nothing changed)")
         steps = [f"npm version {v} --no-git-tag-version   (restored afterwards)"]
         if not a.skip_checks:
@@ -979,16 +1043,20 @@ class Release:
         else:
             steps.append("npx electron-vite build")
         steps += ["npx electron-builder --win --x64 --publish never",
-                  "node scripts/release-manifest.mjs + SHA256SUMS.txt",
-                  ("reuse draft " if self.plan.existing_draft else "create draft ") + f"{v.tag} on {self.plan.remote.slug} at {self.plan.head_sha[:8]}",
-                  "upload: " + ", ".join(expected_asset_names(v)) + " (+ .blockmap / latest.yml if built)",
-                  "leave as draft" if a.draft else f"publish {v.tag}" + (" as pre-release" if self.plan.prerelease else "")]
+                  "node scripts/release-manifest.mjs + SHA256SUMS.txt"]
+        if self.to_github and self.plan.remote:
+            steps += [("reuse draft " if self.plan.existing_draft else "create draft ") + f"{v.tag} on {self.plan.remote.slug} at {self.plan.head_sha[:8]}",
+                      "upload: " + ", ".join(expected_asset_names(v)) + " (+ .blockmap / latest.yml if built)",
+                      "leave as draft" if a.draft else f"publish {v.tag}" + (" as pre-release" if self.plan.prerelease else "")]
+        if self.to_server:
+            steps.append(f"upload to {a.server} and publish on " + ("beta" if self.plan.prerelease else "stable"))
         for i, s in enumerate(steps if not a.skip_build else steps[4:], 1):
             print(f"    {i}. {s}")
 
     def run(self) -> int:
         a, ui = self.args, self.ui
-        ui.step_total = 2 + (1 if a.dry_run else (0 if a.skip_build else 1) + 1 + (0 if a.no_publish else 1))
+        publishes = (1 if self.to_github else 0) + (1 if self.to_server else 0)
+        ui.step_total = 2 + (1 if a.dry_run else (0 if a.skip_build else 1) + 1 + (0 if a.no_publish else publishes))
         started = time.monotonic()
         try:
             self.preflight()
@@ -1004,9 +1072,12 @@ class Release:
                 print(f"\n{ui.green(ui.ok)} Built {self.plan.version} in {format_duration(time.monotonic() - started)}; "
                       f"not published (--no-publish). Files: {RELEASE_DIR}")
                 return 0
-            url = self.publish(assets)
+            urls = [self.publish(assets)] if self.to_github else []
+            if self.to_server:
+                urls.append(self.publish_server())
             print(f"\n{ui.green(ui.ok)} {ui.bold(f'Released {self.plan.version.tag}')} in {format_duration(time.monotonic() - started)}")  # type: ignore[union-attr]
-            print(f"    {url}")
+            for url in urls:
+                print(f"    {url}")
             return 0
         finally:
             for fn in reversed(self.plan.cleanups):
@@ -1025,7 +1096,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Examples:\n  py -3 scripts/release.py\n  py -3 scripts/release.py --dry-run\n"
                "  py -3 scripts/release.py --bump minor --notes \"New agent panel\"\n"
-               "  py -3 scripts/release.py --skip-build --version 0.3.1   (resume after a failed upload)",
+               "  py -3 scripts/release.py --skip-build --version 0.3.1   (resume after a failed upload)\n"
+               "  py -3 scripts/release.py --server https://flash.example --target server   (private server only)",
     )
     v = p.add_mutually_exclusive_group()
     v.add_argument("--bump", choices=["patch", "minor", "major"], help="pick the next version without asking")
@@ -1042,6 +1114,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--install", action="store_true", help="run `npm ci` when node_modules is missing")
     p.add_argument("--allow-dirty", action="store_true", help="allow uncommitted changes")
     p.add_argument("--allow-non-windows", action="store_true", help="try to build on macOS/Linux (needs Wine for NSIS)")
+    p.add_argument("--server", default=os.environ.get("FLASH_SERVER_URL", ""),
+                   help="private Flash server (flash-server/) to publish to as well; default: FLASH_SERVER_URL")
+    p.add_argument("--server-token", default=os.environ.get("FLASH_SERVER_TOKEN", ""),
+                   help="admin token for --server; default: FLASH_SERVER_TOKEN")
+    p.add_argument("--target", choices=["github", "server", "both"],
+                   help="where to publish (default: both when a server is set, else github)")
     p.add_argument("-y", "--yes", action="store_true", help="don't ask: suggested version, publish without confirmation")
     p.add_argument("--no-color", action="store_true", help="plain output")
     return p
