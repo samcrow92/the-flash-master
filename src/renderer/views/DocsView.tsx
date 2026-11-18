@@ -333,6 +333,7 @@ function Harnesses() {
       </tbody>
     </table>
     <p className="muted small">GitLab Duo works on the GitLab project behind the folder’s git remote, so Duo agents only start in GitLab repositories. Ask the coordinator to run one in a GitLab repo elsewhere on your disk (“have Duo look at C:\code\my-gitlab-repo”) and it starts the agent in that folder. For self-managed GitLab on another host name, add the host in <button className="link" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}>Settings → Harnesses → GitLab Duo</button>.</p>
+    <p className="muted small">To have the coordinator itself run on Duo, turn on <b>Coordinator on Duo</b> in <button className="link" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}>Settings → Harnesses → GitLab Duo</button>, or pick <code>duo</code> as a chat’s harness. It works in project chats only: Duo starts by itself in the project folder when the chat opens, on Opus 5.5 unless the chat picks another model. The master chat has no project folder, so it keeps its usual harness.</p>
 
     <h3>Cursor Agent</h3>
     <Status id="cursor" />

@@ -14,7 +14,7 @@ import type { HarnessAdapter, HarnessSession, PromptAttachment, SessionOptions, 
  * a folder whose remote is gitlab.com, a host named gitlab…, the instance in GITLAB_BASE_URL / GITLAB_URL, or one of
  * the hosts in Settings → Harnesses → GitLab Duo (for self-managed GitLab on another name).
  */
-export type DuoSettings = Settings["duo"];
+export type DuoSettings = Pick<Settings["duo"], "hosts">;
 
 /** Hosts of the remotes in `git remote -v` output (https, ssh:// and scp-style git@host:path). */
 export function remoteHosts(remotes: string): string[] {

@@ -42,6 +42,9 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
   const busy = chatAgents.some((a) => a.status === "running");
   const listRef = useRef<HTMLDivElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
+  // A coordinator on GitLab Duo starts in the project folder as soon as the chat opens or Duo is picked (project chats only).
+  const duoOn = !!chat?.projectId && (chat.harness === "duo" || !!st.settings?.duo?.coordinator);
+  useEffect(() => { if (duoOn) void api().prepareChat(chatId).catch(() => undefined); }, [chatId, duoOn, chat?.harness, chat?.agentRole, chat?.model, chat?.mode]);
 
   // Only the messages near the viewport are mounted; the list sticks to the latest message (on open, while a reply
   // streams, for new messages) until the user scrolls up to read, and scrolling back down re-attaches.
@@ -118,7 +121,9 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
               <span>Harness</span>
               <select value={chat.harness ?? ""} onChange={(e) => update({ harness: (e.target.value || null) as HarnessId | null })}>
                 <option value="">auto</option>
-                {HARNESS_IDS.filter((h) => h !== "mock" || st.settings?.advanced.showMockHarness).map((h) => <option key={h} value={h}>{h}</option>)}
+                {HARNESS_IDS.filter((h) => h !== "mock" || st.settings?.advanced.showMockHarness).map((h) => h === "duo" && !chat.projectId
+                  ? <option key={h} value={h} disabled title="GitLab Duo runs in project chats only">duo (project chats only)</option>
+                  : <option key={h} value={h}>{h}</option>)}
               </select>
             </label>
             <label className="ctl" title="Model id passed to the harness (blank = harness default)">

@@ -35,6 +35,13 @@ export interface Settings {
   /** GitLab Duo agents only start in GitLab repos (see harness/duo.ts). */
   duo: {
     hosts: string; // extra host names that are GitLab (self-managed), besides gitlab.com and hosts named gitlab…
+    /**
+     * Run the chat's coordinator on GitLab Duo in project chats. Duo starts by itself in the project folder when the chat
+     * opens or Duo is picked. Only project chats: the master chat and chats without a project keep their usual harness.
+     */
+    coordinator: boolean;
+    /** Model for a coordinator on Duo when the chat names none (default Opus 5.5). */
+    coordinatorModel: string;
   };
   chat: {
     maxAttachmentMB: number;
@@ -203,6 +210,9 @@ export interface Settings {
   };
 }
 
+/** Opus 5.5, the default model of a coordinator that runs on GitLab Duo. */
+export const DUO_COORDINATOR_MODEL = "claude-opus-5-5";
+
 const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ enabled, path: "", args: "", defaultModel });
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -223,7 +233,7 @@ export const DEFAULT_SETTINGS: Settings = {
     comfort: { harness: "", model: "sol", thinking: "low" },
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
-  duo: { hosts: "" },
+  duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
