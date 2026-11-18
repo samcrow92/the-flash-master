@@ -165,3 +165,66 @@ def test_main_reports_errors_with_hints(monkeypatch, capsys):
     assert release.main(["--no-color"]) == 1
     out = capsys.readouterr().out
     assert "something broke" in out and "do this to fix it" in out
+
+
+def _release_for_resume(monkeypatch, tmp_path, info):
+    monkeypatch.setattr(release, "BUILD_INFO", tmp_path / "build-info.json")
+    if info is not None:
+        (tmp_path / "build-info.json").write_text(json.dumps(info))
+    r = release.Release(release.build_parser().parse_args(["--skip-build"]), release.UI(False))
+    r.plan.source_ref, r.plan.source_sha = "origin/main", "b" * 40
+    return r
+
+
+def test_resume_tags_the_commit_the_files_were_built_from(monkeypatch, tmp_path):
+    r = _release_for_resume(monkeypatch, tmp_path, {"version": "0.3.1", "sha": "a" * 40})
+    r.use_built_commit(Version.parse("0.3.1"))
+    assert r.plan.source_sha == "a" * 40  # main moved on after the build; the tag still matches the binaries
+
+
+def test_resume_refuses_a_build_of_another_version_or_none(monkeypatch, tmp_path):
+    r = _release_for_resume(monkeypatch, tmp_path, {"version": "0.3.0", "sha": "a" * 40})
+    with pytest.raises(ReleaseError, match="holds a build of 0.3.0"):
+        r.use_built_commit(Version.parse("0.3.1"))
+    (tmp_path / "x").mkdir()
+    r = _release_for_resume(monkeypatch, tmp_path / "x", None)
+    with pytest.raises(ReleaseError, match="build-info.json is missing"):
+        r.use_built_commit(Version.parse("0.3.1"))
+
+
+def test_builds_from_the_remote_not_the_local_checkout():
+    src = Path(release.__file__).read_text("utf-8")
+    # no local-state gates: the release is a fresh worktree of <remote>/<ref>
+    assert "git status --porcelain" not in src and "--allow-dirty" not in src
+    assert '"worktree", "add", "--detach"' in src
+    assert release.build_parser().parse_args(["--ref", "v1.0.0"]).ref == "v1.0.0"
+
+
+GIT_REMOTE_V = """origin\thttps://github.com/samcrow92/the-flash-master (fetch)
+origin\thttps://github.com/samcrow92/the-flash-master (push)
+corporate\thttps://forvia-hella.ghe.com/team/the-flash-master.git (fetch)
+corporate\thttps://forvia-hella.ghe.com/team/the-flash-master.git (push)
+"""
+
+
+def test_lists_every_remote():
+    remotes = release.parse_remotes(GIT_REMOTE_V)
+    assert list(remotes) == ["origin", "corporate"]
+    assert release.describe_remote(remotes["corporate"]) == "forvia-hella.ghe.com/team/the-flash-master"
+
+
+def test_choose_remote(monkeypatch, capsys):
+    remotes = release.parse_remotes(GIT_REMOTE_V)
+    assert release.choose_remote(remotes, "corporate", interactive=True) == "corporate"
+    with pytest.raises(ReleaseError, match="have: origin, corporate"):
+        release.choose_remote(remotes, "upstream", interactive=False)
+    ui = release.UI(False)
+    assert release.choose_remote(remotes, None, interactive=False, ui=ui) == "origin"  # --yes / piped: origin
+    assert release.choose_remote({"corporate": "x"}, None, interactive=True, ui=ui) == "corporate"  # only one: no question
+    answers = iter(["7", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    assert release.choose_remote(remotes, None, interactive=True, ui=ui) == "corporate"
+    out = capsys.readouterr().out
+    assert "1) origin" in out and "2) corporate" in out and "forvia-hella.ghe.com/team/the-flash-master" in out
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    assert release.choose_remote(remotes, None, interactive=True, ui=ui) == "origin"  # Enter = origin
