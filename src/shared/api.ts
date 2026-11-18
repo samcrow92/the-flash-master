@@ -224,6 +224,10 @@ export interface FlashApi {
   updateSetToken(token: string): Promise<void>;
   /** Show which proxy the app uses for a URL and try to reach it (blank = the Jazz server). */
   proxyTest(url: string): Promise<{ ok: boolean; detail: string; config: string; resolved: string; source: string }>;
+  /** Documentation → Proxy setup: the proxy in the environment now (never the password) and whether this OS supports setting it. */
+  proxyEnvState(): Promise<{ supported: boolean; address: string; username: string; set: boolean }>;
+  /** Write HTTP_PROXY / HTTPS_PROXY = http://user:pass@host:port to the Windows user environment. */
+  proxyEnvSet(input: { address: string; username: string; password: string }): Promise<{ ok: boolean; detail: string; display: string; errors?: Partial<Record<"address" | "username" | "password", string>> }>;
   appInfo(): Promise<{ version: string; dataDir: string; platform: string }>;
   // window (custom title bar)
   windowState(): Promise<WindowState>;
@@ -252,7 +256,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "qmTest", "qmProjects", "scmTest", "getSettings",
-  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "appInfo",
+  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "proxyEnvState", "proxyEnvSet", "appInfo",
   "windowState", "windowControl", "terminalOpen", "terminalWrite", "terminalResize", "terminalClose",
 ];
 
