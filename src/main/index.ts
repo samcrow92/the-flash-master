@@ -30,6 +30,7 @@ import { ScmClient, type CliRunner } from "./scm";
 import { findScmCli, scmCliRunner } from "./scm-cli";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
+import { currentProxyEnv, setProxyEnv } from "./win-env";
 import { parseProxy, fallbacks, isProxySetupError, describe, explainProxyError, type ProxyCfg, type ParsedProxy } from "./proxy";
 import type { CopilotUsage } from "@shared/types";
 import { loadRoles, loadSkills, parseRole, roleMarkdown, slugRole, validateRole, type AgentSpec } from "./roles";
@@ -1054,6 +1055,13 @@ const api: FlashApi = {
   updateState: async () => updater.state,
   updateCheck: async () => updater.check(),
   proxyTest: async (url: string) => proxyTest(url),
+  proxyEnvState: async () => ({ supported: process.platform === "win32", ...currentProxyEnv() }),
+  proxyEnvSet: async (input) => {
+    const r = await setProxyEnv(input);
+    log(r.ok ? "info" : "warn", `proxy env: ${r.ok ? "set" : "not set"} ${r.display}`.trim()); // display is redacted
+    if (r.ok) await applyProxy();
+    return r;
+  },
   updateDownload: async () => updater.download(),
   updateInstall: async () => updater.install(),
   updateSignIn: async () => updateSignIn(),

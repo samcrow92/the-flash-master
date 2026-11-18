@@ -57,16 +57,23 @@ py -3 scripts/release.py --dry-run   # check tools, auth and version; build and 
 py -3 scripts/release.py             # suggests the next version, builds, uploads, publishes
 ```
 
-1. **Preflight**: Windows, git, Node 22.13+, `node_modules`, a clean working tree, the commit already pushed to the
-   remote, and write access to the repository. Credentials come from `GH_TOKEN` / `GITHUB_TOKEN`
-   (`GH_ENTERPRISE_TOKEN` for Enterprise hosts) or the GitHub CLI login (`gh auth login --hostname <host>`).
-2. **Version**: the newest release on the git remote (`--remote`, default `origin`) is the current version;
+It releases what is on the remote, never your local working copy: uncommitted or unpushed changes and the branch
+you have checked out don't matter.
+
+1. **Preflight**: Windows, git, Node 22.13+, the remote to release on (with several, e.g. `origin` and `corporate`,
+   it lists them to pick from; `--remote corporate` skips the question), write access there, and the commit to build: that remote's
+   default branch (`origin/main`), or `--ref <branch|tag|commit>`. Credentials come from `GH_TOKEN` /
+   `GITHUB_TOKEN` (`GH_ENTERPRISE_TOKEN` for Enterprise hosts) or the GitHub CLI login (`gh auth login --hostname <host>`).
+2. **Version**: the newest release on the chosen remote is the current version;
    package.json is used when there is none. It suggests the patch bump and offers minor, major or a custom version
    (`--bump minor`, `--version 1.0.0-beta.1`). Versions with a suffix are published as pre-releases.
-3. **Build**: stamps the version into package.json for the build only (restored afterwards), runs `npm run ci`
-   (`--skip-checks` to skip), `electron-builder --win --x64`, `release-manifest.mjs` and writes `SHA256SUMS.txt`.
-   Set `CSC_LINK` / `CSC_KEY_PASSWORD` to sign. Full output goes to `release/release-script.log`.
-4. **Publish**: creates a draft release on the pushed commit, uploads the executables, `latest.json`,
+3. **Build**: checks that commit out fresh into `release/.source` (a git worktree), runs `npm ci`, stamps the
+   version into its package.json, runs `npm run ci` (`--skip-checks` to skip), `electron-builder --win --x64`,
+   `release-manifest.mjs`, copies the files to `release/` and writes `SHA256SUMS.txt`. If the checks fail on your machine, it shows whether CI passed on
+   GitHub for that commit and asks whether to continue anyway. The checkout is removed
+   afterwards (kept after a failed build). Set `CSC_LINK` / `CSC_KEY_PASSWORD` to sign. Full output goes to
+   `release/release-script.log`.
+4. **Publish**: creates a draft release on the built commit, uploads the executables, `latest.json`,
    `SHA256SUMS.txt` (and `.blockmap` / `latest.yml` when the build makes them) with progress bars, checks every file
    arrived, then publishes. The tag only appears at that last step. If an upload fails the draft is kept:
    `py -3 scripts/release.py --skip-build --version <version>` resumes it.

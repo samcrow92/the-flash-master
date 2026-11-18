@@ -6,13 +6,17 @@
     py -3 scripts/release.py --no-publish    builds and packages locally, stops before GitHub
     py -3 scripts/release.py --bump minor --yes --notes "What changed"
 
-Steps: preflight checks -> choose version -> checks (npm run ci) -> build -> package (electron-builder)
--> latest.json + SHA256SUMS.txt -> draft release -> upload assets -> publish.
+Steps: preflight checks -> choose version -> fresh checkout of the remote branch -> npm ci -> checks (npm run ci)
+-> package (electron-builder) -> latest.json + SHA256SUMS.txt -> draft release -> upload assets -> publish.
+
+It builds what is on the remote (default: <remote>/<default branch>, or --ref), never your local working copy:
+uncommitted or unpushed changes, and whatever branch you have checked out, don't matter. The build runs in a
+separate git worktree under release/.source, which is removed after a successful build.
 
 The release is created as a draft first, so the tag only appears (and users only see it) once every file is
 uploaded and verified. If an upload fails, the draft stays: run the script again with --skip-build to resume.
-package.json / package-lock.json carry the release version only during the build and are restored afterwards,
-the same way .github/workflows/release.yml does it.
+The release version is stamped into package.json inside that checkout only, the same way
+.github/workflows/release.yml does it.
 
 Auth: GH_TOKEN / GITHUB_TOKEN (GH_ENTERPRISE_TOKEN for Enterprise hosts), else `gh auth token`.
 Works with github.com, GitHub Enterprise Server and <name>.ghe.com remotes. Standard library only.
@@ -43,6 +47,8 @@ from typing import Any, Callable, Iterable, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_DIR = ROOT / "release"
+SOURCE_DIR = RELEASE_DIR / ".source"  # git worktree the release is built in (release/ is gitignored)
+BUILD_INFO = RELEASE_DIR / "build-info.json"  # which version/commit the files in release/ were built from
 SERVER_TOOLS = ROOT / "flash-server" / "tools"
 
 
@@ -234,6 +240,67 @@ def parse_remote_url(url: str) -> Remote:
     if host.startswith("ssh."):  # ssh.github.com:443
         host = host[4:]
     return Remote(host, owner, repo)
+
+
+def list_remotes() -> dict[str, str]:
+    """{name: fetch URL} for every git remote, in `git remote` order."""
+    return parse_remotes(capture(["git", "remote", "-v"], check=False))
+
+
+def parse_remotes(text: str) -> dict[str, str]:
+    remotes: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] == "(fetch)":
+            remotes.setdefault(parts[0], parts[1])
+    return remotes
+
+
+def describe_remote(url: str) -> str:
+    try:
+        r = parse_remote_url(url)
+        return f"{r.host}/{r.slug}"
+    except ValueError:
+        return url
+
+
+def choose_remote(remotes: dict[str, str], wanted: Optional[str], interactive: bool, ui: Optional["UI"] = None) -> str:
+    """--remote wins; a single remote needs no question; several are listed to pick from (origin is the default)."""
+    names = list(remotes)
+    if wanted:
+        if wanted not in remotes:
+            raise ReleaseError(f"git remote `{wanted}` is not configured (have: {', '.join(names)})",
+                               "Pick one of those with --remote.")
+        return wanted
+    default = "origin" if "origin" in remotes else names[0]
+    if len(names) == 1 or not interactive or ui is None:
+        if len(names) > 1 and ui is not None:
+            ui.info(f"several remotes ({', '.join(names)}); using `{default}` (choose with --remote)")
+        return default
+    print(f"    {ui.bold('Release on which remote?')}")
+    for i, n in enumerate(names, 1):
+        print(f"      {ui.bold(str(i))}) {n:<12} {ui.dim(describe_remote(remotes[n]))}")
+    while True:
+        choice = ui.ask("Remote (number or name)", str(names.index(default) + 1))
+        if choice.isdigit() and 1 <= int(choice) <= len(names):
+            return names[int(choice) - 1]
+        if choice in remotes:
+            return choice
+        ui.fail(f"pick 1-{len(names)} or a remote name")
+
+
+def summarize_check_runs(runs: list[dict]) -> tuple[bool, str]:
+    """GitHub check runs of a commit -> (all passed, one line for the person)."""
+    if not runs:
+        return False, "No CI results on GitHub for this commit"
+    done = [r for r in runs if r.get("status") == "completed"]
+    good = [r for r in done if r.get("conclusion") in ("success", "skipped", "neutral")]
+    bad = [r.get("name", "?") for r in done if r not in good]
+    if bad:
+        return False, f"CI failed on GitHub for this commit: {', '.join(bad)}"
+    if len(done) < len(runs):
+        return False, f"CI is still running on GitHub for this commit ({len(done)} of {len(runs)} checks done)"
+    return True, f"CI passed on GitHub for this commit ({len(runs)} checks)"
 
 
 # ───────────────────────────── artifacts ─────────────────────────────
@@ -460,7 +527,7 @@ class Runner:
         self.ui = ui
         self.log_path = log_path
 
-    def run(self, title: str, args: list[str], hint: str = "", env: Optional[dict] = None) -> None:
+    def run(self, title: str, args: list[str], hint: str = "", env: Optional[dict] = None, cwd: Path = ROOT) -> None:
         exe = which(args[0])
         if not exe:
             raise ReleaseError(f"`{args[0]}` was not found on PATH", hint)
@@ -474,7 +541,7 @@ class Runner:
             log.write(f"\n===== {title}: {' '.join(args)} ({time.strftime('%Y-%m-%d %H:%M:%S')}) =====\n")
             log.flush()
             proc = subprocess.Popen(
-                [exe, *args[1:]], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                [exe, *args[1:]], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, env={**os.environ, "FORCE_COLOR": "0", **(env or {})},
             )
 
@@ -622,6 +689,22 @@ class GitHub:
                 self.request("DELETE", f"/repos/{self.remote.slug}/releases/assets/{a['id']}")
 
 
+def _force_remove(func: Callable, path: str, _exc: Any) -> None:
+    """shutil.rmtree helper: Windows marks some files in node_modules / .git read-only."""
+    try:
+        os.chmod(path, 0o700)
+        func(path)
+    except OSError:
+        pass
+
+
+def _rmtree(path: Path) -> None:
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_force_remove)
+    else:
+        shutil.rmtree(path, onerror=_force_remove)
+
+
 class _ProgressReader:
     def __init__(self, fh: Any, cb: Callable[[int], None]) -> None:
         self.fh, self.cb = fh, cb
@@ -670,8 +753,8 @@ def resolve_token(host: str) -> tuple[str, str]:
 class Plan:
     remote_name: str = "origin"
     remote: Optional[Remote] = None
-    head_sha: str = ""
-    branch: str = ""
+    source_ref: str = ""  # what gets built, e.g. origin/main
+    source_sha: str = ""
     base: Optional[BaseVersion] = None
     version: Optional[Version] = None
     prerelease: bool = False
@@ -685,10 +768,11 @@ class Release:
     def __init__(self, args: argparse.Namespace, ui: UI) -> None:
         self.args = args
         self.ui = ui
-        self.plan = Plan(remote_name=args.remote)
+        self.plan = Plan(remote_name=args.remote or "")
         self.gh: Optional[GitHub] = None
         self.to_github, self.to_server = release_targets(args)
         self.log_path = RELEASE_DIR / "release-script.log"
+        self.default_branch = "main"
 
     # 1 ── preflight
     def preflight(self) -> None:
@@ -739,50 +823,47 @@ class Release:
                 raise ReleaseError(f"Node {out} is too old; {'.'.join(map(str, MIN_NODE))}+ required", "Install Node.js 22 LTS from nodejs.org.")
             return f"({out})"
 
-        def deps() -> str:
-            if not (ROOT / "node_modules" / ".bin").is_dir():
-                if a.install:
-                    Runner(ui, self.log_path).run("npm ci", ["npm", "ci"], "Check your network/proxy and npm registry settings.")
-                    return "(installed)"
-                raise ReleaseError("node_modules is missing", "Run `npm ci` first, or pass --install.")
-            if not (ROOT / "node_modules" / "electron-builder").is_dir():
-                raise ReleaseError("electron-builder is not installed", "Run `npm ci`.")
-            return ""
-
-        def clean_tree() -> str:
-            out = capture(["git", "status", "--porcelain"], strip=False).rstrip()
-            if out:
-                files = ", ".join(line[3:] for line in out.splitlines()[:5])
-                if a.allow_dirty:
-                    ui.warn(f"uncommitted changes are NOT in the release tag but WILL be in the binaries: {files}")
-                    return "(dirty, allowed)"
-                raise ReleaseError(f"uncommitted changes: {files}",
-                                   "Commit or stash them (the binaries must match the tagged commit), or pass --allow-dirty.")
-            return ""
-
         def remote() -> str:
-            try:
-                url = capture(["git", "remote", "get-url", self.plan.remote_name])
-            except ReleaseError:
-                raise ReleaseError(f"git remote `{self.plan.remote_name}` is not configured", "Pick another with --remote, see `git remote -v`.")
+            remotes = list_remotes()
+            if not remotes:
+                raise ReleaseError("this repository has no git remote", "Add one: `git remote add origin <url>`.")
+            name = choose_remote(remotes, a.remote, interactive=sys.stdin.isatty() and not a.yes, ui=ui)
+            self.plan.remote_name = name
+            url = remotes[name]
             try:
                 self.plan.remote = parse_remote_url(url)
             except ValueError as e:
-                raise ReleaseError(str(e))
-            return f"({self.plan.remote_name} -> {self.plan.remote.web_url})"
+                if self.to_github:
+                    raise ReleaseError(str(e))
+                return f"({name} -> {url})"
+            return f"({name} -> {self.plan.remote.web_url})"
 
-        def pushed() -> str:
-            self.plan.head_sha = capture(["git", "rev-parse", "HEAD"])
-            self.plan.branch = capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False)
+        def source() -> str:
             try:
-                capture(["git", "fetch", "--quiet", "--tags", self.plan.remote_name])
+                capture(["git", "fetch", "--quiet", "--tags", "--force", self.plan.remote_name])
             except ReleaseError as e:
                 raise ReleaseError(f"git fetch {self.plan.remote_name} failed: {e.message}", "Check your network and git credentials.")
-            contains = capture(["git", "branch", "-r", "--contains", "HEAD"], check=False)
-            if not any(line.strip().startswith(self.plan.remote_name + "/") for line in contains.splitlines()):
-                raise ReleaseError(f"commit {self.plan.head_sha[:8]} is not on {self.plan.remote_name}",
-                                   f"Push it first (`git push {self.plan.remote_name} {self.plan.branch}`): the tag is created on GitHub.")
-            return f"({self.plan.branch} @ {self.plan.head_sha[:8]})"
+            r = self.plan.remote_name
+            if not self.gh:  # server-only: the remote's HEAD names the default branch
+                head = capture(["git", "symbolic-ref", "--short", f"refs/remotes/{r}/HEAD"], check=False)
+                self.default_branch = head.split("/", 1)[1] if "/" in head else self.default_branch
+            if a.ref:
+                candidates = [f"{r}/{a.ref}", f"refs/tags/{a.ref}", a.ref]
+            else:
+                candidates = [f"{r}/{self.default_branch}"]
+            for c in candidates:
+                sha = capture(["git", "rev-parse", "--verify", "--quiet", f"{c}^{{commit}}"], check=False)
+                if sha:
+                    self.plan.source_ref, self.plan.source_sha = c, sha
+                    break
+            else:
+                raise ReleaseError(f"`{a.ref or candidates[0]}` was not found on {r}",
+                                   "Pass --ref with a branch, tag or commit that exists on the remote.")
+            subject = capture(["git", "log", "-1", "--format=%s", self.plan.source_sha], check=False)
+            local = capture(["git", "rev-parse", "HEAD"], check=False)
+            if local and local != self.plan.source_sha:
+                ui.info(f"your local checkout ({local[:8]}) is not used; the release is built from {self.plan.source_ref}")
+            return f"({self.plan.source_ref} @ {self.plan.source_sha[:8]} \"{subject[:60]}\")"
 
         def auth() -> str:
             assert self.plan.remote
@@ -793,9 +874,7 @@ class Release:
             if not (perms.get("push") or perms.get("admin") or perms.get("maintain")):
                 raise ReleaseError(f"the token from {source} cannot write to {self.plan.remote.slug}",
                                    "Creating releases needs write access (Contents: read & write).")
-            default = info.get("default_branch")
-            if default and self.plan.branch and self.plan.branch != default:
-                ui.warn(f"releasing from `{self.plan.branch}`, not the default branch `{default}`")
+            self.default_branch = info.get("default_branch") or "main"
             return f"(via {source})"
 
         check("Python", py)
@@ -804,8 +883,6 @@ class Release:
         check("git", tool("git", "Install Git for Windows: https://git-scm.com/download/win"))
         if check("Node.js", node):
             check("npm / npx", lambda: (tool("npm", "Reinstall Node.js.")(), tool("npx", "Reinstall Node.js.")())[0])
-            if not a.skip_build:
-                check("Dependencies", deps)
         if not a.skip_checks and not a.dry_run and not which("py") and not which("python"):
             ui.warn("Python tests in `npm run ci` look for `py -3` / `python` with pytest; pass --skip-checks if missing")
         def server() -> str:
@@ -820,14 +897,8 @@ class Release:
             self.plan.server_version = current.get("stable")
             return f"({a.server}, stable {current.get('stable') or 'none'}, beta {current.get('beta') or 'none'})"
 
-        check("Working tree", clean_tree)
-        if self.to_github:
-            if check("Remote", remote):
-                if check("Commit pushed", pushed):
-                    check("GitHub access", auth)
-        else:
-            self.plan.head_sha = capture(["git", "rev-parse", "HEAD"], check=False) or "local"
-            self.plan.branch = capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False)
+        if check("Remote", remote) and (not self.to_github or check("GitHub access", auth)):
+            check("Source", source)
         if self.to_server:
             check("Flash server", server)
         if not os.environ.get("CSC_LINK"):
@@ -845,7 +916,10 @@ class Release:
         else:  # server-only: the server's stable release counts like a GitHub release
             sv = self.plan.server_version
             releases = [{"tag_name": f"v{sv}", "draft": False}] if sv else []
-        pkg = json.loads((ROOT / "package.json").read_text("utf-8")).get("version")
+        try:
+            pkg = json.loads(capture(["git", "show", f"{self.plan.source_sha}:package.json"])).get("version")
+        except (ReleaseError, ValueError):
+            pkg = None
         base = pick_base_version(releases, pkg)
         self.plan.base = base
         ui.info(f"Current version: {ui.bold(str(base.version))} {ui.dim('from ' + base.source)}")
@@ -909,45 +983,111 @@ class Release:
         elif a.notes:
             self.plan.notes = a.notes.strip()
         ui.success(f"Releasing {ui.bold(tag)}" + (" as a pre-release" if self.plan.prerelease else "")
-                   + f" from {self.plan.branch} @ {self.plan.head_sha[:8]}")
+                   + f" from {self.plan.source_ref} @ {self.plan.source_sha[:8]}")
+        if a.skip_build:
+            self.use_built_commit(version)
+
+    def use_built_commit(self, version: Version) -> None:
+        """--skip-build publishes the files already in release/: tag the commit they were built from."""
+        try:
+            info = json.loads(BUILD_INFO.read_text("utf-8"))
+        except (OSError, ValueError):
+            raise ReleaseError("release/build-info.json is missing", "Nothing to resume: run without --skip-build.")
+        if info.get("version") != str(version):
+            raise ReleaseError(f"release/ holds a build of {info.get('version')}, not {version}",
+                               f"Resume with --version {info.get('version')}, or run without --skip-build.")
+        if info.get("sha") != self.plan.source_sha:
+            self.ui.warn(f"{self.plan.source_ref} moved on since the build; tagging the built commit {info['sha'][:8]}")
+            self.plan.source_sha = info["sha"]
 
     # 3 ── build
+    def prepare_source(self, run: Callable[..., None]) -> None:
+        """A clean checkout of the release commit in release/.source (a git worktree), whatever the local state."""
+        sha = self.plan.source_sha
+        valid = (SOURCE_DIR / ".git").exists() and capture(
+            ["git", "-C", str(SOURCE_DIR), "rev-parse", "--is-inside-work-tree"], check=False) == "true"
+        if valid:
+            run("Check out the release commit", ["git", "-C", str(SOURCE_DIR), "checkout", "--detach", "--force", sha])
+            run("Clean the checkout", ["git", "-C", str(SOURCE_DIR), "clean", "-ffdxq", "-e", "node_modules"])
+        else:
+            if SOURCE_DIR.exists():
+                _rmtree(SOURCE_DIR)
+            capture(["git", "worktree", "prune"], check=False)
+            run(f"Check out {self.plan.source_ref} @ {sha[:8]}", ["git", "worktree", "add", "--detach", "--force", str(SOURCE_DIR), sha],
+                "Check that git can write to the release/ folder.")
+
     def build(self) -> None:
         ui, a, v = self.ui, self.args, self.plan.version
         assert v
-        ui.step("Build the Windows binaries")
+        ui.step(f"Build the Windows binaries from {self.plan.source_ref}")
         RELEASE_DIR.mkdir(exist_ok=True)
-        self.log_path.write_text(f"TheFlashMaster release {v} - {time.ctime()}\n", "utf-8")
+        self.log_path.write_text(f"TheFlashMaster release {v} from {self.plan.source_sha} - {time.ctime()}\n", "utf-8")
         ui.info(f"build log: {self.log_path}")
+        runner = Runner(ui, self.log_path)
+        self.prepare_source(runner.run)
 
-        # Same as release.yml: stamp the version for the build only, restore the files afterwards.
-        saved = {p: p.read_bytes() for p in (ROOT / "package.json", ROOT / "package-lock.json") if p.is_file()}
+        def run(title: str, args: list[str], hint: str = "") -> None:
+            runner.run(title, args, hint, cwd=SOURCE_DIR)
 
-        def restore() -> None:
-            for p, data in saved.items():
-                if p.read_bytes() != data:
-                    p.write_bytes(data)
-
-        self.plan.cleanups.append(restore)
-        run = Runner(ui, self.log_path).run
+        run("Install dependencies (npm ci)", ["npm", "ci", "--no-audit", "--no-fund"],
+            "Check your network/proxy and npm registry settings.")
         run(f"Set version {v}", ["npm", "version", str(v), "--no-git-tag-version", "--allow-same-version"])
-        run("Check Electron download", ["node", "scripts/ensure-electron.mjs"], "Run `npm ci` again; a proxy may block the Electron download.")
+        run("Check Electron download", ["node", "scripts/ensure-electron.mjs"], "A proxy may block the Electron download.")
         if a.skip_checks:
             ui.warn("skipping checks (--skip-checks)")
-        else:
-            run("Checks (typecheck, lint, tests, build)", ["node", "scripts/ci.mjs"],
-                "Fix the failing check, or pass --skip-checks if you already ran `npm run ci` on this commit.")
-        if a.skip_checks:
             run("Build (electron-vite)", ["npx", "electron-vite", "build"])
-        # ci.mjs already ran `electron-vite build` with the stamped version.
-        for stale in RELEASE_DIR.glob(f"{PRODUCT}-{v}-*"):
-            stale.unlink()  # never upload a leftover from an earlier attempt at this version
+        else:  # ci.mjs also runs `electron-vite build` with the stamped version
+            ci_ok, ci_note = self.remote_ci()
+            if ci_note:
+                (ui.success if ci_ok else ui.info)(ci_note)
+            try:
+                run("Checks (typecheck, lint, tests, build)", ["node", "scripts/ci.mjs"],
+                    "Fix the failing check on the branch, or pass --skip-checks if CI already passed on this commit.")
+            except ReleaseError:
+                # A test that only fails on this machine (slow disk, antivirus, proxy) shouldn't block a commit that
+                # CI already passed on every platform; let the person decide, and say what CI found.
+                if not sys.stdin.isatty() or a.yes:
+                    raise
+                question = ("The checks failed here but passed in CI on GitHub. Continue the release anyway?" if ci_ok
+                            else "The checks failed. Continue the release anyway?")
+                if not ui.confirm(question, default=False):
+                    raise
+                ui.warn("continuing without passing local checks")
+                run("Build (electron-vite)", ["npx", "electron-vite", "build"])
         run("Package installer + portable exe (electron-builder)", ["npx", "electron-builder", "--win", "--x64", "--publish", "never"],
-            "Close any running TheFlashMaster.exe from release/; check signing settings (CSC_LINK) if signing failed.")
+            "Check signing settings (CSC_LINK) if signing failed.")
         manifest_args = ["node", "scripts/release-manifest.mjs"] + (["--notes", self.plan.notes] if self.plan.notes else [])
         run("Update manifest (latest.json)", manifest_args)
-        restore()
-        ui.success("package.json restored")
+
+        # Bring the results into release/, replacing anything left from an earlier build.
+        for old in [*RELEASE_DIR.glob(f"{PRODUCT}-*"), RELEASE_DIR / "latest.json", RELEASE_DIR / "latest.yml", RELEASE_DIR / "SHA256SUMS.txt"]:
+            if old.is_file():
+                old.unlink()
+        built = SOURCE_DIR / "release"
+        for f in built.iterdir():
+            if f.is_file() and (f.name in ("latest.json", "latest.yml") or (f.name.startswith(f"{PRODUCT}-{v}-") and ".exe" in f.name)):
+                shutil.copy2(f, RELEASE_DIR / f.name)
+        BUILD_INFO.write_text(json.dumps({"version": str(v), "sha": self.plan.source_sha, "ref": self.plan.source_ref}), "utf-8")
+        ui.success(f"Copied the build to {RELEASE_DIR}")
+        self.remove_source()
+
+    def remote_ci(self) -> tuple[bool, str]:
+        """(all CI check runs on the release commit passed, a line saying so). Best effort: never fails the release."""
+        if not self.gh or not self.plan.remote:  # server-only release: GitHub isn't asked
+            return False, ""
+        try:
+            data = self.gh.request("GET", f"/repos/{self.plan.remote.slug}/commits/{self.plan.source_sha}/check-runs?per_page=100")
+        except ReleaseError:
+            return False, ""
+        return summarize_check_runs((data or {}).get("check_runs", []))
+
+    def remove_source(self) -> None:
+        """Drop the build checkout (a full node_modules) once its files are copied. A failed build keeps it."""
+        if SOURCE_DIR.exists():
+            capture(["git", "worktree", "remove", "--force", str(SOURCE_DIR)], check=False)
+            if SOURCE_DIR.exists():
+                _rmtree(SOURCE_DIR)
+            capture(["git", "worktree", "prune"], check=False)
 
     # 4 ── checksums
     def checksums(self) -> list[Path]:
@@ -984,12 +1124,12 @@ class Release:
         rel = self.plan.existing_draft
         if rel:
             rel = gh.request("PATCH", f"/repos/{slug}/releases/{rel['id']}", {
-                "target_commitish": self.plan.head_sha, "prerelease": self.plan.prerelease,
+                "target_commitish": self.plan.source_sha, "prerelease": self.plan.prerelease,
                 **({"body": self.plan.notes} if self.plan.notes else {})})
             ui.success(f"Reusing draft {rel['html_url']}")
         else:
             rel = gh.request("POST", f"/repos/{slug}/releases", {
-                "tag_name": v.tag, "target_commitish": self.plan.head_sha, "name": f"{PRODUCT} {v}",
+                "tag_name": v.tag, "target_commitish": self.plan.source_sha, "name": f"{PRODUCT} {v}",
                 "body": self.plan.notes, "draft": True, "prerelease": self.plan.prerelease,
                 "generate_release_notes": not self.plan.notes,
             })
@@ -1037,7 +1177,8 @@ class Release:
         ui, v, a = self.ui, self.plan.version, self.args
         assert v
         ui.step("Plan (dry run, nothing changed)")
-        steps = [f"npm version {v} --no-git-tag-version   (restored afterwards)"]
+        steps = [f"check out {self.plan.source_ref} @ {self.plan.source_sha[:8]} into release/.source, npm ci, "
+                 f"npm version {v} --no-git-tag-version"]
         if not a.skip_checks:
             steps.append("node scripts/ci.mjs                      (typecheck, lint, tests, build)")
         else:
@@ -1045,7 +1186,7 @@ class Release:
         steps += ["npx electron-builder --win --x64 --publish never",
                   "node scripts/release-manifest.mjs + SHA256SUMS.txt"]
         if self.to_github and self.plan.remote:
-            steps += [("reuse draft " if self.plan.existing_draft else "create draft ") + f"{v.tag} on {self.plan.remote.slug} at {self.plan.head_sha[:8]}",
+            steps += [("reuse draft " if self.plan.existing_draft else "create draft ") + f"{v.tag} on {self.plan.remote.slug} at {self.plan.source_sha[:8]}",
                       "upload: " + ", ".join(expected_asset_names(v)) + " (+ .blockmap / latest.yml if built)",
                       "leave as draft" if a.draft else f"publish {v.tag}" + (" as pre-release" if self.plan.prerelease else "")]
         if self.to_server:
@@ -1104,15 +1245,15 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--version", help="exact version to release, e.g. 0.4.0 or 0.4.0-beta.1")
     p.add_argument("--notes", help="release notes (also shown by the in-app updater); default: GitHub's generated notes")
     p.add_argument("--notes-file", help="read release notes from a file (Markdown)")
-    p.add_argument("--remote", default="origin", help="git remote to release to (default: origin)")
+    p.add_argument("--remote", help="git remote to build from and release to, e.g. origin or corporate "
+                                    "(asked when there are several; default origin)")
+    p.add_argument("--ref", help="branch, tag or commit on the remote to build (default: the repository's default branch)")
     p.add_argument("--prerelease", action="store_true", help="mark as pre-release (automatic for versions like 1.0.0-beta.1)")
     p.add_argument("--draft", action="store_true", help="upload everything but leave the release as a draft")
     p.add_argument("--dry-run", action="store_true", help="run the checks and show the plan; build and change nothing")
     p.add_argument("--no-publish", action="store_true", help="build and package locally, skip GitHub")
     p.add_argument("--skip-checks", action="store_true", help="skip `npm run ci` (typecheck, lint, tests) before packaging")
     p.add_argument("--skip-build", action="store_true", help="reuse the files already in release/ (resume a failed upload)")
-    p.add_argument("--install", action="store_true", help="run `npm ci` when node_modules is missing")
-    p.add_argument("--allow-dirty", action="store_true", help="allow uncommitted changes")
     p.add_argument("--allow-non-windows", action="store_true", help="try to build on macOS/Linux (needs Wine for NSIS)")
     p.add_argument("--server", default=os.environ.get("FLASH_SERVER_URL", ""),
                    help="private Flash server (flash-server/) to publish to as well; default: FLASH_SERVER_URL")
