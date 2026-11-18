@@ -137,3 +137,22 @@ def test_restore_rejects_unsafe_archive(tmp_path):
         tar.addfile(info, io.BytesIO(b"x"))
     code, out = run_cli("restore", str(evil), "--data-dir", str(tmp_path / "d"), "--json")
     assert code == 1 and not (tmp_path / "escape.txt").exists()
+
+
+def test_server_start_does_not_resolve_its_host_name(tmp_path, monkeypatch):
+    # macOS CI: HTTPServer.server_bind's socket.getfqdn() reverse lookup stalled the server start past 30 s.
+    import socket
+    from flashserver.core import Service
+    from flashserver.web import make_server
+
+    def no_dns(*_a, **_k):
+        raise AssertionError("getfqdn called while binding")
+
+    monkeypatch.setattr(socket, "getfqdn", no_dns)
+    svc = Service({"dataDir": str(tmp_path / "data"), "name": "t"})
+    srv = make_server(svc, "127.0.0.1", 0, quiet=True)
+    try:
+        assert srv.server_address[1] > 0
+    finally:
+        srv.server_close()
+        svc.close()
