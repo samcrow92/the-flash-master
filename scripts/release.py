@@ -231,7 +231,7 @@ def collect_assets(release_dir: Path, version: Version) -> list[Path]:
         raise ReleaseError(f"{release_dir} does not exist", "Build first (run without --skip-build).")
     v = str(version)
     found: list[Path] = []
-    for f in sorted(release_dir.iterdir()):
+    for f in sorted(release_dir.iterdir(), key=lambda p: p.name):  # by name: WindowsPath sorts case-insensitively
         if not f.is_file():
             continue
         n = f.name
