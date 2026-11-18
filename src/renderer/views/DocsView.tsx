@@ -4,11 +4,12 @@ import { Brain,
   AlertTriangle, Archive, AtSign, BookOpen, Bot, CircleCheck, CircleAlert, ClipboardList, Compass, Download, ExternalLink, FolderPlus, Gauge,
   KeyRound, LifeBuoy, ListChecks, Package, Loader2, LogIn, MousePointerClick, Paperclip, Plane, Puzzle, Rocket, RotateCcw, Settings, Sparkles, SquareKanban, Wrench, Zap,
   CornerDownRight, Leaf, Users, Lightbulb, FileText, FlaskConical, ScanSearch, ShieldCheck, Bug, Swords,
-  RoleIcon, User, ChevronRight, MessageCircle,
+  RoleIcon, User, ChevronRight, MessageCircle, Network, Eye, EyeOff,
 } from "../components/icons";
 import { AGENT_DOCS, type AgentDoc } from "./agentDocs";
 import { customAgents } from "../agentOverview";
 import type { RoleDef } from "@shared/types";
+import { validateProxyInput, type ProxyEnvInput } from "@shared/proxy-input";
 
 const CLI = {
   cursorInstall: "https://cursor.com/docs/cli/installation",
@@ -30,6 +31,7 @@ const DL = {
 
 const PAGES = [
   { id: "start", label: "Getting started", icon: Rocket },
+  { id: "proxy", label: "Proxy setup", icon: Network },
   { id: "install", label: "Install Copilot CLI", icon: Download },
   { id: "login", label: "Sign in to Copilot", icon: LogIn },
   { id: "harnesses", label: "Cursor, Claude Code & other CLIs", icon: Bot },
@@ -52,6 +54,7 @@ const PageLink = ({ to, children }: { to: Page; children: ReactNode }) => {
   return <button className="link" onClick={() => go(to)}>{children}</button>;
 };
 
+type ProxyState = { supported: boolean; address: string; username: string; set: boolean } | null;
 type Check = { found: boolean; path: string | null; version: string | null; signedIn: boolean; detail: string } | null;
 
 export function DocsView({ initialPage }: { initialPage?: string }) {
@@ -69,7 +72,9 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
     setChecking(true);
     try { setCheck(await api().checkHarness("copilot")); } finally { setChecking(false); }
   };
-  useEffect(() => { void run(); }, []);
+  const [proxy, setProxy] = useState<ProxyState>(null);
+  const loadProxy = () => { void api().proxyEnvState().then(setProxy).catch(() => setProxy(null)); };
+  useEffect(() => { void run(); loadProxy(); }, []);
 
   return (
     <div className="page docs">
@@ -86,11 +91,12 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
               ))}
             </Fragment>
           ))}
-          <StatusCard check={check} checking={checking} onCheck={run} onGo={setPage} />
+          <StatusCard check={check} checking={checking} proxy={proxy} onCheck={() => { void run(); loadProxy(); }} onGo={setPage} />
         </nav>
         <DocsNav.Provider value={setPage}>
         <article className="docs-body" key={page}>
           {page === "start" && <Start check={check} go={setPage} />}
+          {page === "proxy" && <ProxySetup onChanged={loadProxy} />}
           {page === "install" && <Install check={check} onChanged={run} />}
           {page === "login" && <Login check={check} checking={checking} onCheck={run} />}
           {page === "harnesses" && <Harnesses />}
@@ -107,12 +113,13 @@ export function DocsView({ initialPage }: { initialPage?: string }) {
   );
 }
 
-function StatusCard({ check, checking, onCheck, onGo }: { check: Check; checking: boolean; onCheck: () => void; onGo: (p: PageId) => void }) {
+function StatusCard({ check, checking, proxy, onCheck, onGo }: { check: Check; checking: boolean; proxy: ProxyState; onCheck: () => void; onGo: (p: PageId) => void }) {
   const projects = useStore((s) => s.projects.length);
   const Row = ({ ok, label, go }: { ok: boolean | null; label: string; go?: PageId }) => <StatusRow ok={ok} label={label} onClick={() => go && onGo(go)} />;
   return (
     <div className="docs-status">
       <div className="muted small">Your setup</div>
+      {proxy?.supported && <Row ok={proxy.set} label="Proxy set" go="proxy" />}
       <Row ok={checking && !check ? null : !!check?.found} label="Copilot CLI installed" go="install" />
       <Row ok={checking && !check ? null : !!check?.signedIn} label="Signed in to GitHub" go="login" />
       <Row ok={projects > 0} label="Project folder added" go="use" />
@@ -154,8 +161,66 @@ function Start({ check, go }: { check: Check; go: (p: PageId) => void }) {
       <button className="doc-card" onClick={() => go("login")}><LogIn size={22} /><b>2. Sign in</b><span>Connect Copilot CLI to your GitHub account once.</span>{check?.signedIn && <CircleCheck className="done" size={18} />}</button>
       <button className="doc-card" onClick={() => go("use")}><Rocket size={22} /><b>3. Start working</b><span>Add a project folder, open a chat and describe the task.</span></button>
     </div>
+    <p>Behind a company proxy? Do the <PageLink to="proxy">Proxy setup</PageLink> first, so downloads, Copilot CLI and the agents can reach the internet.</p>
     <p>Not sure which specialist to ask? See <PageLink to="agents">Agents &amp; when to use them</PageLink>. For feature work that must be right the first time, turn on the <PageLink to="superpowers">Superpowers workflow</PageLink>.</p>
     <Note>You need an active GitHub Copilot subscription. If you get Copilot through your company, the <b>Copilot CLI</b> policy must be enabled by your organization’s admins. <Ext href={DL.plans}>Copilot plans</Ext></Note>
+  </>;
+}
+
+type ProxyField = keyof ProxyEnvInput;
+
+function ProxySetup({ onChanged }: { onChanged: () => void }) {
+  const [v, setV] = useState<Record<ProxyField, string>>({ address: "", username: "", password: "" });
+  const [touched, setTouched] = useState<Partial<Record<ProxyField, boolean>>>({});
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [supported, setSupported] = useState(true);
+  const [res, setRes] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [serverErr, setServerErr] = useState<Partial<Record<ProxyField, string>>>({});
+  useEffect(() => {
+    void api().proxyEnvState().then((s) => {
+      setSupported(s.supported);
+      setV((x) => ({ ...x, address: x.address || s.address, username: x.username || s.username }));
+    }).catch(() => {});
+  }, []);
+  const errors = { ...validateProxyInput(v), ...serverErr };
+  const valid = !Object.keys(validateProxyInput(v)).length;
+  const field = (k: ProxyField, label: string, input: ReactNode) => (
+    <label className={`field ${touched[k] && errors[k] ? "invalid" : ""}`}>
+      {label}{input}{touched[k] && errors[k] && <span className="field-err">{errors[k]}</span>}
+    </label>
+  );
+  const onInput = (k: ProxyField) => (e: { target: { value: string } }) => { setV((x) => ({ ...x, [k]: e.target.value })); setServerErr({}); setRes(null); };
+  const apply = async () => {
+    setTouched({ address: true, username: true, password: true });
+    if (!valid) return;
+    setBusy(true);
+    try {
+      const r = await api().proxyEnvSet(v);
+      setRes(r); setServerErr(r.errors ?? {});
+      if (r.ok) { setV((x) => ({ ...x, password: "" })); setTouched({}); onChanged(); }
+    } catch (e) { setRes({ ok: false, detail: String((e as Error)?.message ?? e) }); } finally { setBusy(false); }
+  };
+  return <>
+    <h3>Proxy setup</h3>
+    <p>On the company network every connection to the internet goes through a proxy that asks for your Windows sign-in. Enter it once here and TheFlashMaster saves it in your <b>Windows environment variables</b> (<code>HTTP_PROXY</code> and <code>HTTPS_PROXY</code>), so Copilot CLI, the agents, git, npm and pip all use it.</p>
+    <form className="proxy-form panel" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void apply(); }}>
+      {field("address", "Proxy address", <input value={v.address} placeholder="proxy.company.com:3128" spellCheck={false} onChange={onInput("address")} onBlur={() => setTouched((t) => ({ ...t, address: true }))} />)}
+      <div className="proxy-row">
+        {field("username", "User name", <input value={v.username} placeholder="your Windows user" spellCheck={false} autoComplete="off" onChange={onInput("username")} onBlur={() => setTouched((t) => ({ ...t, username: true }))} />)}
+        {field("password", "Password", <span className="pw-wrap">
+          <input type={show ? "text" : "password"} value={v.password} autoComplete="new-password" onChange={onInput("password")} onBlur={() => setTouched((t) => ({ ...t, password: true }))} />
+          <button type="button" className="icon-btn ghost" title={show ? "Hide password" : "Show password"} aria-label={show ? "Hide password" : "Show password"} onClick={() => setShow((x) => !x)}>{show ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+        </span>)}
+      </div>
+      <div className="row gap wrap">
+        <button type="submit" className="primary" disabled={!valid || busy || !supported}>{busy ? <Loader2 size={15} className="spin" /> : <Network size={15} />} Set proxy variables</button>
+        {res && <span className={`small ${res.ok ? "ok-text" : "warn-text"}`}>{res.ok ? <CircleCheck size={14} /> : <CircleAlert size={14} />} {res.detail}</span>}
+        {!supported && <span className="small muted">Available on Windows only.</span>}
+      </div>
+    </form>
+    <p className="muted small">The value is written as <code>http://user:password@address</code>; special characters in the user name and password (such as <code>@ : \ %</code>) are encoded for you, so <code>DOMAIN\user</code> works as typed. Nothing is logged, and the password is not stored by TheFlashMaster itself.</p>
+    <Note kind="warn">Windows keeps these variables in plain text in your user profile. When your password changes, come back and set it again. Terminals, editors and agents that were already open need a restart to see the new value.</Note>
   </>;
 }
 
@@ -340,7 +405,7 @@ function Trouble() {
     <Q q="“delegate tool not available” / TheFlashMaster can’t start specialists">TheFlashMaster’s tools reach Copilot as MCP servers. If your organisation’s <b>MCP servers in Copilot</b> policy is off, Copilot blocks them all and the chat shows <i>“MCP servers blocked by policy”</i>. Ask your GitHub admin to enable that policy (organisation settings → Copilot → Policies). <b>Text mode</b> is the default and avoids this entirely: agents write <code>DELEGATE role: brief</code>, <code>AGENT … END</code> and <code>TOOL name {"…"}</code> lines and the app carries them out (Settings → Agents → Agent tools). With <i>MCP tools, text fallback</i>, run <b>Settings → MCP → Test tool servers</b> for other causes.</Q>
     <Q q="A specialist finished but delivered nothing / the coordinator went quiet">TheFlashMaster recovers it on its own: a specialist that ends without a report (or fails, or stays silent for twice the stuck-agent time) is first asked to deliver, then restarted on its task; the chat shows each attempt. If it still delivers nothing, the coordinator decides what's next (restart it with more context, give the task to another specialist, or go on) and tells you. A coordinator turn that tells you nothing gets one reminder, then a card. Set the number of attempts in Settings → Agents.</Q>
     <Q q="What is a “Needs you” card?">The coordinator can’t go on without you: missing access or credentials, a choice that changes what you asked for, or a step that can’t be undone. Specialists don’t ask you directly: their questions go to the coordinator, which untangles them first. The card says who asks, the question, why it waits and quick answers (the recommended one marked). Pick one or type your own; the answer goes back to the agent that asked.</Q>
-    <Q q="Nothing happens behind the company proxy">TheFlashMaster passes your <code>https_proxy</code> / <code>http_proxy</code> settings to Copilot CLI. You can also set a proxy in Settings → Network.</Q>
+    <Q q="Nothing happens behind the company proxy">Use <PageLink to="proxy">Proxy setup</PageLink> to save your proxy address and sign-in in the Windows environment. TheFlashMaster passes your <code>https_proxy</code> / <code>http_proxy</code> settings to Copilot CLI. You can also set a proxy for the app alone in Settings → Network.</Q>
     <Q q="Commands fail on Windows">Copilot CLI needs PowerShell 7. Install it from the official PowerShell releases on GitHub (see Install page).</Q>
     <Q q="The usage bar doesn’t show">The bar uses Copilot CLI’s own <code>/usage</code>. Older versions don’t offer it to apps — update Copilot CLI. Details in Settings → Usage.</Q>
     <Q q="An agent got confused or the chat is very long">Click <b>Reset context</b> (↺ next to the chat box) to start the agents fresh, keeping the messages visible.</Q>
