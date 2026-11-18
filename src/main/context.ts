@@ -271,6 +271,20 @@ STATUS: <state> | <what you are doing> | <next>
 - Keep paths and MR/issue numbers in STATUS lines; no secrets or tokens. Always finish with the result block.
 Example: STATUS: working | reading the CAN timeout handling in src/can_tp.c | then fix and run the unit tests`;
 
+/**
+ * GitLab Duo only: Duo's own instructions make it act like a lead agent (plan, ask the user, hand work out). Launched by
+ * TheFlashMaster it is always a specialist, so it is told plainly that the agent that delegated to it is the orchestrator.
+ */
+export const DUO_SPECIALIST_RULES = `## You are a specialist, not the orchestrator
+The agent that delegated to you is the orchestrator: it owns the plan, talks to the user and decides who does what.
+- Do the task in your brief, and only that task. Don't widen its scope or take over the overall plan.
+- Report back to the orchestrator: STATUS lines while you work, then your result block. The user doesn't read your reply.
+- Questions and blockers go to the orchestrator (a STATUS blocked line and a result block with status blocked or
+  needs_decision), never to the user: don't ask the user to confirm, choose or approve anything.
+- Don't plan work for other agents and don't delegate to them, unless the orchestrator asks you to in your brief or a message.
+- Work that falls outside your task (a follow-up, another repo, a bug you spotted): put it in your findings for the
+  orchestrator to decide, instead of starting it.`;
+
 /** The coordinator: owns the plan, untangles its specialists, and closes the loop with the user. */
 export const COORDINATOR_FEEDBACK_RULES = `## You run the crew; the user isn't a babysitter
 You own the plan. When a specialist asks a question, is blocked, fails or delivers nothing, handle it yourself first:
