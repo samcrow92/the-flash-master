@@ -58,6 +58,10 @@
       "url": "https://forvia-hella.ghe.com/marianmarcel-abagiu/the-flash-master",
       "channel": "stable",
       "_comment": "Set url to the GitHub repository whose releases carry latest.json, e.g. https://github.company.com/team/the-flash-master (github.com, GitHub Enterprise Server, <name>.ghe.com), or a web folder with latest.json."
+    },
+    "server": {
+      "url": "",
+      "_comment": "Optional Flash server (flash-server/API.md), e.g. http://10.20.30.40:8787: updates are checked there first (falling back to updates.url), its marketplace is listed automatically, and users submit plugins to it. Users add their token in Settings → Flash server; Settings or policy server.url override this default."
     }
   },
   "dependencies": {

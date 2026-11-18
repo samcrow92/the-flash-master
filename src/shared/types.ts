@@ -331,6 +331,10 @@ export interface UpdateState {
   checkedAt?: number;
   mode: "installer" | "portable" | "dev";
   feed: string;
+  /** Where the last check found its manifest: the Flash server (Settings → Flash server) or the repository feed. */
+  source?: "server" | "repository";
+  /** Why the Flash server was not used (it failed and the repository feed answered instead). */
+  serverError?: string;
 }
 
 /**
@@ -557,7 +561,7 @@ export interface HarnessModels {
 }
 
 // ---------------- marketplace ----------------
-export type PluginKind = "agent" | "workflow" | "instructions" | "mcp";
+export type PluginKind = "agent" | "workflow" | "skill" | "script" | "instructions" | "mcp" | "exam";
 
 /** One entry of a marketplace's index.json. */
 export interface PluginEntry {
@@ -571,6 +575,7 @@ export interface PluginEntry {
   package: string; // path relative to the marketplace URL
   sha256?: string;
   updated?: string;
+  author?: string;
 }
 
 /** A plugin package (the JSON file a PluginEntry points to). Content is inline so any static file server can host it. */
@@ -582,6 +587,11 @@ export interface PluginPackage {
   team?: string;
   agents?: { file: string; content: string }[];
   workflows?: { file: string; content: string }[];
+  /** Skills, installed like workflows (command = header `command:` or the file name without .md). */
+  skills?: { file: string; content: string }[];
+  /** Helper scripts, written to <dataDir>/plugins/<id>/scripts/<file>; agents are told where they are. */
+  scripts?: { file: string; content: string }[];
+  tags?: string[];
   instructions?: string;
   mcpServers?: { id: string; label?: string; command: string; args?: string; env?: string }[];
   /** Team EXAM setup: fills empty Settings → EXAM fields and triggers the automatic setup. */
@@ -606,6 +616,8 @@ export interface InstalledPlugin {
   installedAt: number;
   agents: string[]; // role names
   workflows: string[]; // skill commands
+  skills: string[]; // skill commands (from the package's skills array)
+  scripts: string[]; // script file names under plugins/<id>/scripts
   hasInstructions: boolean;
   instructionsEnabled: boolean;
   mcpServers: string[];
@@ -621,3 +633,34 @@ export interface MarketplaceListing {
   error: string | null;
   fetchedAt: number | null;
 }
+
+// ---------------- Flash server (flash-server/API.md) ----------------
+export type SubmissionStatus = "pending" | "approved" | "rejected" | "changes_requested" | "withdrawn";
+export interface Submission {
+  id: number;
+  pluginId: string;
+  version: string;
+  name: string;
+  kinds: PluginKind[];
+  status: SubmissionStatus;
+  notes: string;
+  feedback: string | null;
+  author: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewer: string | null;
+}
+export interface ServerTestResult {
+  ok: boolean;
+  detail: string;
+  url: string;
+  serverName?: string;
+  serverVersion?: string;
+  user?: { id: number; name: string; role: "user" | "admin" };
+}
+export type SubmitFileKind = "agent" | "workflow" | "skill" | "script" | "instructions";
+export interface SubmitMeta { id: string; name: string; version: string; description: string; team: string; tags: string[] }
+export type SubmitSource = { kind: "folder"; path: string } | { kind: "files"; files: { path: string; name: string; kind: SubmitFileKind }[] };
+/** What the Submit dialog shows after picking a folder or files (fields prefilled from plugin.json / the files). */
+export interface SubmitDraft { source: SubmitSource; meta: SubmitMeta; items: string[]; problems: string[] }
+export interface SubmitResult { ok: boolean; errors: string[]; kinds: PluginKind[]; items: string[]; submission?: Submission }

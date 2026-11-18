@@ -1,6 +1,6 @@
 import type {
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
-  Project, RoleDef, SkillDef, Task, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult, CodeGraphStatus,
+  Project, RoleDef, SkillDef, Task, Submission, ServerTestResult, SubmitDraft, SubmitMeta, SubmitResult, SubmitSource, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult, CodeGraphStatus,
 } from "./types";
 import type { DeepPartial, Settings } from "./settings";
 import type { ReviewComment } from "./review";
@@ -172,6 +172,14 @@ export interface FlashApi {
   marketplaceUpdateAll(): Promise<{ id: string; ok: boolean; error?: string }[]>;
   marketplaceTest(sourceId: string): Promise<{ ok: boolean; detail: string }>;
   pluginInstructions(pluginId: string, enabled: boolean): Promise<void>;
+  /** Pick a plugin folder (plugins-src/<id>/ layout) or single files for a submission; fields come prefilled. null = cancelled. */
+  marketplaceSubmitPick(mode: "folder" | "files"): Promise<SubmitDraft | null>;
+  /** Build the package, validate it with the install rules, and (unless dryRun) send it to the Flash server for review. */
+  marketplaceSubmit(input: { source: SubmitSource; meta: SubmitMeta; notes: string; dryRun?: boolean }): Promise<SubmitResult>;
+  /** My submissions on the Flash server, newest first (also refreshes the status-change notices). */
+  marketplaceSubmissions(): Promise<Submission[]>;
+  /** Withdraw a pending / changes-requested submission. */
+  marketplaceWithdraw(id: number): Promise<Submission>;
   listModels(harness: HarnessId, refresh?: boolean): Promise<HarnessModels>;
   instructionSetup(): Promise<{ harness: HarnessId; args: string[]; env: Record<string, string>; coverage: "full" | "partial" | "none"; note: string }[]>;
   allModels(): Promise<HarnessModels[]>;
@@ -224,13 +232,17 @@ export interface FlashApi {
   /** Sign in to the repository's GitHub (company SSO) in a window, for private/internal repositories. */
   updateSignIn(): Promise<{ ok: boolean; detail: string }>;
   updateSetToken(token: string): Promise<void>;
+  /** Flash server: GET /api/v1/health + /api/v1/me with the stored token. */
+  serverTest(): Promise<ServerTestResult>;
+  /** Flash server token, stored encrypted; empty string removes it. */
+  serverSetToken(token: string): Promise<void>;
   /** Show which proxy the app uses for a URL and try to reach it (blank = the Jazz server). */
   proxyTest(url: string): Promise<{ ok: boolean; detail: string; config: string; resolved: string; source: string }>;
   /** Documentation → Proxy setup: the proxy in the environment now (never the password) and whether this OS supports setting it. */
   proxyEnvState(): Promise<{ supported: boolean; address: string; username: string; set: boolean }>;
   /** Write HTTP_PROXY / HTTPS_PROXY = http://user:pass@host:port to the Windows user environment. */
   proxyEnvSet(input: { address: string; username: string; password: string }): Promise<{ ok: boolean; detail: string; display: string; errors?: Partial<Record<"address" | "username" | "password", string>> }>;
-  appInfo(): Promise<{ version: string; dataDir: string; platform: string }>;
+  appInfo(): Promise<{ version: string; dataDir: string; platform: string; serverDefault: string }>;
   // window (custom title bar)
   windowState(): Promise<WindowState>;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
@@ -256,9 +268,9 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
-  "marketplaceTest", "pluginInstructions", "listModels", "instructionSetup", "allModels",
+  "marketplaceTest", "pluginInstructions", "marketplaceSubmitPick", "marketplaceSubmit", "marketplaceSubmissions", "marketplaceWithdraw", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "qmTest", "qmProjects", "scmTest", "getSettings",
-  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "proxyTest", "proxyEnvState", "proxyEnvSet", "appInfo",
+  "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "serverTest", "serverSetToken", "proxyTest", "proxyEnvState", "proxyEnvSet", "appInfo",
   "windowState", "windowControl", "terminalOpen", "terminalWrite", "terminalResize", "terminalClose",
 ];
 

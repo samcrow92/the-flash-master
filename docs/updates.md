@@ -96,6 +96,16 @@ Users need read access to the releases. Two ways, both in **Settings → About**
 Copy the three files to any web folder and set the update source to that folder (or its `latest.json`).
 File names in `latest.json` are resolved relative to it; `baseUrl` in the manifest can point elsewhere.
 
+## 6. Flash server (optional)
+
+When a Flash server is set (**Settings → Flash server**, `package.json → flashmaster.server.url`, or the policy key
+`server.url`), the app checks `<server>/updates/<channel>/latest.json` first and downloads the release files from the
+same folder, sending the user's server token (`Authorization: Bearer …`). If the server can't be reached or answers
+with an HTTP error, the app falls back to the repository feed above (when one is configured). **About → Updates**
+shows which source answered (*from Flash server* / *from repository*) and why the server was skipped.
+The server token only goes to the server and the GitHub token/sign-in only to the repository; the two never mix.
+Publishing releases to the server: see `flash-server/API.md` (Releases) and the server guide.
+
 ## Behaviour
 
 - Checks at start (after ~15 s) and every 6 hours; downloads in the background (can be turned off).

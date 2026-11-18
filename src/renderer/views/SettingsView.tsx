@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Settings as SettingsIcon } from "../components/icons";
-import type { CopilotBilling, DriveMode, HarnessId, HarnessStatus } from "@shared/types";
+import type { CopilotBilling, DriveMode, HarnessId, HarnessStatus, ServerTestResult } from "@shared/types";
 import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import type { ExamSetupResult } from "@shared/api";
@@ -15,7 +15,7 @@ import { configUri, isGcWebLink } from "@shared/rm-config";
 
 export const TABS = [
   ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["usage", "Usage"], ["permissions", "Permissions"],
-  ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
+  ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["server", "Flash server"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
 ] as const;
 
 type Path = string;
@@ -50,6 +50,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
           {tab === "permissions" && <Permissions {...f} />}
           {tab === "mcp" && <Mcp {...f} />}
           {tab === "marketplace" && <MarketplaceSettings {...f} />}
+          {tab === "server" && <ServerSettings f={f} />}
           {tab === "integrations" && <Integrations {...f} />}
           {tab === "network" && <Network {...f} />}
           {tab === "data" && <Data {...f} />}
@@ -498,6 +499,47 @@ function MarketplaceSettings(f: F) {
   </>;
 }
 
+/** Flash server (flash-server/API.md): updates, the "flash-server" marketplace, submissions. */
+function ServerSettings({ f }: { f: F }) {
+  const st = useStore();
+  const [token, setToken] = useState("");
+  const [test, setTest] = useState<ServerTestResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [def, setDef] = useState("");
+  useEffect(() => { void api().appInfo().then((i) => setDef(i.serverDefault)); }, []);
+  const runTest = async () => { setBusy(true); try { setTest(await api().serverTest()); } catch (e: any) { setTest({ ok: false, url: "", detail: String(e?.message ?? e) }); } finally { setBusy(false); } };
+  const lockedUrl = f.locked("server.url");
+  return <>
+    <p className="muted">A Flash server is your team's private hub: app updates, a marketplace of reviewed agents, workflows, skills and scripts, and
+      submissions from the app (Marketplace → Submit). Ask your admin for the address and a personal token.</p>
+    <Row label="Server URL" hint={def ? `Default from this build: ${def}. Leave empty to use it.` : "e.g. http://10.20.30.40:8787 or https://flash.company.com"}>
+      <Text f={f} path="server.url" placeholder={def || "http://flash-server:8787"} /></Row>
+    {lockedUrl && <div className="muted small row gap-s"><Lock size={12} /> The server address is managed by your organisation.</div>}
+    <Row label="Token" hint={f.s.server.hasToken ? "A token is stored (encrypted). Paste a new one to replace it, or save empty to remove." : "Your personal token (fs_…), shown once by the admin when your account was created."}>
+      <div className="row gap"><input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={f.s.server.hasToken ? "••••••" : "fs_…"} />
+        <button onClick={async () => { await api().serverSetToken(token); setToken(""); st.setSettings((await api().getSettings()).settings); setTest(null); }}>Save</button></div>
+    </Row>
+    <div className="row gap">
+      <button className="primary" disabled={busy || !(f.s.server.url || def)} onClick={() => void runTest()}>{busy ? <Loader2 size={14} className="spin" /> : <Zap size={14} />} Test connection</button>
+    </div>
+    {test && (
+      <div className={`panel server-status ${test.ok ? "ok" : "bad"}`}>
+        <div className="row gap-s"><StatusMark state={test.ok ? "ok" : "fail"} /> <strong>{test.ok ? "Connected" : "Not connected"}</strong></div>
+        <div className="small">{test.detail}</div>
+        {(test.serverName || test.user) && <div className="muted small">
+          {test.serverName && <>Server: <b>{test.serverName}</b>{test.serverVersion ? ` ${test.serverVersion}` : ""} · </>}
+          <code>{test.url}</code></div>}
+      </div>
+    )}
+    <h4>What the server is used for</h4>
+    <ul className="small muted">
+      <li>Updates come from the server first (<code>/updates/&lt;channel&gt;/latest.json</code>); if it can't be reached, the repository feed in About is used.</li>
+      <li>The server's catalogue appears in Marketplace as its own source; your token is sent only to this server.</li>
+      <li>Marketplace → <b>Submit</b> sends a plugin for review; <b>My submissions</b> shows the reviewer's feedback, and you get a notice when the status changes.</li>
+    </ul>
+  </>;
+}
+
 function BillingDetail({ b }: { b: CopilotBilling }) {
   const unit = unitName(b);
   const fmt = (v: number) => (Math.round(v * 100) / 100).toLocaleString();
@@ -854,7 +896,9 @@ function Updates({ f }: { f: F }) {
       {u?.error && <div className="warn-note small">{u.error}</div>}
       {u?.needsSignIn && <div className="row gap"><button className="primary" onClick={() => run(async () => { const r = await api().updateSignIn(); st.toast(r.ok ? "info" : "error", r.detail); })}>Sign in to GitHub</button>
         <span className="muted small">The repository is private or internal — sign in once (company SSO works), or set a token below.</span></div>}
-      <div className="muted small">Source: <code>{u?.feed || "not set"}</code></div>
+      <div className="muted small update-source">Source: {u?.source === "server" ? <span className="pill green">from Flash server</span> : u?.source === "repository" ? <span className="pill">from repository</span> : null}
+        <code>{u?.feed || "not set"}</code></div>
+      {u?.serverError && u.source === "repository" && <div className="muted small">The Flash server could not be used ({u.serverError}), so the repository feed answered.</div>}
     </div>
     <Row label="Check automatically" hint="At start and every 6 hours."><Bool f={f} path="updates.autoCheck" /></Row>
     <Row label="Download in the background" hint="Installing always asks first."><Bool f={f} path="updates.autoDownload" /></Row>
@@ -869,7 +913,7 @@ function Updates({ f }: { f: F }) {
 }
 
 function About({ f }: { f: F }) {
-  const [info, setInfo] = useState<{ version: string; dataDir: string; platform: string } | null>(null);
+  const [info, setInfo] = useState<{ version: string; dataDir: string; platform: string; serverDefault: string } | null>(null);
   useEffect(() => { void api().appInfo().then(setInfo); }, []);
   return <div>
     <h3 className="row gap-s"><span className="brand-mark"><Zap size={17} strokeWidth={2.2} /></span> TheFlashMaster {info?.version}</h3>

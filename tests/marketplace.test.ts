@@ -72,23 +72,29 @@ describe("marketplace", () => {
     expect(l.error).toBeNull();
     expect(l.url).toBe(`http://127.0.0.1:${port}`);
     expect(l.plugins.map((p) => [p.id, p.version, p.kinds])).toEqual([
-      ["body-sw-test-pack", "1.0.0", ["agent", "workflow"]], ["diag-team-rules", "2.1.0", ["instructions"]], ["exam-team-setup", "1.0.0", ["exam"]]]);
+      ["body-sw-test-pack", "1.0.0", ["agent", "workflow", "skill", "script"]], ["diag-team-rules", "2.1.0", ["instructions"]], ["exam-team-setup", "1.0.0", ["exam"]]]);
     expect(l.plugins.every((p) => /^[0-9a-f]{64}$/.test(p.sha256!))).toBe(true);
   });
 
-  it("installs agents, workflows and instructions, then uninstalls exactly them", async () => {
-    const { mp, src, rolesDir, skillsDir } = setup();
+  it("installs agents, workflows, skills, scripts and instructions, then uninstalls exactly them", async () => {
+    const { mp, src, rolesDir, skillsDir, data } = setup();
     const rec = await mp.install(src, "body-sw-test-pack");
-    expect(rec).toMatchObject({ agents: ["hil-tester"], workflows: ["hil-campaign"], sourceName: "Body" });
+    expect(rec).toMatchObject({ agents: ["hil-tester"], workflows: ["hil-campaign"], skills: ["hil-report"], scripts: ["collect-logs.py"], sourceName: "Body" });
     expect(loadRoles(join(ROOT, "agents"), rolesDir).find((r) => r.name === "hil-tester")).toMatchObject({ title: "HIL Test Engineer (Body)", source: "user" });
-    expect(loadSkills(skillsDir).map((s) => s.command)).toEqual(["hil-campaign"]);
+    expect(loadSkills(skillsDir).map((s) => s.command)).toEqual(["hil-campaign", "hil-report"]);
+    const script = join(data, "plugins", "body-sw-test-pack", "scripts", "collect-logs.py");
+    expect(readFileSync(script, "utf8")).toContain("def main");
+    // Agents are told where the plugin's scripts are.
+    expect(mp.instructions()).toContain(script);
     await mp.install(src, "diag-team-rules");
     expect(mp.instructions()).toContain("DID_<0xNNNN>_<Name>");
     mp.setInstructionsEnabled("diag-team-rules", false);
-    expect(mp.instructions()).toBe("");
+    expect(mp.instructions()).not.toContain("DID_<0xNNNN>_<Name>");
     mp.uninstall("body-sw-test-pack");
     expect(existsSync(join(rolesDir, "hil-tester.md"))).toBe(false);
     expect(existsSync(join(skillsDir, "hil-campaign.md"))).toBe(false);
+    expect(existsSync(join(skillsDir, "hil-report.md"))).toBe(false);
+    expect(existsSync(script)).toBe(false);
     expect(mp.installed().map((p) => p.id)).toEqual(["diag-team-rules"]);
   });
 

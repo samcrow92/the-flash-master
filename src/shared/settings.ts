@@ -97,6 +97,11 @@ export interface Settings {
     feedUrl: string; // override of the repository's update source (package.json → flashmaster.updates.url)
     hasToken: boolean; // a read-only GitHub token is stored (encrypted)
   };
+  /** Flash server (flash-server/API.md): updates, marketplace source "flash-server", submissions. Default url: package.json → flashmaster.server.url. */
+  server: {
+    url: string; // "" = the repository's default (package.json → flashmaster.server.url), if any
+    hasToken: boolean; // the server token is stored (encrypted), like the updater token
+  };
   usage: {
     copilotMeter: boolean; // show Copilot usage (from Copilot's /usage and session log) under the chat box
     refreshMinutes: number; // 0 = only manual refresh
@@ -238,6 +243,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
+  server: { url: "", hasToken: false },
   usage: { copilotMeter: true, refreshMinutes: 30, onlyIfAdvertised: true, includedCredits: 0 },
   tokens: {
     dailyBudget: 0,
