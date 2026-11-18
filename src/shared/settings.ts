@@ -42,6 +42,8 @@ export interface Settings {
     coordinator: boolean;
     /** Model for a coordinator on Duo when the chat names none (default Opus 5.5). */
     coordinatorModel: string;
+    /** Extra instructions for the coordinator on Duo, sent after its orchestrator brief (how you want it to plan and delegate). */
+    orchestratorRules: string;
   };
   chat: {
     maxAttachmentMB: number;
@@ -238,7 +240,7 @@ export const DEFAULT_SETTINGS: Settings = {
     comfort: { harness: "", model: "sol", thinking: "low" },
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
-  duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL },
+  duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL, orchestratorRules: "" },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },

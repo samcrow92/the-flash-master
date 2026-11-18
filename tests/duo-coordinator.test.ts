@@ -89,9 +89,15 @@ describe("coordinator on GitLab Duo", () => {
     await until(() => coordReplies(db, chat.id)[0]?.status === "done");
     expect(starts).toHaveLength(1); // the turn used the session Duo started with
     expect(prompts[0]).toContain("## Delegation (text mode)");
-    expect(prompts[0]).toContain("## You run the crew");
+    expect(prompts[0]).not.toContain("## You run the crew"); // the Duo orchestrator brief takes its place
     // The master chat's coordinator is the orchestrator: none of the Duo specialist brief.
     expect(prompts[0]).not.toContain("You are a specialist, not the orchestrator");
+    // Mari: the Duo coordinator always knows it is the orchestrator, and uses TheFlashMaster's tools to do it.
+    expect(prompts[0]).toContain("## You are the orchestrator");
+    expect(prompts[0]).toMatch(/always the orchestrator, never a specialist/);
+    for (const tool of ["agent_status", "message_agent", "list_roles", "memory_search", "knowledge_read", "code_graph", "ask_user"])
+      expect(prompts[0]).toContain(tool);
+    expect(prompts[0]).toMatch(/DELEGATE, AGENT and TOOL lines run when your turn ends/);
     expect(coordReplies(db, chat.id)[0]!.content).toContain("Goal was:");
   }, 30000);
 
@@ -144,5 +150,41 @@ describe("coordinator on GitLab Duo", () => {
     expect(r.ready).toBe(false);
     expect(r.error).toMatch(/only runs in GitLab repositories/);
     expect(systemNotes(db, chat.id).join("\n")).toMatch(/GitLab Duo didn't start in/);
+  }, 30000);
+
+  it("the Duo coordinator gets the orchestrator brief with your own instructions after it, also in auto tool mode", async () => {
+    const prompts: string[] = [];
+    const real = DuoSession.prototype.prompt;
+    vi.spyOn(DuoSession.prototype, "prompt").mockImplementation(function (this: DuoSession, text: string, att?: any) {
+      prompts.push(text);
+      return real.call(this, text, att);
+    });
+    const { db, orch, chat } = setup({ agents: { toolMode: "auto" }, duo: { coordinator: true, orchestratorRules: "Always start a reviewer after a coder." } });
+    cleanup = () => orch.stopAll();
+    await orch.sendUserMessage(chat.id, "Plan it", null);
+    await until(() => coordReplies(db, chat.id)[0]?.status === "done");
+    expect(prompts[0]).toContain("## You are the orchestrator");
+    expect(prompts[0]).toMatch(/### Your user's instructions for orchestrating\nAlways start a reviewer after a coder\./);
+    // Headless Duo has no MCP server for TheFlashMaster's tools: it delegates with DELEGATE lines whatever the tool mode.
+    expect(prompts[0]).toContain("## Delegation (text mode)");
+  }, 30000);
+
+  it("a Duo specialist delegated by the coordinator keeps the specialist brief, not the orchestrator one", async () => {
+    const prompts: string[] = [];
+    const real = DuoSession.prototype.prompt;
+    vi.spyOn(DuoSession.prototype, "prompt").mockImplementation(function (this: DuoSession, text: string, att?: any) {
+      prompts.push(text);
+      return real.call(this, text, att);
+    });
+    const { db, orch, chat } = setup();
+    cleanup = () => orch.stopAll();
+    const parent = await orch.sendUserMessage(chat.id, "Plan it", null);
+    await until(() => coordReplies(db, chat.id)[0]?.status === "done");
+    expect(parent).toBeTruthy();
+    const coordId = coordReplies(db, chat.id)[0]!.agentId!;
+    await until(() => db.getAgent(coordId)!.status === "idle");
+    await orch.delegate(coordId, { role: "tester", goal: "review the MR", harness: "duo", timeoutSec: 20 });
+    expect(prompts[0]).toContain("## You are a specialist, not the orchestrator");
+    expect(prompts[0]).not.toContain("## You are the orchestrator");
   }, 30000);
 });

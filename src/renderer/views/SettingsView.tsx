@@ -183,6 +183,7 @@ function Harnesses(f: F) {
           <div className="muted small">Duo agents only start in GitLab repositories (a folder whose git remote is on GitLab). The coordinator can start one in another folder that is a GitLab repo.</div>
           <Row label="Coordinator on Duo" hint="Project chats run their coordinator on GitLab Duo, which starts by itself in the project folder when the chat opens. Chats without a project folder, like the master chat, keep their usual harness, and so do projects that aren't GitLab repos."><Bool f={f} path="duo.coordinator" /></Row>
           <Row label="Coordinator model" hint="Used when the chat picks no model for Duo. Default: Opus 5.5."><Text f={f} path="duo.coordinatorModel" placeholder="claude-opus-5-5" /></Row>
+          <Row label="Orchestrator instructions" hint="The coordinator on Duo always gets TheFlashMaster's orchestrator brief: plan, delegate to specialists, unblock them with agent_status and message_agent, and come to you only when truly blocked. Anything you add here is sent after it."><Area f={f} path="duo.orchestratorRules" rows={4} /></Row>
           <Row label="Self-managed GitLab hosts" hint="Host names of your GitLab servers when they aren't gitlab.com or named gitlab…, e.g. git.company.com. Separate several with commas."><Text f={f} path="duo.hosts" placeholder="git.company.com" /></Row>
           <div className="warn-note">GitLab Duo runs in headless mode (no ACP) and auto-approves its own tools. Use read-only prompts or a sandbox.</div>
         </>}
