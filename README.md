@@ -121,6 +121,8 @@ Push a tag and GitHub Actions does the rest: it builds on `windows-latest`, runs
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+Or release from your own Windows machine: `py -3 scripts/release.py` suggests the next version, builds the installer and portable exe locally, and uploads them with `latest.json` to a new GitHub Release (`--dry-run` to preview). See [docs/updates.md](docs/updates.md#3b-release-from-your-own-windows-machine).
+
 ## Architecture
 
 ```
