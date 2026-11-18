@@ -60,15 +60,17 @@ py -3 scripts/release.py             # suggests the next version, builds, upload
 It releases what is on the remote, never your local working copy: uncommitted or unpushed changes and the branch
 you have checked out don't matter.
 
-1. **Preflight**: Windows, git, Node 22.13+, write access to the repository, and the commit to build: the remote's
+1. **Preflight**: Windows, git, Node 22.13+, the remote to release on (with several, e.g. `origin` and `corporate`,
+   it lists them to pick from; `--remote corporate` skips the question), write access there, and the commit to build: that remote's
    default branch (`origin/main`), or `--ref <branch|tag|commit>`. Credentials come from `GH_TOKEN` /
    `GITHUB_TOKEN` (`GH_ENTERPRISE_TOKEN` for Enterprise hosts) or the GitHub CLI login (`gh auth login --hostname <host>`).
-2. **Version**: the newest release on the git remote (`--remote`, default `origin`) is the current version;
+2. **Version**: the newest release on the chosen remote is the current version;
    package.json is used when there is none. It suggests the patch bump and offers minor, major or a custom version
    (`--bump minor`, `--version 1.0.0-beta.1`). Versions with a suffix are published as pre-releases.
 3. **Build**: checks that commit out fresh into `release/.source` (a git worktree), runs `npm ci`, stamps the
    version into its package.json, runs `npm run ci` (`--skip-checks` to skip), `electron-builder --win --x64`,
-   `release-manifest.mjs`, copies the files to `release/` and writes `SHA256SUMS.txt`. The checkout is removed
+   `release-manifest.mjs`, copies the files to `release/` and writes `SHA256SUMS.txt`. If the checks fail on your machine, it shows whether CI passed on
+   GitHub for that commit and asks whether to continue anyway. The checkout is removed
    afterwards (kept after a failed build). Set `CSC_LINK` / `CSC_KEY_PASSWORD` to sign. Full output goes to
    `release/release-script.log`.
 4. **Publish**: creates a draft release on the built commit, uploads the executables, `latest.json`,

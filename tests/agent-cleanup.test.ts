@@ -27,7 +27,9 @@ function repo(): string {
   git(dir, "commit", "-qm", "init");
   return dir;
 }
-const until = async (fn: () => boolean, ms = 8000) => {
+// These tests create git repos and agent worktrees; with Windows antivirus each git call can take a second, so allow
+// far more than CI needs (a release build on Mari's machine timed out at the 15 s default).
+const until = async (fn: () => boolean, ms = 45000) => {
   const t = Date.now();
   while (!fn()) { if (Date.now() - t > ms) throw new Error("timeout"); await new Promise((r) => setTimeout(r, 10)); }
 };
@@ -46,7 +48,7 @@ async function setup(path = repo()) {
   return { db, orch, roles, leadId, p };
 }
 
-describe("Flash Master cleans up agents", () => {
+describe("Flash Master cleans up agents", { timeout: 90000 }, () => {
   it("offers close_agent, close_idle_agents and delete_task, and tells Flash Master to use them", () => {
     const names = buildTools({ db: new Db(":memory:"), orch: {} as Orchestrator, roles: () => [], jazz: () => null, emitTask: () => {} })
       .filter((t) => t.set === "core").map((t) => t.name);

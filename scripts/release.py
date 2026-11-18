@@ -266,6 +266,20 @@ def choose_remote(remotes: dict[str, str], wanted: Optional[str], interactive: b
         ui.fail(f"pick 1-{len(names)} or a remote name")
 
 
+def summarize_check_runs(runs: list[dict]) -> tuple[bool, str]:
+    """GitHub check runs of a commit -> (all passed, one line for the person)."""
+    if not runs:
+        return False, "No CI results on GitHub for this commit"
+    done = [r for r in runs if r.get("status") == "completed"]
+    good = [r for r in done if r.get("conclusion") in ("success", "skipped", "neutral")]
+    bad = [r.get("name", "?") for r in done if r not in good]
+    if bad:
+        return False, f"CI failed on GitHub for this commit: {', '.join(bad)}"
+    if len(done) < len(runs):
+        return False, f"CI is still running on GitHub for this commit ({len(done)} of {len(runs)} checks done)"
+    return True, f"CI passed on GitHub for this commit ({len(runs)} checks)"
+
+
 # ───────────────────────────── artifacts ─────────────────────────────
 
 def expected_asset_names(version: Version) -> list[str]:
@@ -977,8 +991,23 @@ class Release:
             ui.warn("skipping checks (--skip-checks)")
             run("Build (electron-vite)", ["npx", "electron-vite", "build"])
         else:  # ci.mjs also runs `electron-vite build` with the stamped version
-            run("Checks (typecheck, lint, tests, build)", ["node", "scripts/ci.mjs"],
-                "Fix the failing check on the branch, or pass --skip-checks if CI already passed on this commit.")
+            ci_ok, ci_note = self.remote_ci()
+            if ci_note:
+                (ui.success if ci_ok else ui.info)(ci_note)
+            try:
+                run("Checks (typecheck, lint, tests, build)", ["node", "scripts/ci.mjs"],
+                    "Fix the failing check on the branch, or pass --skip-checks if CI already passed on this commit.")
+            except ReleaseError:
+                # A test that only fails on this machine (slow disk, antivirus, proxy) shouldn't block a commit that
+                # CI already passed on every platform; let the person decide, and say what CI found.
+                if not sys.stdin.isatty() or a.yes:
+                    raise
+                question = ("The checks failed here but passed in CI on GitHub. Continue the release anyway?" if ci_ok
+                            else "The checks failed. Continue the release anyway?")
+                if not ui.confirm(question, default=False):
+                    raise
+                ui.warn("continuing without passing local checks")
+                run("Build (electron-vite)", ["npx", "electron-vite", "build"])
         run("Package installer + portable exe (electron-builder)", ["npx", "electron-builder", "--win", "--x64", "--publish", "never"],
             "Check signing settings (CSC_LINK) if signing failed.")
         manifest_args = ["node", "scripts/release-manifest.mjs"] + (["--notes", self.plan.notes] if self.plan.notes else [])
@@ -995,6 +1024,15 @@ class Release:
         BUILD_INFO.write_text(json.dumps({"version": str(v), "sha": self.plan.source_sha, "ref": self.plan.source_ref}), "utf-8")
         ui.success(f"Copied the build to {RELEASE_DIR}")
         self.remove_source()
+
+    def remote_ci(self) -> tuple[bool, str]:
+        """(all CI check runs on the release commit passed, a line saying so). Best effort: never fails the release."""
+        assert self.gh and self.plan.remote
+        try:
+            data = self.gh.request("GET", f"/repos/{self.plan.remote.slug}/commits/{self.plan.source_sha}/check-runs?per_page=100")
+        except ReleaseError:
+            return False, ""
+        return summarize_check_runs((data or {}).get("check_runs", []))
 
     def remove_source(self) -> None:
         """Drop the build checkout (a full node_modules) once its files are copied. A failed build keeps it."""
