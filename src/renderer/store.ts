@@ -3,6 +3,7 @@ import type { AgentRun, AppEvent, Chat, CodeGraphStatus, HarnessId, HarnessModel
 import type { Settings } from "@shared/settings";
 import { chatKey, pickAgentChat } from "./agentChat";
 import { agentLabel } from "@shared/instances";
+import { uniqueModels } from "@shared/models";
 
 export const api = () => window.flash.api;
 
@@ -172,7 +173,8 @@ export const useStore = create<State>((set, get) => ({
   copilotUsage: null,
   update: null,
   setModels(m) {
-    set((st) => ({ models: { ...st.models, [m.harness]: m } }));
+    // Lists cached by an older version can still hold duplicate ids.
+    set((st) => ({ models: { ...st.models, [m.harness]: { ...m, models: uniqueModels(m.models) } } }));
   },
   toasts: [],
   searchOpen: false,

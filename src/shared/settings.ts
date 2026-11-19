@@ -156,8 +156,11 @@ export interface Settings {
     rm: { enabled: boolean; serverUrl: string; projects: string[]; config: string; cacheHours: number; component: string };
     /** Engineering Test Management (ETM / RQM): test plans, suites, cases, scripts, execution records and results. Same sign-in. */
     qm: { enabled: boolean; serverUrl: string; projectArea: string; config: string };
-    /** EWM source control, read-only (streams, components, files). cliPath: lscm/scm for folder listings; blank = find it on PATH. */
-    scm: { enabled: boolean; cliPath: string };
+    /**
+     * EWM source control: streams, components, files (REST), plus repository workspaces, check-in, change sets and accept
+     * through the SCM command line. cliPath: lscm/scm; blank = find it on PATH. deliver: agents may deliver to streams.
+     */
+    scm: { enabled: boolean; cliPath: string; deliver: boolean };
     /** Accept a self-signed or company-CA certificate from the Jazz servers (ccm, qm, rm hosts only) that Windows doesn't trust. */
     trustServerCert: boolean;
     authType: "form" | "basic" | "windows" | "browser"; // windows = integrated Kerberos/NTLM; browser = SSO window (Jazz Authorization Server / OIDC)
@@ -198,6 +201,12 @@ export interface Settings {
     canoeVersion: string;
     davinciCliPath: string;
     caplIncludePaths: string;
+    /** Vector's official MCP servers (CANoe 20 SP2+, CANoe AI Package): connect them and give their tools to every agent. */
+    mcpEnabled: boolean;
+    mcpAutoDetect: boolean; // look for Vector's mcp.json / MCP executables in the CANoe and AI Package folders
+    mcpConfigPath: string; // Vector's mcp.json (or the AI Package folder)
+    canoeMcp: string; // CANoe MCP Server: http(s) URL or command line ("" = auto-detect)
+    canoeDocsMcp: string; // CANoe Documentation MCP Server: http(s) URL or command line
   };
   network: {
     proxy: string;
@@ -325,7 +334,7 @@ export const DEFAULT_SETTINGS: Settings = {
     projectAreas: [],
     rm: { enabled: false, serverUrl: "", projects: [], config: "", cacheHours: 24, component: "" },
     qm: { enabled: false, serverUrl: "", projectArea: "", config: "" },
-    scm: { enabled: false, cliPath: "" },
+    scm: { enabled: false, cliPath: "", deliver: false },
     trustServerCert: false,
     authType: "basic",
     username: "",
@@ -337,7 +346,8 @@ export const DEFAULT_SETTINGS: Settings = {
   exam: { installPath: "", restPort: 8085, licenseHost: "", licensePort: 5053, modelName: "", targetEndpoint: "", modelConfigUuid: "",
     systemConfig: "", reportProject: "", pythonPath: "", workspace: "", javaOpts: "",
     pluginPackage: "", autoSetup: true },
-  vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
+  vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "",
+    mcpEnabled: true, mcpAutoDetect: true, mcpConfigPath: "", canoeMcp: "", canoeDocsMcp: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
   memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true, knowledgeSync: true, knowledgeSyncMinutes: 2 },
   data: { retentionDays: 0 },

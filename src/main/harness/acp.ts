@@ -12,6 +12,7 @@ import { decidePermission, insideRoot } from "./policy";
 import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { imageBlockMarkdown } from "../images";
 
 /** Pick the option of a select config whose value/name matches a wanted level (e.g. thinking "medium"). */
 export function pickOption(opt: Json | undefined, wanted: string): string | null {
@@ -39,6 +40,7 @@ export function promptBlocks(text: string, atts: PromptAttachment[] | undefined,
   return blocks;
 }
 import { runCapture } from "./process";
+import { uniqueModels } from "@shared/models";
 
 /** Read models from an ACP session response: `models.availableModels` or a select config option of category "model". */
 export function modelsFromSession(r: Json | undefined): { models: ModelInfo[]; modelOptionId: string | null } {
@@ -56,7 +58,7 @@ export function modelsFromSession(r: Json | undefined): { models: ModelInfo[]; m
       for (const o of flat) if (o?.value) out.push({ id: String(o.value), name: String(o.name ?? o.value), description: o.description ?? null, current: o.value === opt.currentValue });
     }
   }
-  return { models: out.slice(0, 256), modelOptionId };
+  return { models: uniqueModels(out).slice(0, 256), modelOptionId };
 }
 
 type Json = Record<string, any>;
@@ -278,6 +280,11 @@ export class AcpSession implements HarnessSession {
         break;
       case "agent_message_chunk":
         if (u.content?.type === "text") this.o.onEvent({ type: "text", text: u.content.text });
+        else if (u.content?.type === "image") {
+          // A picture the agent sends (screenshot, generated image): kept on disk, shown inline in the reply.
+          const md = imageBlockMarkdown(u.content);
+          if (md) this.o.onEvent({ type: "text", text: `\n\n${md}\n\n` });
+        }
         break;
       case "agent_thought_chunk":
         if (u.content?.type === "text") this.o.onEvent({ type: "thought", text: u.content.text });
@@ -377,7 +384,7 @@ export class AcpAdapter implements HarnessAdapter {
     // OpenCode also lists models on its CLI (provider/model per line).
     if (this.id === "opencode") {
       const r = await runCapture(p.executable ?? "opencode", ["models"], 30000, p.cwd);
-      return r.out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[\w.-]+\/[\w.:@-]+$/.test(l)).slice(0, 256).map((id) => ({ id, name: id }));
+      return r.out.split(/\r?\n/).map((l) => l.trim()).filter((l, i, all) => /^[\w.-]+\/[\w.:@-]+$/.test(l) && all.indexOf(l) === i).slice(0, 256).map((id) => ({ id, name: id }));
     }
     return [];
   }
@@ -447,6 +454,8 @@ export function toolOutputText(content: unknown, raw: unknown): string | undefin
     const x = c as Record<string, any>;
     if (x?.type === "content" && x.content?.type === "text" && typeof x.content.text === "string") parts.push(x.content.text);
     else if (x?.type === "text" && typeof x.text === "string") parts.push(x.text);
+    else if (x?.type === "content" && x.content?.type === "image") { const md = imageBlockMarkdown(x.content); if (md) parts.push(md); }
+    else if (x?.type === "image") { const md = imageBlockMarkdown(x); if (md) parts.push(md); }
     else if (x?.type === "diff" && typeof x.path === "string") parts.push(`(edited ${x.path})`);
   }
   if (!parts.length && raw != null) {

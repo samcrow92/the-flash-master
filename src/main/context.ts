@@ -120,7 +120,9 @@ export const REPLY_STYLE = "Reply style: the user reads your replies in a chat. 
   + "Before and after tool calls, say briefly what you are checking and what you found, each as its own paragraph. "
   + "Links: whenever you create or update a file the user will want to open (an .html report, a document, a diagram, a log export), put a direct link to it in your reply "
   + "as a Markdown link with its absolute path as a file URL, e.g. [rca-report.html](file:///C:/work/project/reports/rca-report.html) (forward slashes, spaces as %20). "
-  + "Link web pages with their full https:// URL. The chat makes these clickable: files open in their default app (HTML in the browser).";
+  + "Link web pages with their full https:// URL. The chat makes these clickable: files open in their default app (HTML in the browser). "
+  + "Images: to show the user a picture you made or captured (a screenshot, a rendered chart or diagram), embed it as a Markdown image with its "
+  + "file URL, e.g. ![login page](file:///C:/work/project/out/login.png); the chat shows it inline and enlarges it on click.";
 
 /**
  * pstack's unslop skill as a standing writing rule. It covers what the agent writes through tools too (the user asked for

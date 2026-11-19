@@ -19,16 +19,19 @@ import { MemoryStore } from "./memory";
 import { KnowledgeBase, ensureFlashmasterIgnore } from "./knowledge";
 import { CodeGraph, GRAPHIFY_MIN_PYTHON, GRAPHIFY_PACKAGE } from "./graphify";
 import { noProjectFolder } from "./worktree";
-import { McpBootstrap, selfTestServer } from "./mcp";
+import { McpBootstrap, baseEnv, selfTestServer } from "./mcp";
+import { VectorMcp } from "./vector-mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
 import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
 import { Requirements, parseRmLink } from "./requirements";
 import { resolveLink } from "./links";
+import { MAX_INLINE_IMAGE_BYTES, resolveImage, setAgentImageDir } from "./images";
 import { EtmClient } from "./etm";
 import { RmWriter } from "./rm-write";
 import { ScmClient, type CliRunner } from "./scm";
 import { findScmCli, scmCliRunner } from "./scm-cli";
+import { ScmWriter } from "./scm-write";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
 import { currentProxyEnv, setProxyEnv } from "./win-env";
@@ -167,6 +170,14 @@ const mcp = new McpBootstrap({
   pythonSrc: join(resources, "mcp-servers"),
   dataDir,
 }, () => settings.get(), (servers) => emit({ type: "mcp.status", servers }));
+// Vector's official MCP servers (CANoe 20 SP2+): one app-side connection, tools forwarded to every agent.
+const vectorMcp = new VectorMcp({
+  settings: () => settings.get(), baseEnv: () => ({ ...baseEnv(), ...networkEnv(settings.get()) }),
+  register: (defs) => bridge.register(defs), unregister: (set) => bridge.unregister(set),
+  onStatus: () => emit({ type: "mcp.status", servers: mcp.list() }),
+});
+mcp.setVendor({ list: () => vectorMcp.list(), tools: () => vectorMcp.toolCount() });
+settings.onChange(() => void vectorMcp.refresh());
 // Code graph (graphify) for the knowledge base: installed into its own venv on the first "Scan code", run on demand.
 const codeGraph = new CodeGraph({
   db, knowledge, python: () => mcp.toolPython("graphify"),
@@ -384,13 +395,13 @@ const etm = (): EtmClient | null => {
 };
 let scmClient: ScmClient | null = null;
 let scmHttp: JazzClient | null = null;
-/** EWM SCM command line for folder listings; signs in with the Jazz user/password when those are set. */
-const scmCli = (): { run: CliRunner; repo: string } | null => {
+/** EWM SCM command line (folder listings, and the changes in scm-write.ts); signs in with the Jazz user/password when those are set. */
+const scmCli = (timeoutMs = 180_000): { run: CliRunner; repo: string } | null => {
   const j = settings.get().jazz;
   const exe = findScmCli(j.scm.cliPath);
   if (!exe) return null;
   const creds = (j.authType === "basic" || j.authType === "form") && j.username && j.hasPassword ? { user: j.username, password: readJazzPassword() } : null;
-  return { run: scmCliRunner(exe, creds), repo: j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "") };
+  return { run: scmCliRunner(exe, creds, timeoutMs), repo: j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "") };
 };
 const scm = (): ScmClient | null => {
   const j = settings.get().jazz;
@@ -400,6 +411,16 @@ const scm = (): ScmClient | null => {
   if (!scmClient || scmHttp !== http) { scmClient = new ScmClient(http, scmCli); scmHttp = http; }
   return scmClient;
 };
+/** EWM source control changes (workspaces, check-in, accept, deliver). Loads and delivers can take long: 30 min per command. */
+let scmWriter: ScmWriter | null = null;
+const scmWrite = (): ScmWriter | null => {
+  if (!scm()) return null;
+  scmWriter ??= new ScmWriter({
+    cli: () => scmCli(30 * 60_000), readOnly: () => settings.get().permissions.readOnly, allowDeliver: () => settings.get().jazz.scm.deliver,
+    streamNames: async () => { const c = scm(); return c ? (await c.streams({ max: 500 })).map((x) => x.name) : []; },
+  });
+  return scmWriter;
+};
 /** Jazz hosts (work items, test management, requirements) whose certificate may be accepted when trustServerCert is on. */
 const jazzHosts = () => {
   const j = settings.get().jazz;
@@ -407,7 +428,7 @@ const jazzHosts = () => {
 };
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
-bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmWriter, etm, scm, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
+bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmWriter, etm, scm, scmWrite, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
   memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,
@@ -417,6 +438,7 @@ bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, r
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
 // chats without a project use the app data folder, which is added to the agents' readable roots.
 const appAttachDir = join(dataDir, "attachments");
+setAgentImageDir(join(dataDir, "agent-images"));
 mkdirSync(appAttachDir, { recursive: true });
 const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
   ".bmp": "image/bmp", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
@@ -727,6 +749,16 @@ const api: FlashApi = {
     if (!ok || !existsSync(path)) throw new Error("attachment not found");
     await shell.openPath(path);
   },
+  readImage: async (target, chatId) => {
+    const c = chatId ? db.getChat(String(chatId)) : null;
+    const project = c?.projectId ? db.getProject(c.projectId)?.path : null;
+    const r = resolveImage(String(target ?? ""), { platform: process.platform, bases: project ? [project] : [], home: homedir(), exists: existsSync });
+    if (!r.ok) return { ok: false, detail: r.reason };
+    try {
+      if (statSync(r.path).size > MAX_INLINE_IMAGE_BYTES) return { ok: false, detail: "image is too large to show inline" };
+      return { ok: true, path: r.path, dataUrl: `data:${r.mime};base64,${(await readFile(r.path)).toString("base64")}` };
+    } catch (e) { return { ok: false, detail: String((e as Error)?.message ?? e) }; }
+  },
   openLink: async (target, chatId) => {
     const c = chatId ? db.getChat(String(chatId)) : null;
     const project = c?.projectId ? db.getProject(c.projectId)?.path : null;
@@ -1013,7 +1045,7 @@ const api: FlashApi = {
   listModels: async (h, refresh) => (refresh || !modelState(h).fetchedAt ? refreshModels(h) : modelState(h)),
   allModels: async () => HARNESS_IDS.map(modelState),
   mcpStatus: async () => mcp.list(),
-  mcpReinstall: async () => mcp.ensure(true),
+  mcpReinstall: async () => { await vectorMcp.refresh(true); return mcp.ensure(true); },
   mcpInstall: async (id) => { await mcp.ensureCatalog(true, id); return mcp.list(); },
   mcpSelfTest: async () => {
     const role = roles.find((r) => r.name === "flashmaster") ?? roles[0]!;
@@ -1284,6 +1316,7 @@ app.whenReady().then(async () => {
     if (u.copilotMeter) void refreshCopilotUsage(); // local files only: cheap, so always fresh at start
     scheduleUsage();
   });
+  void vectorMcp.refresh();
   void mcp.ensure().then((servers) => { emit({ type: "mcp.status", servers }); if (settings.get().exam.autoSetup) void runExamSetup(true, true); });
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
   // Review status of my Flash server submissions: at start and every 15 minutes (status changes become notices).
@@ -1292,7 +1325,7 @@ app.whenReady().then(async () => {
   setInterval(pollQuietly, 15 * 60000);
 });
 
-app.on("before-quit", () => { terminals.closeAll(); void orch.stopAll(); bridge.stop(); db.close(); });
+app.on("before-quit", () => { terminals.closeAll(); vectorMcp.close(); void orch.stopAll(); bridge.stop(); db.close(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 // macOS: clicking the Dock icon with no window open brings the main window back.
 app.on("activate", () => { if (!app.isReady()) return; if (!win || win.isDestroyed()) createWindow(); else win.show(); });

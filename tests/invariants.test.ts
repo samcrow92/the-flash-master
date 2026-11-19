@@ -158,6 +158,20 @@ describe("role icons", () => {
   });
 });
 
+describe("bridged tool sets", () => {
+  // A tool set on the bridge reaches ACP harnesses only through a bundled forwarder of the same name.
+  it("every bridge tool set has a bundled forwarder built by electron-vite", () => {
+    const sets = [...read("src/main/bridge.ts").match(/set: ((?:"[a-z]+"(?: \| )?)+);/)![1]!.matchAll(/"([a-z]+)"/g)].map((m) => m[1]!);
+    expect(sets).toContain("vector");
+    const vite = read("electron.vite.config.ts");
+    for (const set of sets) {
+      const dir = set === "core" ? "flashmaster-core" : set;
+      expect(vite, `mcp-${dir} entry`).toContain(`"mcp-${dir}": resolve(import.meta.dirname, "mcp-servers/${dir}/server.ts")`);
+      if (set !== "core") expect(read(`mcp-servers/${dir}/server.ts`)).toContain(`runForwarder("${set}"`);
+    }
+  });
+});
+
 describe("native modules", () => {
   // The main bundle inlines devDependencies; a native module can't be inlined, so it must be a runtime dependency
   // (externalised by electron-vite, shipped by electron-builder) and unpacked from app.asar so its binaries can run.
@@ -295,14 +309,29 @@ describe("scannable coordinator replies", () => {
   });
 });
 
-describe("EWM source control stays read-only", () => {
-  // Mari asked for reading and retrieving files only: no check-in, deliver or other change to EWM streams.
-  it("the SCM client only sends GET requests, and the SCM CLI only lists", () => {
+describe("EWM source control changes stay inside repository workspaces", () => {
+  // 2026-11-17 Mari asked for read-only source; 2026-11-19 for full source control with the same credentials. The rules:
+  // the REST client (scm.ts) still only reads; every change goes through ScmWriter.change(), which refuses in read-only
+  // mode; deliver needs the "Agents may deliver" setting and the stream name as confirm.
+  it("the REST SCM client only sends GET requests and only lists through the CLI", () => {
     const scm = read("src/main/scm.ts");
     expect(scm).not.toMatch(/request\(\s*"(POST|PUT|PATCH|DELETE)"/);
     const cliCalls = [...scm.matchAll(/\[\s*"(\w+)",\s*"(\w+)"/g)].map((m) => `${m[1]} ${m[2]}`);
     expect(cliCalls.every((c) => c === "list remotefiles")).toBe(true);
     expect(read("src/main/scm-cli.ts")).not.toMatch(/checkin|deliver|"(load|share)"/);
+  });
+  it("every changing SCM command goes through the read-only guard, and deliver checks the setting first", () => {
+    const w = read("src/main/scm-write.ts");
+    expect([...w.matchAll(/\.run\(/g)].length).toBe(2); // read() and change() only
+    const reads = [...w.matchAll(/this\.read\(\[([^\]]*)\]/g)].map((m) => m[1]!.replace(/[\s"]/g, ""));
+    expect(reads.every((c) => /^(list,(workspaces|changesets|changes)|show,status)$/.test(c)), reads.join(" | ")).toBe(true);
+    const change = w.slice(w.indexOf("private async change("), w.indexOf("private async notStream("));
+    expect(change.indexOf("this.d.readOnly()")).toBeGreaterThan(0);
+    expect(change.indexOf("this.d.readOnly()")).toBeLessThan(change.indexOf(".run("));
+    const deliver = w.slice(w.indexOf("async deliver("), w.indexOf("async discard("));
+    expect(deliver.indexOf("this.d.allowDeliver()")).toBeLessThan(deliver.indexOf("this.change("));
+    expect(deliver).toMatch(/confirm[^;]*!== st/);
+    expect(read("src/shared/settings.ts")).toMatch(/scm: \{ enabled: false, cliPath: "", deliver: false \}/);
   });
 });
 
@@ -395,6 +424,14 @@ describe("Flash server credentials", () => {
     const bi = read("scripts/marketplace/build-index.mjs");
     expect(bi).toContain(`const SCRIPT_RE = /${SCRIPT_RE.source}/;`);
     expect(bi).toContain(`const FILE_RE = /${FILE_RE.source}/;`);
+  });
+});
+
+describe("chat images", () => {
+  it("the renderer only loads images from the app and data: URLs (local files go through api.readImage)", () => {
+    const csp = /Content-Security-Policy" content="([^"]+)"/.exec(read("src/renderer/index.html"))?.[1] ?? "";
+    expect(csp).toMatch(/img-src 'self' data:(;|$)/);
+    expect(read("src/renderer/components/Markdown.tsx")).toContain("hydrateImages");
   });
 });
 

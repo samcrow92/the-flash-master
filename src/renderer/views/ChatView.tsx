@@ -6,6 +6,7 @@ import { planEdit, planRetry } from "@shared/rewind";
 import { isNoticeLine } from "@shared/replyParts";
 import { HARNESS_IDS } from "@shared/types";
 import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
+import { openImage } from "../images";
 import { Markdown } from "../components/Markdown";
 import { ReplyBody } from "../components/ReplyBody";
 import { AskCard } from "../components/AskCard";
@@ -277,7 +278,8 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
           {m.attachments.length > 0 && (
             <div className="msg-atts">
               {m.attachments.map((a) => (
-                <button key={a.id} className={`msg-att ${a.thumb ? "img" : ""}`} title={`${a.name} — click to open`} onClick={() => void api().openAttachment(a.path)}>
+                <button key={a.id} className={`msg-att ${a.thumb ? "img" : ""}`} title={`${a.name} — click to ${a.thumb ? "enlarge" : "open"}`}
+                  onClick={() => (a.thumb ? openImage({ src: a.thumb, name: a.name, path: a.path, chatId: m.chatId, thumb: true }) : void api().openAttachment(a.path))}>
                   {a.thumb ? <img src={a.thumb} alt={a.name} /> : <><FileText size={16} /><span className="att-name">{a.name}</span><span className="muted small">{(a.size / 1024).toFixed(0)} KB</span></>}
                 </button>
               ))}

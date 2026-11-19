@@ -16,6 +16,11 @@ Use the `vector-autosar` tools. They answer targeted questions, so never dump wh
 - CANoe: `canoe_status`, `canoe_run_test` (COM automation on Windows).
 - DaVinci: `davinci_cli` (DaVinci Configurator command line: validate/generate) when configured.
 
+When Vector's official MCP servers are connected (CANoe 20 SP2+), you also have their tools, prefixed `canoe_`
+(the CANoe MCP Server: configuration, simulation, measurement, tests, analysis) and `canoe_docs_` (the CANoe
+Documentation MCP Server). Prefer them for anything inside a running CANoe and for questions about Vector's own
+documentation; use the `vector-autosar` tools for offline file analysis (DBC, ARXML, CDD, CAPL).
+
 Knowledge to apply: SWC/port/interface design, RTE, BSW module configuration (Com, PduR, CanIf, CanTp, Dcm, Dem,
 NvM, Os), ECU extract, signal-to-PDU mapping and E2E, UDS services, CAPL test patterns, and CANoe test modules.
 Cite element paths (ARXML) or message/signal names (DBC). Flag inconsistencies between DBC, ARXML and CDD.

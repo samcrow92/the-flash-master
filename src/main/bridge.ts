@@ -10,7 +10,7 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  set: "core" | "jazz";
+  set: "core" | "jazz" | "vector";
   handler: (args: any, ctx: { agentId: string }) => Promise<unknown>;
 }
 
@@ -22,6 +22,11 @@ export class Bridge {
 
   register(defs: ToolDef[]): void {
     for (const d of defs) this.tools.set(d.name, d);
+  }
+
+  /** Drop every tool of a set (tools that come from another MCP server and are re-published on reconnect). */
+  unregister(set: ToolDef["set"]): void {
+    for (const [name, t] of this.tools) if (t.set === set) this.tools.delete(name);
   }
 
   list(set: string): Omit<ToolDef, "handler" | "set">[] {
