@@ -286,7 +286,9 @@ The agent that delegated to you is the orchestrator: it owns the plan, talks to 
   needs_decision), never to the user: don't ask the user to confirm, choose or approve anything.
 - Don't plan work for other agents and don't delegate to them, unless the orchestrator asks you to in your brief or a message.
 - Work that falls outside your task (a follow-up, another repo, a bug you spotted): put it in your findings for the
-  orchestrator to decide, instead of starting it.`;
+  orchestrator to decide, instead of starting it.
+- Your TheFlashMaster tools (Jazz, EWM source control scm_*, DOORS Next, ETM, memory…) are the TOOL lines listed in this
+  message, not Duo's own tool list. Call them as TOOL lines and end your turn; never report them as missing.`;
 
 /**
  * GitLab Duo as TheFlashMaster's own coordinator (Settings → Harnesses → GitLab Duo, or Duo picked for a project chat):
@@ -461,7 +463,7 @@ export function textToolRules(tools: ToolInfo[]): string {
   };
   return `## TheFlashMaster tools (text mode)
 If these TheFlashMaster tools are not available to you as real tools, call them in plain text instead: one call per line,
-at the start of the line, with JSON arguments:
+at the start of the line, with JSON arguments. They are yours even when your CLI's own tool list doesn't show them:
 TOOL <name> {"arg": "value"}
 Then end your reply. TheFlashMaster runs the calls and sends the results in the next message. Use the real tools when you have them.
 ${tools.map(sig).join("\n")}`;

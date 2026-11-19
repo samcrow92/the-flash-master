@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { McpServerStatus, RoleDef } from "@shared/types";
 import type { ExamSetupResult } from "@shared/api";
-import type { Settings } from "@shared/settings";
+import { jazzToolsOn, type Settings } from "@shared/settings";
 import type { McpServerSpec } from "./harness/types";
 import { runCapture, splitArgs, which } from "./harness/process";
 import { networkEnv } from "./orchestrator";
@@ -216,7 +216,7 @@ export class McpBootstrap {
     const ready = new Set(this.list().filter((x) => x.state === "ready").map((x) => x.id));
     const wanted = new Set(["flashmaster-core", ...role.tools]);
     // Every agent can read Jazz work items (and DOORS Next requirements) once Jazz is set up — not only the roles that list it.
-    if (s.jazz.enabled) wanted.add("jazz");
+    if (jazzToolsOn(s.jazz)) wanted.add("jazz");
     // Vector's official CANoe MCP tools: every agent and the coordinator, once a Vector server is connected.
     const vectorOn = this.vendor.tools() > 0;
     if (vectorOn) wanted.add("vector");

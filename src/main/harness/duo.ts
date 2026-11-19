@@ -7,8 +7,9 @@
  * Headless Duo auto-approves its own tools, so the UI flags Duo agents.
  */
 import type { ChildProcess } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import type { HarnessStatus } from "@shared/types";
 import { duoModelId, type Settings } from "@shared/settings";
 import { detectExecutable, killTree, runCapture, spawnTool, splitArgs } from "./process";
@@ -98,8 +99,34 @@ export function duoActivity(line: string): string | null {
 
 /** Goals up to this many characters go straight into DUO_WORKFLOW_GOAL (Windows caps one variable at 32,767). */
 export const DUO_GOAL_ENV_MAX = 24_000;
-/** Folder (inside the repo, ignored by git) for goals too long for the environment. Duo only reads files in the repo. */
+/**
+ * Folder (inside the repo) for goals too long for the environment. Duo only reads files in the repo, and its read_file
+ * tool refuses files a .gitignore covers, so the folder is kept out of git through the repository's local exclude file
+ * (.git/info/exclude) instead: git never sees it and nothing in the repo changes.
+ */
 export const DUO_GOAL_DIR = ".flashmaster-duo";
+
+/**
+ * Keeps the goal folder out of git without a .gitignore: an entry in the repository's own exclude file (shared by its
+ * worktrees). Also removes the `*` .gitignore older versions put in the folder. False when git can't be asked.
+ */
+export function excludeGoalDir(cwd: string): boolean {
+  const old = join(cwd, DUO_GOAL_DIR, ".gitignore");
+  try { if (existsSync(old) && readFileSync(old, "utf8") === "*\n") rmSync(old, { force: true }); } catch { /* keep going */ }
+  try {
+    const p = execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd, encoding: "utf8", timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (!p) return false;
+    const file = isAbsolute(p) ? p : join(cwd, p);
+    const entry = `/${DUO_GOAL_DIR}/`;
+    const cur = existsSync(file) ? readFileSync(file, "utf8") : "";
+    if (cur.split(/\r?\n/).some((l) => l.trim() === entry)) return true;
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${cur && !cur.endsWith("\n") ? "\n" : ""}# TheFlashMaster: long GitLab Duo goals (removed after each turn)\n${entry}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * How the goal reaches Duo: the environment for DUO_WORKFLOW_GOAL, and the file to write first when the goal is too long
@@ -110,7 +137,8 @@ export function duoGoal(goal: string, cwd: string, stamp: string): { env: string
   const rel = `${DUO_GOAL_DIR}/goal-${stamp}.md`;
   return {
     env: `Your full instructions for this turn are long, so they were saved in the file ${rel} in this repository. ` +
-      "Read that whole file first with your file-reading tool (it can take several reads), then do exactly what it says, " +
+      "Read that whole file first with your file-reading tool (it can take several reads; if that tool refuses the file, " +
+      "print it with a shell command: type on Windows, cat elsewhere), then do exactly what it says, " +
       "as if it were this message. Don't edit, move or commit that file.",
     file: { path: join(cwd, rel), text: goal },
   };
@@ -267,7 +295,8 @@ export class DuoSession implements HarnessSession {
     if (g.file) {
       try {
         mkdirSync(join(this.o.cwd, DUO_GOAL_DIR), { recursive: true });
-        writeFileSync(join(this.o.cwd, DUO_GOAL_DIR, ".gitignore"), "*\n");
+        // Not a .gitignore: Duo's read_file refuses ignored files. Fall back to one only when git can't take the exclude.
+        if (!excludeGoalDir(this.o.cwd)) writeFileSync(join(this.o.cwd, DUO_GOAL_DIR, ".gitignore"), "*\n");
         writeFileSync(g.file.path, g.file.text);
       } catch (e) {
         return Promise.resolve({ stopReason: "error", error: `Could not save the long goal for Duo in ${DUO_GOAL_DIR}: ${(e as Error).message}` });

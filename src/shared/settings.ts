@@ -239,6 +239,14 @@ export interface Settings {
  * Opus 5.5, the default model of a coordinator that runs on GitLab Duo. `duo run --model` takes GitLab's model
  * identifier (the `gitlab_identifier` in GitLab's ai_gateway/model_selection/models.yml): underscores, not dashes.
  */
+/**
+ * Agents get the Jazz tools (work items, DOORS Next, ETM, EWM source control): Jazz is turned on, or a server or sign-in
+ * is filled in. Source control also works from a link the user gives, so the top switch alone must not hide the tools.
+ */
+export function jazzToolsOn(j: Settings["jazz"]): boolean {
+  return j.enabled || !!j.serverUrl.trim() || !!j.username.trim();
+}
+
 export const DUO_COORDINATOR_MODEL = "claude_opus_5_5";
 
 /**

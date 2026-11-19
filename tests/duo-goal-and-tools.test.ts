@@ -45,7 +45,7 @@ describe("the goal reaches Duo without the command line", () => {
     expect(text(events)).toContain("(resumed) Goal was: Rules: - keep it short");
   });
 
-  it("a goal too long for one variable (a restarted chat's rules + history) is read from an ignored file, then removed", async () => {
+  it("a goal too long for one variable (a restarted chat's rules + history) is read from a file git excludes without a .gitignore, then removed", async () => {
     const cwd = gitlabRepo();
     const events: HarnessEvent[] = [];
     const goal = `History:\n${"user: tune the brake light timing please\n".repeat(5000)}END`; // ~200 KB: past every limit
@@ -53,8 +53,9 @@ describe("the goal reaches Duo without the command line", () => {
     const res = await session(cwd, events).prompt(goal);
     expect(res).toEqual({ stopReason: "end_turn" });
     expect(text(events)).toContain("Goal was: (from file) History: user: tune the brake light timing please");
-    expect(readdirSync(join(cwd, DUO_GOAL_DIR))).toEqual([".gitignore"]); // the goal file is gone after the turn
-    expect(readFileSync(join(cwd, DUO_GOAL_DIR, ".gitignore"), "utf8")).toBe("*\n");
+    // The goal file is gone after the turn, and no .gitignore covers the folder: Duo's read_file refuses ignored files.
+    expect(readdirSync(join(cwd, DUO_GOAL_DIR))).toEqual([]);
+    expect(readFileSync(join(cwd, ".git", "info", "exclude"), "utf8")).toContain("/.flashmaster-duo/");
     expect(execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" })).toBe(""); // git never sees it
   });
 
