@@ -309,14 +309,29 @@ describe("scannable coordinator replies", () => {
   });
 });
 
-describe("EWM source control stays read-only", () => {
-  // Mari asked for reading and retrieving files only: no check-in, deliver or other change to EWM streams.
-  it("the SCM client only sends GET requests, and the SCM CLI only lists", () => {
+describe("EWM source control changes stay inside repository workspaces", () => {
+  // 2026-11-17 Mari asked for read-only source; 2026-11-19 for full source control with the same credentials. The rules:
+  // the REST client (scm.ts) still only reads; every change goes through ScmWriter.change(), which refuses in read-only
+  // mode; deliver needs the "Agents may deliver" setting and the stream name as confirm.
+  it("the REST SCM client only sends GET requests and only lists through the CLI", () => {
     const scm = read("src/main/scm.ts");
     expect(scm).not.toMatch(/request\(\s*"(POST|PUT|PATCH|DELETE)"/);
     const cliCalls = [...scm.matchAll(/\[\s*"(\w+)",\s*"(\w+)"/g)].map((m) => `${m[1]} ${m[2]}`);
     expect(cliCalls.every((c) => c === "list remotefiles")).toBe(true);
     expect(read("src/main/scm-cli.ts")).not.toMatch(/checkin|deliver|"(load|share)"/);
+  });
+  it("every changing SCM command goes through the read-only guard, and deliver checks the setting first", () => {
+    const w = read("src/main/scm-write.ts");
+    expect([...w.matchAll(/\.run\(/g)].length).toBe(2); // read() and change() only
+    const reads = [...w.matchAll(/this\.read\(\[([^\]]*)\]/g)].map((m) => m[1]!.replace(/[\s"]/g, ""));
+    expect(reads.every((c) => /^(list,(workspaces|changesets|changes)|show,status)$/.test(c)), reads.join(" | ")).toBe(true);
+    const change = w.slice(w.indexOf("private async change("), w.indexOf("private async notStream("));
+    expect(change.indexOf("this.d.readOnly()")).toBeGreaterThan(0);
+    expect(change.indexOf("this.d.readOnly()")).toBeLessThan(change.indexOf(".run("));
+    const deliver = w.slice(w.indexOf("async deliver("), w.indexOf("async discard("));
+    expect(deliver.indexOf("this.d.allowDeliver()")).toBeLessThan(deliver.indexOf("this.change("));
+    expect(deliver).toMatch(/confirm[^;]*!== st/);
+    expect(read("src/shared/settings.ts")).toMatch(/scm: \{ enabled: false, cliPath: "", deliver: false \}/);
   });
 });
 

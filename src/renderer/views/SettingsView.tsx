@@ -737,11 +737,12 @@ function QmSettings({ f }: { f: F }) {
 function ScmSettings({ f }: { f: F }) {
   const [test, setTest] = useState("");
   return <>
-    <h4>IBM EWM source control (read-only)</h4>
-    <p className="muted small">Agents can list streams and components and read or copy files with the <code>scm_*</code> tools. Nothing is ever checked in or delivered. Same server and sign-in as work items.</p>
+    <h4>IBM EWM source control</h4>
+    <p className="muted small">Agents read streams and files, and work in their own repository workspaces with the <code>scm_*</code> tools: load into a sandbox in their working folder, check in, link work items, accept. Streams change only by deliver. Same server and sign-in as work items; read-only mode blocks every change.</p>
     <Row label="Enabled"><Bool f={f} path="jazz.scm.enabled" /></Row>
     {f.s.jazz.scm.enabled && <>
-      <Row label="SCM command line" hint="Folder listings and file search use the EWM SCM command line (scm.exe or lscm from the EWM client). Blank = find it on PATH. Reading a file by path works without it."><Text f={f} path="jazz.scm.cliPath" placeholder={"C:\\Program Files\\IBM\\…\\scmtools\\eclipse\\scm.exe"} /></Row>
+      <Row label="SCM command line" hint="Folder listings, file search and every change (workspaces, load, check-in, accept, deliver) use the EWM SCM command line (scm.exe or lscm from the EWM client). Blank = find it on PATH. Reading a file by path works without it."><Text f={f} path="jazz.scm.cliPath" placeholder={"C:\\Program Files\\IBM\\…\\scmtools\\eclipse\\scm.exe"} /></Row>
+      <Row label="Agents may deliver" hint="Off: agents check in to their workspace and tell you which change sets are ready, and you deliver. On: an agent may deliver to a stream when you ask it to (it must repeat the stream's name)."><Bool f={f} path="jazz.scm.deliver" /></Row>
       <Row label="Connection"><div className="row gap"><button onClick={async () => { setTest("Testing…"); const r = await api().scmTest(); setTest(r.ok ? "✅ " + r.detail : "❌ " + r.detail); }}>Test</button><span><MarkText text={test} /></span></div></Row>
     </>}
   </>;

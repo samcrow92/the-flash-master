@@ -81,7 +81,7 @@ export class ScmClient {
     try {
       const s = await this.streams({ max: 500 }, true);
       const cli = this.cli();
-      return { ok: true, detail: `Connected · ${s.length} stream${s.length === 1 ? "" : "s"} visible · reading files works through REST · folder listing ${cli ? "uses the EWM SCM command line" : "needs the EWM SCM command line (scm/lscm), not found"}` };
+      return { ok: true, detail: `Connected · ${s.length} stream${s.length === 1 ? "" : "s"} visible · reading files works through REST · folder listings and changes (workspaces, check-in, accept, deliver) ${cli ? "use the EWM SCM command line" : "need the EWM SCM command line (scm/lscm), not found"}` };
     } catch (e: any) {
       return { ok: false, detail: String(e?.message ?? e) };
     }
