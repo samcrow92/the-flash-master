@@ -333,6 +333,12 @@ describe("EWM source control changes stay inside repository workspaces", () => {
     expect(deliver).toMatch(/confirm[^;]*!== st/);
     expect(read("src/shared/settings.ts")).toMatch(/scm: \{ enabled: false, cliPath: "", deliver: false \}/);
   });
+  it("source control needs no setup of its own: it runs on the Jazz connection, never behind a separate switch", () => {
+    // Bug 2026-11-19: every scm_* call said "not configured" because jazz.scm.enabled defaulted to false.
+    const idx = read("src/main/index.ts");
+    expect(idx).not.toMatch(/scm\.enabled/);
+    expect(read("src/renderer/views/SettingsView.tsx")).not.toMatch(/jazz\.scm\.enabled/);
+  });
 });
 
 describe("worktree placement", () => {

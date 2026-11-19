@@ -210,3 +210,66 @@ export function normPath(p: string): string {
   if (parts.includes("..")) throw new Error("paths may not contain ..");
   return parts.join("/");
 }
+
+/** What an EWM link names: the server (…/ccm) and, when present, the stream or workspace, component, path and change set. */
+export interface ScmLink { repo: string; stream?: string; component?: string; path?: string; changeset?: string }
+const ITEM_ID = /^_[\w-]{6,}$/;
+
+/**
+ * Reads an EWM web or REST link: the web UI (…/ccm/web/projects/<area>#action=com.ibm.team.scm.browseElement&workspaceItemId=_…
+ * &componentItemId=_…&path=…), a stream/workspace/change set page (…#action=…&id=_…), or a file content URL
+ * (…/IFilesystemContentService/<stream>/<component>/<path>). Any other Jazz link still gives the server. Null if not a URL.
+ */
+export function parseScmLink(input: unknown): ScmLink | null {
+  const raw = String(input ?? "").trim();
+  const base = /^(https?:\/\/[^/?#\s]+\/[^/?#\s]+)/i.exec(raw);
+  if (!base) return null;
+  const out: ScmLink = { repo: base[1]!.replace(/\/web$/i, "") };
+  const content = /IFilesystemContentService\/(_[\w-]+)\/(_[\w-]+)\/?([^?#]*)/.exec(raw);
+  if (content) {
+    out.stream = content[1]; out.component = content[2];
+    if (content[3]) out.path = decodeURIComponent(content[3]);
+    return out;
+  }
+  const params = new Map<string, string>();
+  for (const part of raw.split(/[?#&]/).slice(1)) {
+    const i = part.indexOf("=");
+    if (i <= 0) continue;
+    let v = part.slice(i + 1);
+    try { v = decodeURIComponent(v.replace(/\+/g, " ")); } catch { /* keep as is */ }
+    params.set(part.slice(0, i).toLowerCase(), v);
+  }
+  const action = params.get("action") ?? "";
+  const id = params.get("id") ?? params.get("itemid");
+  const pick = (...keys: string[]) => keys.map((k) => params.get(k.toLowerCase())).find((v) => v && ITEM_ID.test(v));
+  const stream = pick("workspaceItemId", "streamItemId", "contextItemId", "workspaceId", "streamId") ?? (/stream|workspace/i.test(action) && id && ITEM_ID.test(id) ? id : undefined);
+  const component = pick("componentItemId", "componentId");
+  const changeset = pick("changeSetItemId", "changeSetId") ?? (/changeset/i.test(action) && id && ITEM_ID.test(id) ? id : undefined);
+  const path = params.get("path") ?? params.get("filepath");
+  if (stream) out.stream = stream;
+  if (component) out.component = component;
+  if (path && path !== "/") out.path = path;
+  if (changeset) out.changeset = changeset;
+  return out;
+}
+
+const isUrl = (v: unknown) => typeof v === "string" && /^https?:\/\//i.test(v.trim());
+
+/**
+ * Fills stream / workspace / component / path / changeset from a link the user gave (the `link` argument, or a URL pasted
+ * into one of those fields). Values the caller gave explicitly win. `repo` is the server the link points at.
+ */
+export function scmTarget<T extends Record<string, any>>(a: T): T & { repo?: string } {
+  const src = [a.link, a.stream, a.workspace, a.component, a.path, a.changeset].find(isUrl);
+  const l = src ? parseScmLink(src) : null;
+  if (!l) return a;
+  const out: Record<string, any> = { ...a, repo: l.repo };
+  for (const k of "stream workspace component path changeset".split(" ")) if (isUrl(out[k])) delete out[k];
+  out.stream ??= l.stream;
+  out.workspace ??= l.stream;
+  out.component ??= l.component;
+  out.path ??= l.path;
+  out.changeset ??= l.changeset;
+  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return out as T & { repo?: string };
+}
