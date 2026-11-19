@@ -2,7 +2,7 @@ import type { Message } from "@shared/types";
 
 /**
  * Chat layout rules kept pure so tests can cover them without a DOM:
- * which side a message sits on, and the threads listed in the right-hand Threads panel.
+ * which side a message sits on, and the threads listed in the Threads tab of the side sheet.
  */
 
 /** Messenger layout: your own messages on the right, agent and system messages on the left (in threads too). */
@@ -59,13 +59,4 @@ export function chatThreads(roots: Message[], threads: Record<string, Message[] 
 /** Split the panel's list: active threads on top, archived ones in their own section. */
 export function splitArchived(list: ThreadSummary[]): { active: ThreadSummary[]; archived: ThreadSummary[] } {
   return { active: list.filter((t) => !t.archived), archived: list.filter((t) => t.archived) };
-}
-
-/**
- * How the Threads panel shows: a full column, or a slim rail. It folds to the rail when you collapsed it, when another
- * side panel (Progress, Artifacts) is open, or when the chat has no threads and you haven't opened it for this chat.
- */
-export function threadsPanelMode(opts: { open: boolean; otherPanel: boolean; count: number; openedEmpty: boolean }): "full" | "rail" {
-  if (!opts.open || opts.otherPanel) return "rail";
-  return opts.count > 0 || opts.openedEmpty ? "full" : "rail";
 }

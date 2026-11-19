@@ -1,7 +1,7 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useVirtualList } from "../components/virtual";
 import { ToolRuns } from "../components/ToolRuns";
-import type { HarnessId, Message } from "@shared/types";
+import type { Chat, HarnessId, Message } from "@shared/types";
 import { planEdit, planRetry } from "@shared/rewind";
 import { isNoticeLine } from "@shared/replyParts";
 import { HARNESS_IDS } from "@shared/types";
@@ -17,13 +17,17 @@ import { Composer } from "../components/Composer";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
 import { UserAvatar } from "../components/UserAvatar";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { AppWindow, Archive, ArchiveRestore, ChevronDown, Eraser, ChevronUp, PanelRight, Compass, Copy, CornerUpLeft, FileText, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
+import { AppWindow, Archive, ChevronDown, ChevronRight, Eraser, Compass, Copy, CornerUpLeft, FileText, FolderOpen, MessageCircle, MessageSquarePlus, MessagesSquare, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, RoleIcon, RotateCcw, Package, Smile, Clock, Check, CheckCheck, Hourglass, Square, Trash2, Info, X, Zap, ReactionIcon, REACTIONS } from "../components/icons";
 import { Dots } from "../components/Dots";
-import { archiveThread, clearChat, deleteMessage, threadMenu } from "../threadActions";
+import { clearChat, deleteMessage } from "../threadActions";
 import { SpecialistsPill } from "../components/SpecialistsPill";
 import { AgentsPill } from "../components/AgentsPill";
 import { ThreadsPanel } from "./ThreadsPanel";
-import { messageSide } from "../threadList";
+import { chatThreads, messageSide } from "../threadList";
+import { chatToOpen, sheetTab, switcherChats, type SheetTab } from "../layout";
+import { showSheet } from "../components/SheetTabs";
+import { chatKey } from "../agentChat";
+import { newChatIn, openProjectChat } from "../chatNav";
 
 /** Per open chat: scroll a message into view even when it isn't mounted (search results, jump-to-message). */
 const revealers = new Map<string, (id: string, block?: "start" | "center") => boolean>();
@@ -66,6 +70,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
   // then centre and flash the message itself once it is mounted.
   const focus = useStore((s) => s.focusMessage);
   const threads = useStore((s) => s.threads);
+  const panelThreads = useStore((s) => s.panelThreads);
   const scrolledFor = useRef<number | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -75,7 +80,9 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
       if (vl.scrollToKey(focus.rootId ?? focus.id, focus.rootId ? "start" : "center")) { scrolledFor.current = focus.at; requestAnimationFrame(() => setFocusTick((n) => n + 1)); }
       return; // not loaded yet: runs again when the messages arrive
     }
-    const el = listRef.current?.querySelector<HTMLElement>(`.msg[data-msg-id="${CSS.escape(focus.id)}"]`);
+    // A reply lives in the side sheet's Threads tab (jumpTo opened it there); a top-level message in the list.
+    const scope = focus.rootId ? document.querySelector(".side-sheet") : listRef.current;
+    const el = scope?.querySelector<HTMLElement>(`.msg[data-msg-id="${CSS.escape(focus.id)}"]`);
     if (!el) return; // runs again when the item / its thread mounts
     if (focus.rootId) el.scrollIntoView({ block: "center" });
     el.classList.remove("msg-flash");
@@ -94,50 +101,61 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
   const isMaster = chat.kind === "master";
   const leave = () => { if (popout) window.close(); else if (st.masterChatId) void st.openChat(st.masterChatId); };
 
+  const threadCount = useMemo(() => chatThreads(messages, threads, panelThreads).filter((t) => !t.archived).length, [messages, threads, panelThreads]);
+  const tab = sheetTab({ chatId, flowChat: st.flowPanel?.chatId ?? null, artifactsChat: st.artifactsPanel, threadsOpen: st.threadsPanelOpen,
+    threadCount, shownEmptyFor: st.threadsShownEmpty });
+  const toggleSheet = (t: SheetTab) => showSheet(chatId, tab === t ? null : t);
+  // Esc closes the side sheet (unless a menu, dialog or text field has the key).
+  useEffect(() => {
+    if (!tab) return;
+    const onKey = (e: KeyboardEvent) => {
+      // With agents running, Esc stops them (app shortcut) rather than closing the sheet.
+      if (e.key !== "Escape" || e.defaultPrevented || busy) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input, textarea, select, .modal, .ctx-menu, .pal, .search-dialog")) return;
+      showSheet(chatId, null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, chatId, busy]);
+
+  const switchChat = (e: ReactMouseEvent) => openMenu(e, chatSwitcherMenu(chat), true);
+  const where = project ? project.name : isMaster ? null : "No project";
+
   return (
-    <div className={`chat-layout ${popout ? "chat-popout " : ""}${st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId ? "with-thread" : ""}`}>
+    <div className={`chat-layout ${popout ? "chat-popout " : ""}${tab ? `sheet-open sheet-${tab === "threads" ? "threads" : "side"}` : ""}`}>
       <section className="chat" data-chat={chatId}>
-        <header className="chat-header">
-          <div className="chat-title-block">
+        <header className="chat-top">
+          <div className="chat-crumb" title={project ? project.path : isMaster ? "Coordinator across all projects" : "Chats and agents that don't belong to a project"}>
+            {where && <><button className="crumb-project" onClick={switchChat}>{where}</button><span className="crumb-sep">/</span></>}
             {editingTitle ? (
               <input autoFocus className="title-input" defaultValue={chat.title}
                 onBlur={(e) => { setEditingTitle(false); if (e.target.value.trim()) void update({ title: e.target.value.trim() }); }}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditingTitle(false); }} />
             ) : (
-              <h2 className="chat-h2" onDoubleClick={() => !isMaster && setEditingTitle(true)} title={isMaster ? "" : "Double-click to rename"}>
-                {isMaster ? <><Zap size={18} className="h2-bolt" /> TheFlashMaster — master chat</> : chat.title}
-                {!isMaster && <button className="title-edit" title="Rename chat" onClick={() => setEditingTitle(true)}><Pencil size={14} /></button>}
-              </h2>
+              <button className="crumb-title" onClick={switchChat} onDoubleClick={() => !isMaster && setEditingTitle(true)}
+                title={isMaster ? "Switch chat" : "Switch chat · double-click to rename"}>
+                {isMaster && <Zap size={15} className="h2-bolt" />}
+                <span className="crumb-text">{isMaster ? "Master chat" : chat.title}</span>
+                <ChevronDown size={14} className="crumb-chev" />
+              </button>
             )}
-            <div className="muted small">{project ? project.path : isMaster ? "Coordinator across all projects" : "No project"}</div>
+            {chat.mode && <span className={`pill mode-pill mode-${chat.mode}`} title="Drive mode overrides the chat's harness and model">{chat.mode.toUpperCase()}</span>}
+          </div>
+          <div className="pill-stack">
+            {!popout && <SpecialistsPill />}
+            <AgentsPill chatId={chatId} />
           </div>
           <div className="chat-controls">
-            <label className="ctl" title="Default agent for this chat (override per message with @role)">
-              <span>Agent</span>
-              <select value={chat.agentRole} onChange={(e) => update({ agentRole: e.target.value })}>
-                {st.roles.map((r) => <option key={r.name} value={r.name}>{r.title}</option>)}
-              </select>
-            </label>
-            <label className="ctl" title="Harness used for new agent sessions in this chat">
-              <span>Harness</span>
-              <select value={chat.harness ?? ""} onChange={(e) => update({ harness: (e.target.value || null) as HarnessId | null })}>
-                <option value="">auto</option>
-                {HARNESS_IDS.filter((h) => h !== "mock" || st.settings?.advanced.showMockHarness).map((h) => h === "duo" && !chat.projectId
-                  ? <option key={h} value={h} disabled title="GitLab Duo runs in project chats only">duo (project chats only)</option>
-                  : <option key={h} value={h}>{h}</option>)}
-              </select>
-            </label>
-            <label className="ctl" title="Model id passed to the harness (blank = harness default)">
-              <span>Model</span>
-              <ModelInput className="model-input" harness={chat.harness ?? roleOf(chat.agentRole)?.harness ?? st.settings?.general.defaultHarness ?? null}
-                value={chat.model ?? ""} disabled={!!chat.mode} onChange={(v) => update({ model: v || null })} />
-            </label>
-            {chat.mode && <span className={`pill mode-pill mode-${chat.mode}`} title="Drive mode overrides the harness/model below">{chat.mode.toUpperCase()}</span>}
-            <button className={`ghost icon-only ${st.flowPanel?.chatId === chatId ? "toggle on" : ""}`} title="Progress: flow chart of where the agents are in their task"
-              onClick={() => (st.flowPanel?.chatId === chatId ? useStore.setState({ flowPanel: null }) : st.openFlow(chatId, null))}><Compass size={16} /><span className="sr-only">Progress</span></button>
-            <button className={`ghost icon-only ${st.artifactsPanel === chatId ? "toggle on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Artifacts: files changed, saved artifacts and code from this chat — download and diff"
-              onClick={() => useStore.setState({ artifactsPanel: st.artifactsPanel === chatId ? null : chatId, flowPanel: null })}><Package size={16} /><span className="sr-only">Artifacts</span></button>
-            {busy && <button className="danger" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={13} fill="currentColor" /> Stop</button>}
+            {busy && <button className="danger stop-btn" onClick={() => chatAgents.forEach((a) => api().stopAgent(a.id))}><Square size={12} fill="currentColor" /> Stop</button>}
+            <button className={`ghost sheet-btn ${tab === "threads" ? "on" : ""}`} title="Threads: every thread in this chat" onClick={() => toggleSheet("threads")}>
+              <MessagesSquare size={15} /><span className="sheet-btn-label">Threads</span>{threadCount > 0 && <span className="sheet-count">{threadCount}</span>}
+            </button>
+            <button className={`ghost sheet-btn ${tab === "progress" ? "on" : ""}`} title="Progress: flow chart of where the agents are in their task" onClick={() => toggleSheet("progress")}>
+              <Compass size={15} /><span className="sheet-btn-label">Progress</span>
+            </button>
+            <button className={`ghost sheet-btn ${tab === "artifacts" ? "on" : ""} ${artPulse ? "art-pulse" : ""}`} title="Artifacts: files changed, saved artifacts and code from this chat — download and diff"
+              onClick={() => toggleSheet("artifacts")}><Package size={15} /><span className="sheet-btn-label">Artifacts</span></button>
             <button className="ghost icon-only" title="More actions" onClick={(e) => openMenu(e, [
               ...(!isMaster ? [{ label: "Rename", icon: <Pencil size={15} />, onClick: () => setEditingTitle(true) },
                 { label: chat.pinned ? "Unpin" : "Pin to top", icon: chat.pinned ? <PinOff size={15} /> : <Pin size={15} />, onClick: () => update({ pinned: !chat.pinned }) }] : []),
@@ -169,19 +187,65 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
               <div className="vl-pad" style={{ height: vl.padBottom }} />
             </div>
           </div>
-          <div className="pill-stack">
-            {!popout && <SpecialistsPill />}
-            <AgentsPill chatId={chatId} />
-          </div>
         </div>
-        <Composer chat={chat} parentId={null} busy={busy} placeholder={`Message ${roleOf(chat.agentRole)?.title ?? "agent"} — @ to route, / for commands, paste or drop files`} />
-        <UsageMeter chatId={chatId} />
+        <Composer chat={chat} parentId={null} busy={busy} placeholder={`Ask ${roleOf(chat.agentRole)?.title ?? "the agent"} anything. @ to route, / for commands, paste or drop files`} />
+        <div className="chat-meta">
+          <label className="ctl" title="Default agent for this chat (override per message with @role)">
+            <span>Agent</span>
+            <select value={chat.agentRole} onChange={(e) => update({ agentRole: e.target.value })}>
+              {st.roles.map((r) => <option key={r.name} value={r.name}>{r.title}</option>)}
+            </select>
+          </label>
+          <label className="ctl" title="Harness used for new agent sessions in this chat">
+            <span>Harness</span>
+            <select value={chat.harness ?? ""} onChange={(e) => update({ harness: (e.target.value || null) as HarnessId | null })}>
+              <option value="">auto</option>
+              {HARNESS_IDS.filter((h) => h !== "mock" || st.settings?.advanced.showMockHarness).map((h) => h === "duo" && !chat.projectId
+                ? <option key={h} value={h} disabled title="GitLab Duo runs in project chats only">duo (project chats only)</option>
+                : <option key={h} value={h}>{h}</option>)}
+            </select>
+          </label>
+          <label className="ctl" title={chat.mode ? "The drive mode picks the model" : "Model id passed to the harness (blank = harness default)"}>
+            <span>Model</span>
+            <ModelInput className="model-input" harness={chat.harness ?? roleOf(chat.agentRole)?.harness ?? st.settings?.general.defaultHarness ?? null}
+              value={chat.model ?? ""} disabled={!!chat.mode} onChange={(v) => update({ model: v || null })} />
+          </label>
+          <UsageMeter chatId={chatId} />
+        </div>
       </section>
-      <ThreadsPanel key={chatId} chatId={chatId} otherPanel={st.flowPanel?.chatId === chatId || st.artifactsPanel === chatId} />
-      {st.artifactsPanel === chatId && <ArtifactsPanel chatId={chatId} onClose={() => useStore.setState({ artifactsPanel: null })} />}
-      {st.flowPanel?.chatId === chatId && <FlowPanel chatId={chatId} agentId={st.flowPanel.agentId} onClose={() => useStore.setState({ flowPanel: null })} />}
+      {tab && (
+        <div className="side-sheet" role="complementary" aria-label="Side sheet">
+          {tab === "threads" && <ThreadsPanel key={chatId} chatId={chatId} />}
+          {tab === "artifacts" && <ArtifactsPanel chatId={chatId} />}
+          {tab === "progress" && <FlowPanel chatId={chatId} agentId={st.flowPanel?.agentId ?? null} />}
+        </div>
+      )}
     </div>
   );
+}
+
+/**
+ * The chat switcher under the chat's title: the other chats of its project (pinned first, newest first), a new chat,
+ * then the archived ones. It replaces the chat lists the sidebar used to show. The master chat lists the projects.
+ */
+function chatSwitcherMenu(chat: Chat): MenuItem[] {
+  const st = useStore.getState();
+  const open = (id: string) => () => void st.openChat(id);
+  if (chat.kind === "master") {
+    return st.projects.map((p) => {
+      const c = chatToOpen(st.chats[p.id] ?? [], st.lastChatByProject[p.id]);
+      return { label: p.name, icon: <FolderOpen size={15} />, hint: c ? c.title : "new chat", onClick: () => void openProjectChat(p.id) };
+    });
+  }
+  const { active, archived } = switcherChats(st.chats[chatKey(chat.projectId)] ?? []);
+  const row = (c: Chat): MenuItem => ({ label: c.title, icon: c.archived ? <Archive size={15} /> : c.pinned ? <Pin size={15} /> : <MessageCircle size={15} />,
+    hint: c.id === chat.id ? "open" : undefined, onClick: open(c.id) });
+  return [
+    ...active.map(row),
+    { separator: true, label: "" },
+    { label: "New chat", icon: <MessageSquarePlus size={15} />, hint: "Ctrl N", onClick: () => void newChatIn(chat.projectId) },
+    ...(archived.length ? [{ separator: true, label: "" }, ...archived.map(row)] : []),
+  ];
 }
 
 function EmptyChat({ isMaster }: { isMaster: boolean }) {
@@ -221,10 +285,9 @@ function DeliveryBadge({ steer, state }: { steer: boolean; state?: keyof typeof 
 /** Memoised: a streaming reply re-renders only its own message, not the whole list. */
 export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Message; inThread?: boolean }) {
   const role = roleOf(m.role);
-  const threadOpen = useStore((s) => !inThread && !!s.openThreads[m.id]);
-  const inPanel = useStore((s) => !inThread && !!s.panelThreads[m.id]);
-  const [focusReq, setFocusReq] = useState(0);
-  const reply = () => { if (!threadOpen) void useStore.getState().openThread(m.chatId, m.id); setFocusReq((n) => n + 1); };
+  // A thread opens in the side sheet's Threads tab; the chip shows "open" while it is expanded there.
+  const threadOpen = useStore((s) => !inThread && !!s.panelThreads[m.id] && s.threadsPanelOpen && s.flowPanel?.chatId !== m.chatId && s.artifactsPanel !== m.chatId);
+  const reply = () => useStore.getState().openSideThread(m.chatId, m.id, { reply: true });
   const toggleThread = () => useStore.getState().toggleThread(m.chatId, m.id);
   const agent = useStore((s) => (m.agentId ? s.agents[m.agentId] : undefined));
   const showTokens = useStore((s) => s.settings?.tokens.showTokenCounts);
@@ -290,7 +353,7 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
           )}
         </div>
         <div className="msg-footer">
-          {!inThread && m.replyCount > 0 && <ThreadPill root={m} open={threadOpen} inPanel={inPanel} onClick={toggleThread} />}
+          {!inThread && m.replyCount > 0 && <ThreadPill root={m} open={threadOpen} onClick={toggleThread} />}
           {m.reactions.map((r) => <button key={r} className="reaction" onClick={() => react(r)} title={`${REACTIONS[r]?.label ?? r} — click to remove`}><ReactionIcon emoji={r} /></button>)}
           <div className="msg-actions">
             <button onClick={() => setPicker((p) => !p)} title="React"><Smile size={15} /></button>
@@ -302,7 +365,6 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
           </div>
           {picker && <div className="emoji-picker">{EMOJIS.map((e, i) => <button key={e} style={{ animationDelay: `${i * 22}ms` }} title={REACTIONS[e]?.label} onClick={() => react(e)}><ReactionIcon emoji={e} size={17} /></button>)}</div>}
         </div>
-        {!inThread && <InlineThread root={m} open={threadOpen} focusReq={focusReq} />}
       </div>
     </div>
   );
@@ -358,7 +420,7 @@ function retryMenu(m: Message): MenuItem[] {
 const plural = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`;
 
 /** The "N replies" pill under a message: who replied, how many, and a chevron that flips when the thread is open. */
-export function ThreadPill({ root, open, inPanel, onClick }: { root: Message; open: boolean; inPanel?: boolean; onClick: () => void }) {
+export function ThreadPill({ root, open, onClick }: { root: Message; open: boolean; onClick: () => void }) {
   const replies = useStore((s) => s.threads[root.id])?.filter((r) => r.id !== root.id);
   const faces: Message[] = [];
   for (const r of replies ?? []) if (!faces.some((f) => f.author === r.author && f.role === r.role)) faces.push(r);
@@ -366,14 +428,14 @@ export function ThreadPill({ root, open, inPanel, onClick }: { root: Message; op
   if (root.threadArchived) {
     return (
       <button className={`thread-pill archived ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open}
-        title={open ? "Collapse archived thread" : "Archived thread — click to look inside or restore it"}>
+        title={open ? "Fold the archived thread in the side sheet" : "Archived thread — click to look inside or restore it"}>
         <Archive size={12} /><span className="tp-count">Archived thread · {plural(root.replyCount)}</span>
         <ChevronDown size={13} className="tp-chev" />
       </button>
     );
   }
   return (
-    <button className={`thread-pill ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open} title={open ? "Collapse thread" : "Expand thread"}>
+    <button className={`thread-pill ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open} title={open ? "Fold the thread in the side sheet" : "Open the thread in the side sheet"}>
       <span className="tp-faces">
         {faces.length ? faces.slice(0, 3).map((f) => (
           <span key={f.id} className="tp-face">{f.author === "user" ? <UserAvatar size={18} /> : f.author === "system" ? <span className="role-badge sys"><Info size={10} /></span> : <RoleIcon role={f.role} size={18} framed />}</span>
@@ -381,82 +443,8 @@ export function ThreadPill({ root, open, inPanel, onClick }: { root: Message; op
       </span>
       <span className="tp-count">{plural(root.replyCount)}</span>
       {last && <span className="tp-last">· last {ago(last.createdAt)} ago</span>}
-      {inPanel && <span className="tp-where" title="Expanded in the Threads panel"><PanelRight size={12} /></span>}
-      <ChevronDown size={13} className="tp-chev" />
+      <ChevronRight size={13} className="tp-chev" />
     </button>
-  );
-}
-
-/**
- * Replies shown inline under their root message. Expanding animates the height (grid 0fr → 1fr), fades the card in and
- * staggers the replies; collapsing plays it backwards and unmounts once the transition is over.
- */
-function InlineThread({ root, open, focusReq }: { root: Message; open: boolean; focusReq: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [mounted, setMounted] = useState(open);
-  // Already open when mounted (the message scrolled back into view, or the chat was reopened): show it without replaying the expand.
-  const [shown, setShown] = useState(open);
-
-  useEffect(() => {
-    if (open) { setMounted(true); return; }
-    setShown(false);
-    const t = setTimeout(() => setMounted(false), 380);
-    return () => clearTimeout(t);
-  }, [open]);
-  // Mounted collapsed → force a style flush → flip to open, so the browser animates from 0 height.
-  useLayoutEffect(() => {
-    if (mounted && open && !shown && ref.current) { void ref.current.offsetHeight; setShown(true); }
-  }, [mounted, open, shown]);
-  // "Reply" focuses the thread's composer once the card has opened, bringing it into view.
-  useEffect(() => {
-    if (!focusReq) return;
-    const t = setTimeout(() => {
-      const ta = ref.current?.querySelector("textarea");
-      ta?.focus({ preventScroll: true });
-      ta?.closest(".composer-wrap")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }, 260);
-    return () => clearTimeout(t);
-  }, [focusReq]);
-
-  if (!mounted) return null;
-  return (
-    <div ref={ref} className={`inline-thread ${shown ? "open" : ""}`} inert={!open}>
-      <div className="it-clip"><ThreadCard root={root} /></div>
-    </div>
-  );
-}
-
-function ThreadCard({ root }: { root: Message }) {
-  const replies = useStore((s) => s.threads[root.id])?.filter((r) => r.id !== root.id);
-  const chat = useStore((s) => s.chatById[root.chatId]);
-  const busy = useStore((s) => Object.values(s.agents).some((a) => a.chatId === root.chatId && a.status === "running"));
-  if (!chat) return null;
-  const n = replies?.length ?? root.replyCount;
-  return (
-        <div className="it-card">
-          <header className="it-head">
-            <span className="it-title"><MessageCircle size={14} /> Thread</span>
-            <span className="it-sub">{n ? plural(n) : "No replies yet"}</span>
-            {root.threadArchived && <span className="it-archived-note"><Archive size={12} /> Archived</span>}
-            <span className="it-tools">
-              {root.threadArchived && <button className="it-collapse" title="Restore thread" onClick={() => void archiveThread(root, false)}><ArchiveRestore size={14} /></button>}
-              <button className="it-collapse" title="Thread actions" aria-label="Thread actions" onClick={(e) => openMenu(e, threadMenu(root), true)}><MoreHorizontal size={14} /></button>
-              <button className="it-collapse" title="Show in Threads panel" onClick={() => useStore.getState().openSideThread(root.chatId, root.id)}><PanelRight size={14} /></button>
-              <button className="it-collapse" title="Open in new window" onClick={() => void api().openThreadWindow(root.chatId, root.id)}><AppWindow size={14} /></button>
-              <button className="it-collapse" title="Collapse thread" onClick={() => useStore.getState().closeThread(root.id)}><ChevronUp size={15} /></button>
-            </span>
-          </header>
-          <div className="it-list">
-            {replies === undefined
-              ? <div className="it-loading"><Dots /></div>
-              : replies.length === 0
-                ? <div className="it-empty">Start the thread — replies stay attached to this message.</div>
-                : replies.map((r, i) => (
-                  <div key={r.id} className="it-item" style={{ "--i": Math.min(i, 10) } as CSSProperties}><MessageItem m={r} inThread /></div>
-                ))}
-          </div>
-          <Composer chat={chat} parentId={root.id} compact busy={busy} placeholder="Reply in thread…" />
-        </div>
   );
 }
 

@@ -117,7 +117,6 @@ describe("cleanup UI wiring", () => {
     }
     expect(read("src/renderer/views/ThreadsPanel.tsx")).toContain("threadMenu(r)");
     const chat = read("src/renderer/views/ChatView.tsx");
-    expect(chat).toContain("threadMenu(root)");
     expect(chat).toContain("deleteMessage(m)");
     expect(chat).toContain("clearChat(chat)");
   });

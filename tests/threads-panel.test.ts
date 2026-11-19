@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Message } from "../src/shared/types";
-import { chatThreads, messageSide, previewText, threadsPanelMode } from "../src/renderer/threadList";
+import { chatThreads, messageSide, previewText } from "../src/renderer/threadList";
 
 let seq = 0;
 const msg = (id: string, author: Message["author"], over: Partial<Message> = {}): Message => ({
@@ -24,7 +24,7 @@ describe("messenger layout", () => {
     expect(css).toMatch(/\.msg\.side-right > \.avatar \{[^}]*grid-column: 2/);
     expect(css).toMatch(/\.msg\.side-right > \.msg-body \{[^}]*align-items: flex-end/);
     // Thread columns use narrower avatars; their rules must still keep the avatar on the right.
-    expect(css).toMatch(/\.inline-thread \.msg\.side-right, \.thread-side \.msg\.side-right, \.threads-panel \.msg\.side-right \{ grid-template-columns: minmax\(0, 1fr\) 24px; \}/);
+    expect(css).toMatch(/\.thread-side \.msg\.side-right, \.threads-panel \.msg\.side-right \{ grid-template-columns: minmax\(0, 1fr\) 24px; \}/);
     const tsx = readFileSync(join(root, "src/renderer/views/ChatView.tsx"), "utf8");
     expect(tsx).toContain("side-${messageSide(m)}");
   });
@@ -56,11 +56,4 @@ describe("Threads panel", () => {
     expect(previewText("x".repeat(200), 20)).toHaveLength(20);
   });
 
-  it("folds to a rail when collapsed, while another side panel is open, or when the chat has no threads", () => {
-    expect(threadsPanelMode({ open: true, otherPanel: false, count: 2, openedEmpty: false })).toBe("full");
-    expect(threadsPanelMode({ open: false, otherPanel: false, count: 2, openedEmpty: false })).toBe("rail");
-    expect(threadsPanelMode({ open: true, otherPanel: true, count: 2, openedEmpty: false })).toBe("rail");
-    expect(threadsPanelMode({ open: true, otherPanel: false, count: 0, openedEmpty: false })).toBe("rail");
-    expect(threadsPanelMode({ open: true, otherPanel: false, count: 0, openedEmpty: true })).toBe("full");
-  });
 });

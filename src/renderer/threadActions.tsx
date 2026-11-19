@@ -4,14 +4,14 @@ import { previewText } from "./threadList";
 import { Archive, ArchiveRestore, Trash2 } from "./components/icons";
 import type { MenuItem } from "./components/ContextMenu";
 
-/** Archive / delete for threads and messages, shared by the Threads panel, inline threads and the message actions. */
+/** Archive / delete for threads and messages, shared by the Threads tab of the side sheet and the message actions. */
 
 const failed = (e: any) => useStore.getState().toast("warn", String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
 const quote = (m: Message) => previewText(m.content, 40) || "this message";
 
-/** Fold a thread up everywhere it is expanded (inline and in the panel). */
+/** Fold a thread up in the Threads tab. */
 function collapse(rootId: string): void {
-  useStore.setState((st) => ({ openThreads: { ...st.openThreads, [rootId]: false }, panelThreads: { ...st.panelThreads, [rootId]: false } }));
+  useStore.getState().closeThread(rootId);
 }
 
 export async function archiveThread(root: Message, archived: boolean): Promise<void> {

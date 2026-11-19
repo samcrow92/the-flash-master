@@ -4,8 +4,9 @@ import type { ChatArtifacts } from "@shared/types";
 import { unifiedPatch } from "@shared/diff";
 import { api, useStore } from "../store";
 import { Markdown } from "../components/Markdown";
+import { SheetTabs } from "../components/SheetTabs";
 import { DiffStat, DiffView } from "../components/DiffView";
-import { Code2, Columns2, Copy, Download, FileCode, FileDiff, FilePlus2, FileText, FileX2, GitBranch, Maximize2, Package, RotateCcw, Rows2, WrapText, X } from "../components/icons";
+import { Code2, Columns2, Copy, Download, FileCode, FileDiff, FilePlus2, FileText, FileX2, GitBranch, Maximize2, RotateCcw, Rows2, WrapText, X } from "../components/icons";
 
 type Viewer =
   | { kind: "diff"; title: string; path: string; oldText: string; newText: string; sub?: string }
@@ -21,7 +22,7 @@ const ago = (t: number) => {
 const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
 /** Right-hand panel: everything agents produced in this chat — changed files (with diffs), git changes, saved artifacts, code snippets. */
-export function ArtifactsPanel({ chatId, onClose }: { chatId: string; onClose: () => void }) {
+export function ArtifactsPanel({ chatId }: { chatId: string }) {
   const st = useStore();
   const rev = useStore((s) => s.artifactsRev[chatId] ?? 0);
   const messages = st.messages[chatId] ?? [];
@@ -74,10 +75,7 @@ export function ArtifactsPanel({ chatId, onClose }: { chatId: string; onClose: (
   const count = { changes: data?.changes.length ?? 0, artifacts: data?.artifacts.length ?? 0, snippets: snippets.length };
   return (
     <aside className="thread artifacts-panel">
-      <header className="thread-header">
-        <strong className="row gap-s"><Package size={16} /> Artifacts</strong>
-        <button className="ghost icon-only" title="Close" onClick={onClose}><X size={16} /></button>
-      </header>
+      <SheetTabs chatId={chatId} current="artifacts" />
       <div className="seg art-tabs">
         <button className={tab === "changes" ? "on" : ""} onClick={() => setTab("changes")}><FileDiff size={13} /> Changes {count.changes > 0 && <b>{count.changes}</b>}</button>
         <button className={tab === "git" ? "on" : ""} onClick={() => setTab("git")}><GitBranch size={13} /> Git</button>
