@@ -11,7 +11,7 @@ TheFlashMaster is a desktop app for Windows x64 and macOS (Apple silicon and Int
 | Cursor Agent | `cursor-agent acp` (ACP), with your Cursor login |
 | Claude Code | `claude-agent-acp`, Claude Code's official ACP bridge (`npm i -g @agentclientprotocol/claude-agent-acp`), with your Claude Code login |
 | Pi coding agent | `pi --mode rpc` (Pi's native RPC; Pi has no MCP, so Pi agents can't use the MCP tools) |
-| GitLab Duo CLI | `duo run --goal …` in headless mode, with session continuation |
+| GitLab Duo CLI | headless `duo run` (goal in `DUO_WORKFLOW_GOAL`), with session continuation; its log shows as tool calls and activity |
 | Mock | Built-in offline demo, so you can try everything without a CLI |
 
 The app calls no model API itself and stores no model credentials. There's no login: it's a single-user local app.
