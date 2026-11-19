@@ -15,6 +15,7 @@ import { diffLines } from "@shared/diff";
 import { paragraphBreak } from "@shared/replySegments";
 import { agentLabel, pickInstanceName } from "@shared/instances";
 import { planEdit, planRetry, type RewindPlan } from "@shared/rewind";
+import { BUILTIN_COMMAND_NAMES } from "@shared/inline-commands";
 import type { Db } from "./db";
 import type { MemoryStore } from "./memory";
 import { describeSync, type KnowledgeBase } from "./knowledge";
@@ -288,9 +289,10 @@ export class Orchestrator {
     // Steering: a message sent while the chat's agent is working goes into the running turn.
     const busyLive = [...this.live.values()].find((l) => l.chatId === chatId && l.threadRoot === threadRoot && l.busy);
     const mentioned = parseMention(content, this.d.roles().map((r) => r.name)).role;
-    const steer = !!busyLive && (o.whileBusy ?? this.d.settings().chat.defaultSendWhileBusy) === "steer" && !parseSlash(content).command
+    const command = this.slash(content).command;
+    const steer = !!busyLive && (o.whileBusy ?? this.d.settings().chat.defaultSendWhileBusy) === "steer" && !command
       && (!mentioned || mentioned === busyLive.role.name);
-    const queued = !!busyLive && !steer && !parseSlash(content).command && (!mentioned || mentioned === busyLive.role.name);
+    const queued = !!busyLive && !steer && !command && (!mentioned || mentioned === busyLive.role.name);
     const userMsg = this.d.db.addMessage({ chatId, parentId: threadRoot, author: "user", content, attachments, steer,
       delivery: steer ? "sent" : queued ? "queued" : undefined });
     this.d.emit({ type: "message.created", message: userMsg });
@@ -384,11 +386,16 @@ export class Orchestrator {
     if (cs.upto >= user.seq) this.d.db.setChatSummary(chat.id, "", this.d.db.lastResetBefore(chat.id, user.seq));
   }
 
+  /** The message's /command: a leading one, or a known one (built-in or skill) anywhere in the text. */
+  private slash(content: string) {
+    return parseSlash(content, [...BUILTIN_COMMAND_NAMES, ...this.d.skills().map((k) => k.command)]);
+  }
+
   /** Run a stored user message: slash commands, @mentions, then the agent's turn. */
   private async dispatch(chat: Chat, threadRoot: string | null, userMsg: Message, content: string, attachments: Attachment[],
     pick?: { harness: HarnessId; model: string | null }): Promise<void> {
     const chatId = chat.id;
-    const slash = parseSlash(content);
+    const slash = this.slash(content);
     if (slash.command === "superpowers") {
       const on = !chat.superpowers;
       this.d.db.updateChat(chatId, { superpowers: on });
