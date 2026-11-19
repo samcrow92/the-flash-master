@@ -601,44 +601,48 @@ export function buildTools(d: {
       handler: async (a) => scm(a).components(String(a.stream)),
     },
     {
-      set: "jazz", name: "scm_list", description: "Files and folders under a path of a component in a stream (needs the EWM SCM command line on this PC). depth: default 1.",
-      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("folder, default the component root"), depth: { type: "number" } }, ["stream", "component"]),
+      set: "jazz", name: "scm_list", description: "Files and folders in an EWM folder: pass the folder link the user gave as link (or stream + component + path). path: subfolder inside it, optional. depth: default 1. Works without the EWM command line.",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("folder, default the link's folder or the component root"), depth: { type: "number" }, folder: s("folder item id (filled from a link)") }, ["stream", "component"]),
       handler: async (a) => {
-        const all = await scm(a).list(String(a.stream), String(a.component), a.path ?? "/", a.depth ?? 1);
+        const all = await scm(a).list(String(a.stream), String(a.component), a.path ?? "/", a.depth ?? 1, a.folder);
         return { count: all.length, entries: all.slice(0, 500).map((e) => e.folder ? `${e.path}/` : e.path), ...(all.length > 500 ? { note: "first 500 shown; narrow the path" } : {}) };
       },
     },
     {
-      set: "jazz", name: "scm_find_files", description: "Find files in a component by glob (\"*.c\", \"src/**/can_*.h\") or words in the path (needs the EWM SCM command line).",
-      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), pattern: s("glob or words"), path: s("folder to search, optional") }, ["stream", "component", "pattern"]),
-      handler: async (a) => { const hits = await scm(a).find(String(a.stream), String(a.component), String(a.pattern), a.path ?? "/"); return { count: hits.length, files: hits.slice(0, 200).map((e) => e.path) }; },
+      set: "jazz", name: "scm_find_files", description: "Find files in an EWM folder (link) or component by glob (\"*.pdf\", \"src/**/can_*.h\") or words in the path. Works without the EWM command line.",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), pattern: s("glob or words"), path: s("folder to search, optional"), folder: s("folder item id (filled from a link)") }, ["stream", "component", "pattern"]),
+      handler: async (a) => { const hits = await scm(a).find(String(a.stream), String(a.component), String(a.pattern), a.path ?? "/", 50, a.folder); return { count: hits.length, files: hits.slice(0, 200).map((e) => e.path) }; },
     },
     {
-      set: "jazz", name: "scm_read_file", description: "Read a text file from an EWM stream (latest version). Big files: pass startLine and lines (default 400 lines).",
-      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("file path inside the component"), startLine: { type: "number" }, lines: { type: "number" } }, ["stream", "component", "path"]),
-      handler: async (a) => scm(a).readFile(String(a.stream), String(a.component), String(a.path), { startLine: a.startLine, lines: a.lines }),
+      set: "jazz", name: "scm_read_file", description: "Read a text file from EWM (latest version). With a folder link, path is relative to that folder (e.g. \"specs/req.txt\" or just the file name). Big files: pass startLine and lines (default 400 lines). Binary files (PDF, Office): use scm_download.",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("file path (inside the link's folder, or the component)"), startLine: { type: "number" }, lines: { type: "number" }, folder: s("folder item id (filled from a link)") }, ["stream", "component", "path"]),
+      handler: async (a) => scm(a).readFile(String(a.stream), String(a.component), String(a.path), { startLine: a.startLine, lines: a.lines, folder: a.folder }),
     },
     {
-      set: "jazz", name: "scm_download", description: "Copy text files from an EWM stream into your working folder (read-only on the EWM side). to: folder relative to your working folder, default ewm/<component>.",
-      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), paths: { type: "array", items: { type: "string" }, description: "file paths inside the component (max 50)" }, to: s("target folder, optional") }, ["stream", "component", "paths"]),
+      set: "jazz", name: "scm_download", description: "Copy files (text or binary, e.g. PDFs) from EWM into your working folder (read-only on the EWM side). With a folder link and no paths, copies the whole folder (max 500 files). paths: relative to the link's folder or the component. to: folder relative to your working folder, default ewm/<component>.",
+      inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), paths: { type: "array", items: { type: "string" }, description: "file paths (max 200); optional with a folder link" }, to: s("target folder, optional"), folder: s("folder item id (filled from a link)") }, ["stream", "component"]),
       handler: async (a, ctx) => {
         const root = agentDir(ctx.agentId);
         const to = String(a.to ?? `ewm/${String(a.component).replace(/[^\w.-]+/g, "_")}`);
         if (isAbsolute(to)) throw new Error("to must be relative to your working folder");
         const base = resolve(root, to);
         if (relative(root, base).startsWith("..")) throw new Error("to must stay inside your working folder");
+        let paths: string[] = Array.isArray(a.paths) ? a.paths.map(String).slice(0, 200) : [];
+        if (!paths.length) {
+          if (!a.folder) throw new Error("paths is required (or pass a folder link to copy the whole folder)");
+          paths = (await scm(a).list(String(a.stream), String(a.component), "/", 50, a.folder)).filter((e) => !e.folder).map((e) => e.path).slice(0, 500);
+        }
         const saved: string[] = [], failed: string[] = [];
-        for (const p of (a.paths ?? []).slice(0, 50)) {
+        for (const p of paths) {
           try {
-            const rel = normPath(String(p));
-            const text = await scm(a).fileText(String(a.stream), String(a.component), rel);
-            const out = join(base, rel);
+            const f = await scm(a).fileBytes(String(a.stream), String(a.component), normPath(p), a.folder);
+            const out = join(base, normPath(f.path));
             mkdirSync(dirname(out), { recursive: true });
-            writeFileSync(out, text);
+            writeFileSync(out, f.data);
             saved.push(relative(root, out).replace(/\\/g, "/"));
           } catch (e: any) { failed.push(`${p}: ${e?.message ?? e}`); }
         }
-        return { saved, ...(failed.length ? { failed } : {}) };
+        return { count: saved.length, saved: saved.slice(0, 200), ...(failed.length ? { failed: failed.slice(0, 50) } : {}) };
       },
     },
     {
@@ -651,7 +655,8 @@ export function buildTools(d: {
         const stream = a.stream ? await c.stream(String(a.stream)).catch(() => ({ id: String(a.stream), name: String(a.stream) })) : undefined;
         const component = stream && a.component ? await c.component(stream.id, String(a.component)).then((x) => x.component).catch(() => ({ id: String(a.component), name: String(a.component) })) : undefined;
         return { server: a.repo, ...(stream ? { stream: { id: stream.id, name: stream.name } } : {}), ...(component ? { component } : {}),
-          ...(a.path ? { path: a.path } : {}), ...(a.changeset ? { changeset: a.changeset } : {}) };
+          ...(a.path ? { path: a.path } : {}), ...(a.folder ? { folder: a.folder, next: "scm_list with this link lists the folder; scm_read_file with the link + a file name reads a file in it" } : {}),
+          ...(a.changeset ? { changeset: a.changeset } : {}) };
       },
     },
     // ---------------- EWM source control changes: only in repository workspaces; streams change only by deliver ----------------
@@ -843,6 +848,7 @@ export function withScmLink(t: ToolDef): ToolDef {
     handler: async (a: any, ctx) => {
       const full = scmTarget({ ...(a ?? {}) });
       const missing = required.filter((k) => full[k] === undefined || full[k] === "");
+      if (missing.length === 1 && missing[0] === "path" && full.folder) throw new Error("path is required: the link is a folder, so pass a file inside it (e.g. its file name). List the folder with scm_list and this link first.");
       if (missing.length) throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required (or pass the EWM link as link)`);
       return t.handler(full, ctx);
     },

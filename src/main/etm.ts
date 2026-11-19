@@ -12,7 +12,7 @@
 
 export interface JazzHttp {
   request(method: string, path: string, body?: string, headers?: Record<string, string>):
-    Promise<{ status: number; ok: boolean; headers: { get(name: string): string | null }; text(): Promise<string> }>;
+    Promise<{ status: number; ok: boolean; headers: { get(name: string): string | null }; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
   readonly baseUrl: string;
 }
 
