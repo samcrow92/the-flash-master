@@ -30,6 +30,7 @@ import { MAX_INLINE_IMAGE_BYTES, resolveImage, setAgentImageDir } from "./images
 import { EtmClient } from "./etm";
 import { ScmClient, type CliRunner } from "./scm";
 import { findScmCli, scmCliRunner } from "./scm-cli";
+import { ScmWriter } from "./scm-write";
 import { SecretStore } from "./secrets";
 import { Updater, parseFeed } from "./updater";
 import { currentProxyEnv, setProxyEnv } from "./win-env";
@@ -391,13 +392,13 @@ const etm = (): EtmClient | null => {
 };
 let scmClient: ScmClient | null = null;
 let scmHttp: JazzClient | null = null;
-/** EWM SCM command line for folder listings; signs in with the Jazz user/password when those are set. */
-const scmCli = (): { run: CliRunner; repo: string } | null => {
+/** EWM SCM command line (folder listings, and the changes in scm-write.ts); signs in with the Jazz user/password when those are set. */
+const scmCli = (timeoutMs = 180_000): { run: CliRunner; repo: string } | null => {
   const j = settings.get().jazz;
   const exe = findScmCli(j.scm.cliPath);
   if (!exe) return null;
   const creds = (j.authType === "basic" || j.authType === "form") && j.username && j.hasPassword ? { user: j.username, password: readJazzPassword() } : null;
-  return { run: scmCliRunner(exe, creds), repo: j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "") };
+  return { run: scmCliRunner(exe, creds, timeoutMs), repo: j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "") };
 };
 const scm = (): ScmClient | null => {
   const j = settings.get().jazz;
@@ -407,6 +408,16 @@ const scm = (): ScmClient | null => {
   if (!scmClient || scmHttp !== http) { scmClient = new ScmClient(http, scmCli); scmHttp = http; }
   return scmClient;
 };
+/** EWM source control changes (workspaces, check-in, accept, deliver). Loads and delivers can take long: 30 min per command. */
+let scmWriter: ScmWriter | null = null;
+const scmWrite = (): ScmWriter | null => {
+  if (!scm()) return null;
+  scmWriter ??= new ScmWriter({
+    cli: () => scmCli(30 * 60_000), readOnly: () => settings.get().permissions.readOnly, allowDeliver: () => settings.get().jazz.scm.deliver,
+    streamNames: async () => { const c = scm(); return c ? (await c.streams({ max: 500 })).map((x) => x.name) : []; },
+  });
+  return scmWriter;
+};
 /** Jazz hosts (work items, test management, requirements) whose certificate may be accepted when trustServerCert is on. */
 const jazzHosts = () => {
   const j = settings.get().jazz;
@@ -414,7 +425,7 @@ const jazzHosts = () => {
 };
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
-bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, etm, scm, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
+bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, etm, scm, scmWrite, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
   memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,

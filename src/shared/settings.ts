@@ -156,8 +156,11 @@ export interface Settings {
     rm: { enabled: boolean; serverUrl: string; projects: string[]; config: string; cacheHours: number; component: string };
     /** Engineering Test Management (ETM / RQM): test plans, suites, cases, scripts, execution records and results. Same sign-in. */
     qm: { enabled: boolean; serverUrl: string; projectArea: string; config: string };
-    /** EWM source control, read-only (streams, components, files). cliPath: lscm/scm for folder listings; blank = find it on PATH. */
-    scm: { enabled: boolean; cliPath: string };
+    /**
+     * EWM source control: streams, components, files (REST), plus repository workspaces, check-in, change sets and accept
+     * through the SCM command line. cliPath: lscm/scm; blank = find it on PATH. deliver: agents may deliver to streams.
+     */
+    scm: { enabled: boolean; cliPath: string; deliver: boolean };
     /** Accept a self-signed or company-CA certificate from the Jazz servers (ccm, qm, rm hosts only) that Windows doesn't trust. */
     trustServerCert: boolean;
     authType: "form" | "basic" | "windows" | "browser"; // windows = integrated Kerberos/NTLM; browser = SSO window (Jazz Authorization Server / OIDC)
@@ -331,7 +334,7 @@ export const DEFAULT_SETTINGS: Settings = {
     projectAreas: [],
     rm: { enabled: false, serverUrl: "", projects: [], config: "", cacheHours: 24, component: "" },
     qm: { enabled: false, serverUrl: "", projectArea: "", config: "" },
-    scm: { enabled: false, cliPath: "" },
+    scm: { enabled: false, cliPath: "", deliver: false },
     trustServerCert: false,
     authType: "basic",
     username: "",

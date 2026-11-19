@@ -7,6 +7,7 @@ import type { JazzClient } from "./jazz";
 import type { Requirements } from "./requirements";
 import { QM_TYPES, VERDICTS, qmType, type EtmClient, type QmWrite } from "./etm";
 import { normPath, type ScmClient } from "./scm";
+import type { ScmWriter } from "./scm-write";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { RoleDef } from "@shared/types";
@@ -26,7 +27,7 @@ export function buildTools(d: {
   requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
   knowledge?: KnowledgeBase; codeGraph?: CodeGraph; readOnly?: () => boolean;
-  etm?: () => EtmClient | null; scm?: () => ScmClient | null;
+  etm?: () => EtmClient | null; scm?: () => ScmClient | null; scmWrite?: () => ScmWriter | null;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -46,6 +47,22 @@ export function buildTools(d: {
     const c = d.scm?.();
     if (!c) throw new Error("EWM source control is not configured (Settings → Integrations → IBM Jazz → Source control)");
     return c;
+  };
+  const scmw = () => {
+    const c = d.scmWrite?.();
+    if (!c) throw new Error("EWM source control is not configured (Settings → Integrations → IBM Jazz → Source control)");
+    return c;
+  };
+  /** A sandbox folder inside the agent's working folder (default ewm/<workspace>): returns its absolute path. */
+  const sandbox = (agentId: string, rel: unknown, workspace?: unknown): { root: string; dir: string } => {
+    const root = agentDir(agentId);
+    const to = String(rel ?? "").trim() || (workspace ? `ewm/${String(workspace).replace(/[^\w.-]+/g, "_")}` : "");
+    if (!to) throw new Error("sandbox is required: the folder scm_load loaded the workspace into (relative to your working folder)");
+    if (isAbsolute(to)) throw new Error("sandbox must be relative to your working folder");
+    const dir = resolve(root, to);
+    const rp = relative(root, dir);
+    if (rp.startsWith("..") || isAbsolute(rp)) throw new Error("sandbox must stay inside your working folder");
+    return { root, dir };
   };
   /** Folder an agent works in: its worktree, else its project folder, else the no-project folder (C:\\Data\\.wt by default). */
   const agentDir = (agentId: string): string => {
@@ -561,7 +578,7 @@ export function buildTools(d: {
       inputSchema: obj({ testcase: s("test case id"), requirement: s("requirement URL"), remove: { type: "boolean" }, projectArea: s("optional") }, ["testcase", "requirement"]),
       handler: async (a) => ({ requirements: await etm().linkRequirement(String(a.testcase), String(a.requirement), !!a.remove, a.projectArea) }),
     },
-    // ---------------- EWM source control (read-only: nothing is checked in or delivered) ----------------
+    // ---------------- EWM source control, reading (REST; folder listings through the SCM command line) ----------------
     {
       set: "jazz", name: "scm_streams", description: "List EWM source control streams (name, id). query: words in the name, optional.",
       inputSchema: obj({ query: s("optional"), max: { type: "number", description: "default 50" } }),
@@ -612,6 +629,85 @@ export function buildTools(d: {
         }
         return { saved, ...(failed.length ? { failed } : {}) };
       },
+    },
+    // ---------------- EWM source control changes: only in repository workspaces; streams change only by deliver ----------------
+    {
+      set: "jazz", name: "scm_workspaces", description: "List EWM repository workspaces (name, owner, the stream it flows to). name: filter, optional.",
+      inputSchema: obj({ name: s("name filter, optional"), max: { type: "number", description: "default 50" } }),
+      handler: async (a) => scmw().workspaces({ name: a.name, max: a.max }),
+    },
+    {
+      set: "jazz", name: "scm_create_workspace",
+      description: "Create an EWM repository workspace that flows to a stream (starts with the stream's current content). Name it after the task, e.g. \"<user> CAN timeout fix\". Then scm_load it.",
+      inputSchema: obj({ name: s("new workspace name"), stream: s("stream it flows to"), description: s("optional") }, ["name", "stream"]),
+      handler: async (a) => scmw().createWorkspace(String(a.name), String(a.stream), a.description),
+    },
+    {
+      set: "jazz", name: "scm_load",
+      description: "Load a repository workspace (never a stream) into a sandbox folder in your working folder, so you can edit its files with your normal file tools. sandbox: relative folder, default ewm/<workspace>. components: optional, default all. force: overwrite local files that are in the way.",
+      inputSchema: obj({ workspace: s("repository workspace name or id"), sandbox: s("folder relative to your working folder, optional"),
+        components: { type: "array", items: { type: "string" }, description: "component names, optional" }, force: { type: "boolean" } }, ["workspace"]),
+      handler: async (a, ctx) => {
+        const { root, dir } = sandbox(ctx.agentId, a.sandbox, a.workspace);
+        mkdirSync(dir, { recursive: true });
+        const r = await scmw().load(String(a.workspace), dir, Array.isArray(a.components) ? a.components.map(String) : [], !!a.force);
+        return { ...r, sandbox: relative(root, dir).replace(/\\/g, "/") || "." };
+      },
+    },
+    {
+      set: "jazz", name: "scm_status",
+      description: "Status of a sandbox: unchecked-in local changes, outgoing and incoming change sets, conflicts. Run it before checking in, accepting or delivering.",
+      inputSchema: obj({ sandbox: s("sandbox folder relative to your working folder") }, ["sandbox"]),
+      handler: async (a, ctx) => scmw().status(sandbox(ctx.agentId, a.sandbox).dir),
+    },
+    {
+      set: "jazz", name: "scm_checkin",
+      description: "Check local changes of a sandbox in to the repository workspace (not to a stream): a new change set with your comment, or an existing one (changeset). paths: files or folders inside the sandbox, default the whole sandbox. workItem: work item number to link (most EWM projects require one before delivery).",
+      inputSchema: obj({ sandbox: s("sandbox folder relative to your working folder"), comment: s("change set comment: what and why"),
+        paths: { type: "array", items: { type: "string" }, description: "paths relative to the sandbox, optional" },
+        changeset: s("existing change set (alias or uuid), optional"), workItem: s("work item number, optional") }, ["sandbox", "comment"]),
+      handler: async (a, ctx) => {
+        const { dir } = sandbox(ctx.agentId, a.sandbox);
+        const paths = Array.isArray(a.paths) && a.paths.length ? a.paths.map((p: unknown) => join(dir, normPath(String(p)))) : [dir];
+        return scmw().checkin(paths, { comment: a.comment, changeset: a.changeset, workItem: a.workItem });
+      },
+    },
+    {
+      set: "jazz", name: "scm_changesets", description: "Recent change sets of a repository workspace (or stream), newest first: id, comment, author, complete, work items.",
+      inputSchema: obj({ workspace: s("workspace or stream name"), component: s("optional"), max: { type: "number", description: "default 25" } }, ["workspace"]),
+      handler: async (a) => scmw().changesets(String(a.workspace), { component: a.component, max: a.max }),
+    },
+    {
+      set: "jazz", name: "scm_changeset", description: "The files a change set adds, changes, moves or deletes.",
+      inputSchema: obj({ changeset: s("change set alias or uuid") }, ["changeset"]),
+      handler: async (a) => scmw().changes(String(a.changeset)),
+    },
+    {
+      set: "jazz", name: "scm_changeset_update",
+      description: "Change a change set: new comment, link a work item, or complete it (complete: true can't be undone; complete only when the user's process asks for it, deliver completes it anyway).",
+      inputSchema: obj({ changeset: s("change set alias or uuid"), comment: s("optional"), workItem: s("work item number, optional"), complete: { type: "boolean" } }, ["changeset"]),
+      handler: async (a) => scmw().updateChangeset(String(a.changeset), { comment: a.comment, workItem: a.workItem, complete: !!a.complete }),
+    },
+    {
+      set: "jazz", name: "scm_accept",
+      description: "Accept incoming change sets into a repository workspace (never a stream): all from the stream it flows to, or the change sets named. sandbox: the loaded sandbox to update, optional. Conflicts are reported; resolve them in the sandbox and check in.",
+      inputSchema: obj({ workspace: s("repository workspace"), source: s("stream to accept from, default the flow target"),
+        changesets: { type: "array", items: { type: "string" }, description: "optional" }, sandbox: s("sandbox folder relative to your working folder, optional") }, ["workspace"]),
+      handler: async (a, ctx) => scmw().accept(String(a.workspace), { source: a.source, changesets: Array.isArray(a.changesets) ? a.changesets.map(String) : undefined,
+        sandbox: a.sandbox ? sandbox(ctx.agentId, a.sandbox).dir : undefined }),
+    },
+    {
+      set: "jazz", name: "scm_deliver",
+      description: "Deliver outgoing change sets from a repository workspace to a stream, so the team gets them. Only when the user asked for the delivery; needs the user's \"Agents may deliver\" setting. confirm must repeat the stream name. changesets: optional, default all outgoing. Accept incoming changes first (scm_status).",
+      inputSchema: obj({ workspace: s("repository workspace"), stream: s("target stream"), confirm: s("the target stream's name again"),
+        changesets: { type: "array", items: { type: "string" }, description: "optional" } }, ["workspace", "stream", "confirm"]),
+      handler: async (a) => scmw().deliver(String(a.workspace), String(a.stream), a.confirm, Array.isArray(a.changesets) ? a.changesets.map(String) : []),
+    },
+    {
+      set: "jazz", name: "scm_discard",
+      description: "Discard an undelivered change set from a repository workspace (its changes leave the workspace and sandbox). Only when the user asked; confirm must repeat the change set.",
+      inputSchema: obj({ workspace: s("repository workspace"), changeset: s("change set alias or uuid"), confirm: s("the change set again") }, ["workspace", "changeset", "confirm"]),
+      handler: async (a) => scmw().discard(String(a.workspace), String(a.changeset), a.confirm),
     },
     // ---------------- DOORS Next requirements (targeted retrieval: search → get, never whole modules) ----------------
     {
