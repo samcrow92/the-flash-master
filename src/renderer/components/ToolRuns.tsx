@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { imagePathsIn } from "@shared/links";
+import { ChatImage } from "./ImageViewer";
 import { useKeptState } from "./virtual";
 import { api, useStore } from "../store";
 import type { ToolRun } from "@shared/types";
@@ -48,6 +50,8 @@ function ToolRunRow({ run, onStop }: { run: ToolRun; onStop?: () => void }) {
   const Icon = KIND_ICON[run.kind] ?? Wrench;
   const running = run.status === "pending" || run.status === "in_progress";
   const stoppable = running && !!onStop && run.kind !== "think";
+  // Screenshots and pictures a tool produced show under the call, open or not.
+  const images = useMemo(() => (run.output ? imagePathsIn(run.output, 4) : []), [run.output]);
   const expandable = !!(run.input || run.output || running);
   const args = open ? "" : toolArgsPreview(run);
   return (
@@ -77,6 +81,7 @@ function ToolRunRow({ run, onStop }: { run: ToolRun; onStop?: () => void }) {
             empty={running ? "Waiting for output…" : "No output"} note={run.truncated ? "Long output: the middle part was left out." : undefined} />
         </div>
       )}
+      {images.length > 0 && <div className="chat-imgs">{images.map((p) => <ChatImage key={p} target={p} chatId={null} />)}</div>}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import type { HarnessStatus, ModelInfo } from "@shared/types";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
 import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
 import { readFileSync } from "node:fs";
+import { imageBlockMarkdown } from "../images";
 
 type Json = Record<string, any>;
 
@@ -373,6 +374,6 @@ export function piToolOutput(result: unknown): string | undefined {
   if (result == null) return undefined;
   if (typeof result === "string") return result;
   const c = (result as { content?: unknown }).content;
-  const t = Array.isArray(c) ? c.map((x: any) => (x?.type === "text" ? x.text : x?.type === "image" ? "(image)" : "")).filter(Boolean).join("\n") : "";
+  const t = Array.isArray(c) ? c.map((x: any) => (x?.type === "text" ? x.text : x?.type === "image" ? (imageBlockMarkdown(x) ?? "(image)") : "")).filter(Boolean).join("\n") : "";
   return t || undefined;
 }

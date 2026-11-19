@@ -25,6 +25,7 @@ import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeL
 import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
 import { Requirements, parseRmLink } from "./requirements";
 import { resolveLink } from "./links";
+import { MAX_INLINE_IMAGE_BYTES, resolveImage, setAgentImageDir } from "./images";
 import { EtmClient } from "./etm";
 import { ScmClient, type CliRunner } from "./scm";
 import { findScmCli, scmCliRunner } from "./scm-cli";
@@ -414,6 +415,7 @@ bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, e
 // Stored inside the project (<project>/.flashmaster/attachments, git-ignored) so agents can read them with their own tools;
 // chats without a project use the app data folder, which is added to the agents' readable roots.
 const appAttachDir = join(dataDir, "attachments");
+setAgentImageDir(join(dataDir, "agent-images"));
 mkdirSync(appAttachDir, { recursive: true });
 const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
   ".bmp": "image/bmp", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
@@ -723,6 +725,16 @@ const api: FlashApi = {
     const ok = path.startsWith(appAttachDir) || db.listProjects().some((p) => path.startsWith(join(p.path, ".flashmaster", "attachments")));
     if (!ok || !existsSync(path)) throw new Error("attachment not found");
     await shell.openPath(path);
+  },
+  readImage: async (target, chatId) => {
+    const c = chatId ? db.getChat(String(chatId)) : null;
+    const project = c?.projectId ? db.getProject(c.projectId)?.path : null;
+    const r = resolveImage(String(target ?? ""), { platform: process.platform, bases: project ? [project] : [], home: homedir(), exists: existsSync });
+    if (!r.ok) return { ok: false, detail: r.reason };
+    try {
+      if (statSync(r.path).size > MAX_INLINE_IMAGE_BYTES) return { ok: false, detail: "image is too large to show inline" };
+      return { ok: true, path: r.path, dataUrl: `data:${r.mime};base64,${(await readFile(r.path)).toString("base64")}` };
+    } catch (e) { return { ok: false, detail: String((e as Error)?.message ?? e) }; }
   },
   openLink: async (target, chatId) => {
     const c = chatId ? db.getChat(String(chatId)) : null;

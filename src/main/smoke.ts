@@ -4,6 +4,7 @@
  *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, thread, reactions,
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
+ *   FLASH_SMOKE_IMAGES=<dir>      only images in chats: a pasted picture, an agent screenshot (inline + tool call), the viewer
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
@@ -73,6 +74,44 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await shot(join(askDir, "needs-you-cards-light.png"));
       log("info", `smoke-ask: cards=${await js<number>("document.querySelectorAll('.ask-card').length")}`);
       app.exit(0);
+      return;
+    }
+    const imgDir = process.env.FLASH_SMOKE_IMAGES;
+    if (ok && imgDir) {
+      mkdirSync(imgDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock" } })`);
+      await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "brake-ecu")`);
+      win.webContents.reload();
+      await sleep(2000);
+      await click("brake-ecu", ".project-name");
+      await sleep(300);
+      await click("General", ".chat-link");
+      await sleep(600);
+      // A picture the user pasted (drawn on a canvas), sent with a request that makes the mock agent take a "screenshot".
+      await js(`(async()=>{const st=document.querySelector('[data-chat]');const chatId=st.dataset.chat;const c=document.createElement('canvas');c.width=640;c.height=360;const g=c.getContext('2d');const gr=g.createLinearGradient(0,0,640,360);gr.addColorStop(0,'#1d3b6a');gr.addColorStop(1,'#5b2b6e');g.fillStyle=gr;g.fillRect(0,0,640,360);g.strokeStyle='#ffb347';g.lineWidth=5;g.beginPath();for(let x=0;x<=640;x+=8){const y=190-70*Math.sin(x/60)*Math.exp(-x/500);x?g.lineTo(x,y):g.moveTo(x,y)}g.stroke();g.fillStyle='rgba(255,255,255,.85)';g.font='bold 26px sans-serif';g.fillText('Brake lamp current, -20 °C',24,44);const a=await window.flash.api.saveAttachment({chatId,name:'scope-capture.png',mime:'image/png',dataBase64:c.toDataURL('image/png').split(',')[1]});await window.flash.api.sendMessage({chatId,content:'The lamp flickers on this scope capture. Take a screenshot of the cold-start dashboard.',attachments:[a]});})()`);
+      await sleep(7000);
+      const imgs = await js<number>(`document.querySelectorAll('.md-img[src], .chat-img img, .msg-att.img img').length`);
+      await js(`(()=>{const l=document.querySelector('.chat .msg-list, .chat .messages, .chat-scroll');if(l)l.scrollTop=l.scrollHeight;document.querySelector('.md-img[src]')?.scrollIntoView({block:'center'})})()`);
+      await sleep(500);
+      await shot(join(imgDir, "chat-images-dark.png"));
+      await js(`document.querySelector('.md-img[src]')?.click()`);
+      await sleep(600);
+      await shot(join(imgDir, "image-viewer-dark.png"));
+      const viewer = await js<boolean>(`!!document.querySelector('.img-viewer img[src^="data:image/png"]')`);
+      await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+      await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
+      win.webContents.reload();
+      await sleep(2500);
+      await click("brake-ecu", ".project-name");
+      await sleep(300);
+      await click("General", ".chat-link");
+      await sleep(1500);
+      await js(`document.querySelector('.md-img[src]')?.scrollIntoView({block:'center'})`);
+      await sleep(500);
+      await shot(join(imgDir, "chat-images-light.png"));
+      log(imgs >= 3 && viewer ? "info" : "error", `smoke-images: inline=${imgs} viewer=${viewer}`);
+      app.exit(imgs >= 3 && viewer ? 0 : 1);
       return;
     }
     const graphDir = process.env.FLASH_SMOKE_GRAPH;
