@@ -14,7 +14,7 @@ import { HarnessRegistry } from "../src/main/harness/registry";
 import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
 import { loadRoles, loadSkills } from "../src/main/roles";
-import { chatOnDuo, DEFAULT_SETTINGS, DUO_COORDINATOR_MODEL, duoModelId, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
+import { chatOnDuo, DEFAULT_SETTINGS, modeClickPatch, DUO_COORDINATOR_MODEL, duoModelId, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
 import type { SessionOptions } from "../src/main/harness/types";
 
 const FAKE_DUO = join(__dirname, "fixtures", "fake-duo.mjs");
@@ -73,14 +73,28 @@ describe("GitLab Duo modes", () => {
   it("show only in project chats whose coordinator runs on Duo", () => {
     const s = DEFAULT_SETTINGS;
     const on = mergeSettings(s, { duo: { coordinator: true } } as any) as Settings;
-    const chat = { projectId: "p", harness: null, mode: null } as const;
+    const chat = { projectId: "p", harness: null } as const;
     expect(chatOnDuo(chat, s)).toBe(false);
     expect(chatOnDuo({ ...chat, harness: "duo" }, s)).toBe(true);
     expect(chatOnDuo(chat, on)).toBe(true);
     expect(chatOnDuo({ ...chat, projectId: null, harness: "duo" }, on)).toBe(false); // master chat: never on Duo
     expect(chatOnDuo({ ...chat, harness: "copilot" }, on)).toBe(false); // another harness picked for the chat
-    const local = mergeSettings(on, { modes: { local: { harness: "opencode", model: "qwen" } } } as any) as Settings;
-    expect(chatOnDuo({ ...chat, mode: "local" }, local)).toBe(false); // a drive mode that moves the chat off Duo
+  });
+
+  it("stay visible whichever drive mode is picked (Mari: picking LOCAL hid the Duo row)", () => {
+    const on = mergeSettings(DEFAULT_SETTINGS, { duo: { coordinator: true }, modes: { local: { harness: "opencode", model: "qwen" } } } as any) as Settings;
+    for (const mode of [null, "local", "eco", "comfort", "sport"] as const) {
+      expect(chatOnDuo({ projectId: "p", harness: null, mode } as any, on), `drive mode ${mode}`).toBe(true);
+    }
+  });
+
+  it("can't both steer the coordinator: a Duo mode drops a drive mode that leaves Duo, and the other way round", () => {
+    const s = mergeSettings(DEFAULT_SETTINGS, { modes: { local: { harness: "opencode", model: "qwen" } } } as any) as Settings;
+    expect(modeClickPatch({ mode: "local", duoMode: null }, s, { duoMode: "sport" })).toEqual({ duoMode: "sport", mode: null });
+    expect(modeClickPatch({ mode: "eco", duoMode: null }, s, { duoMode: "sport" })).toEqual({ duoMode: "sport" }); // ECO keeps the chat's harness
+    expect(modeClickPatch({ mode: null, duoMode: "sport" }, s, { mode: "local" })).toEqual({ mode: "local", duoMode: null });
+    expect(modeClickPatch({ mode: null, duoMode: "sport" }, s, { mode: "comfort" })).toEqual({ mode: "comfort" });
+    expect(modeClickPatch({ mode: "local", duoMode: "eco" }, s, { duoMode: null })).toEqual({ duoMode: null });
   });
 
   it("are saved on the chat", () => {
