@@ -68,6 +68,8 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE agents ADD COLUMN folder TEXT;`,
   // v13: extra launch arguments the coordinator started this specialist's agent CLI with (e.g. Pi's --provider), kept for follow-ups
   `ALTER TABLE agents ADD COLUMN launch_args TEXT;`,
+  // v14: the chat's GitLab Duo mode (eco / comfort / sport: model + thinking for its Duo agents)
+  `ALTER TABLE chats ADD COLUMN duo_mode TEXT;`,
 ];
 
 type Row = Record<string, any>;
@@ -192,7 +194,7 @@ export class Db {
   createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string; autopilot?: boolean }): Chat {
     const c: Chat = {
       id: newId(), projectId: i.projectId, title: i.title, kind: i.kind, agentRole: i.agentRole,
-      harness: null, model: null, superpowers: false, mode: null, autopilot: i.autopilot ?? this.defaultAutopilot, archived: false, pinned: false, createdAt: now(),
+      harness: null, model: null, superpowers: false, mode: null, duoMode: null, autopilot: i.autopilot ?? this.defaultAutopilot, archived: false, pinned: false, createdAt: now(),
     };
     this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,autopilot,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
       c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.autopilot ? 1 : 0, c.createdAt);
@@ -202,8 +204,8 @@ export class Db {
     const c = this.getChat(id);
     if (!c) throw new Error(`chat ${id} not found`);
     const n = { ...c, ...patch };
-    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, autopilot=?, archived=?, pinned=? WHERE id=?",
-      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.autopilot ? 1 : 0, n.archived ? 1 : 0, n.pinned ? 1 : 0, id);
+    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, duo_mode=?, autopilot=?, archived=?, pinned=? WHERE id=?",
+      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.duoMode ?? null, n.autopilot ? 1 : 0, n.archived ? 1 : 0, n.pinned ? 1 : 0, id);
     return n;
   }
   deleteChat(id: string): void {
@@ -644,7 +646,7 @@ const toChange = (r: Row): FileChange => ({
 const toProject = (r: Row): Project => ({ id: r.id, name: r.name, path: r.path, createdAt: Number(r.created_at) });
 const toChat = (r: Row): Chat => ({
   id: r.id, projectId: r.project_id ?? null, title: r.title, kind: r.kind, agentRole: r.agent_role, harness: r.harness ?? null,
-  model: r.model ?? null, superpowers: !!r.superpowers, mode: r.mode ?? null, autopilot: !!r.autopilot,
+  model: r.model ?? null, superpowers: !!r.superpowers, mode: r.mode ?? null, duoMode: r.duo_mode ?? null, autopilot: !!r.autopilot,
   archived: !!r.archived, pinned: !!r.pinned, createdAt: Number(r.created_at),
 });
 const toAgent = (r: Row): AgentRun => ({

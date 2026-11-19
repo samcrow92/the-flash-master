@@ -697,7 +697,7 @@ const api: FlashApi = {
   updateChat: async (id, patch) => {
     const c = db.updateChat(id, patch);
     // New mode/harness/model: idle agent sessions of this chat restart with it on the next message.
-    if ("mode" in patch || "harness" in patch || "model" in patch) orch.resetChatSessions(id);
+    if ("mode" in patch || "duoMode" in patch || "harness" in patch || "model" in patch) orch.resetChatSessions(id);
     return c;
   },
   deleteChat: async (id) => { await orch.stopChat(id); db.deleteChat(id); },

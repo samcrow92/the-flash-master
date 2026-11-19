@@ -1,8 +1,14 @@
-import type { DriveMode, HarnessId } from "./types";
+import type { Chat, DriveMode, DuoMode, HarnessId } from "./types";
 
 export type ThinkingLevel = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export interface ModeProfile {
   harness: HarnessId | ""; // "" = the chat's harness / default harness
+  model: string;
+  thinking: ThinkingLevel;
+}
+
+/** A GitLab Duo mode: a Duo model id (GitLab's `gitlab_identifier`, e.g. claude_opus_5_5) and a thinking level. */
+export interface DuoModeProfile {
   model: string;
   thinking: ThinkingLevel;
 }
@@ -44,6 +50,8 @@ export interface Settings {
     coordinatorModel: string;
     /** Extra instructions for the coordinator on Duo, sent after its orchestrator brief (how you want it to plan and delegate). */
     orchestratorRules: string;
+    /** The ECO / COMFORT / SPORT row under the chat bar while the chat runs on Duo: model + thinking for its Duo agents. */
+    modes: Record<DuoMode, DuoModeProfile>;
   };
   chat: {
     maxAttachmentMB: number;
@@ -217,8 +225,41 @@ export interface Settings {
   };
 }
 
-/** Opus 5.5, the default model of a coordinator that runs on GitLab Duo. */
-export const DUO_COORDINATOR_MODEL = "claude-opus-5-5";
+/**
+ * Opus 5.5, the default model of a coordinator that runs on GitLab Duo. `duo run --model` takes GitLab's model
+ * identifier (the `gitlab_identifier` in GitLab's ai_gateway/model_selection/models.yml): underscores, not dashes.
+ */
+export const DUO_COORDINATOR_MODEL = "claude_opus_5_5";
+
+/**
+ * Mari's Duo modes. ECO is Grok 4.7 as asked, although GitLab Duo listed no Grok model when this was added (2026-11-19).
+ * duo-cli 9.16 has no way to pass a thinking effort, so the levels are kept for when Duo accepts one.
+ */
+export const DUO_MODE_DEFAULTS: Record<DuoMode, DuoModeProfile> = {
+  eco: { model: "grok_4_7", thinking: "high" },
+  comfort: { model: DUO_COORDINATOR_MODEL, thinking: "medium" },
+  sport: { model: DUO_COORDINATOR_MODEL, thinking: "xhigh" },
+};
+
+/**
+ * A model id as Duo wants it: Anthropic-style ids (claude-opus-5-5, claude-opus-5.5) become GitLab identifiers
+ * (claude_opus_5_5). Ids that already have underscores, or a provider prefix (vendor/model), are left alone.
+ */
+export function duoModelId(model: string): string {
+  const m = model.trim();
+  if (!m || m.includes("_") || m.includes("/")) return m;
+  return /^[a-z][a-z0-9]*([-.][a-z0-9]+)+$/i.test(m) ? m.replace(/[-.]/g, "_").toLowerCase() : m;
+}
+
+/**
+ * True when the chat's coordinator runs on GitLab Duo: Duo picked for the chat, or "Coordinator on Duo" in a project chat
+ * (the master chat and chats without a project keep their usual harness). The Duo mode row shows only then.
+ */
+export function chatOnDuo(chat: Pick<Chat, "harness" | "projectId" | "mode">, settings: Pick<Settings, "duo" | "modes">): boolean {
+  if (!chat.projectId) return false;
+  if (chat.mode && settings.modes[chat.mode]?.harness) return settings.modes[chat.mode].harness === "duo";
+  return chat.harness === "duo" || (settings.duo.coordinator && !chat.harness);
+}
 
 const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ enabled, path: "", args: "", defaultModel });
 
@@ -240,7 +281,7 @@ export const DEFAULT_SETTINGS: Settings = {
     comfort: { harness: "", model: "sol", thinking: "low" },
     sport: { harness: "", model: "claude-opus-5.5", thinking: "" },
   },
-  duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL, orchestratorRules: "" },
+  duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL, orchestratorRules: "", modes: DUO_MODE_DEFAULTS },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
   agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },

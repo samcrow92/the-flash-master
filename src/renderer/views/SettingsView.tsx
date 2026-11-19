@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Settings as SettingsIcon } from "../components/icons";
 import type { CopilotBilling, DriveMode, HarnessId, HarnessStatus, ServerTestResult } from "@shared/types";
-import { DRIVE_MODES, HARNESS_IDS } from "@shared/types";
+import { DRIVE_MODES, DUO_MODES, HARNESS_IDS } from "@shared/types";
 import type { Settings } from "@shared/settings";
 import type { ExamSetupResult } from "@shared/api";
 import { api, useStore } from "../store";
@@ -182,7 +182,21 @@ function Harnesses(f: F) {
         {h === "duo" && <>
           <div className="muted small">Duo agents only start in GitLab repositories (a folder whose git remote is on GitLab). The coordinator can start one in another folder that is a GitLab repo.</div>
           <Row label="Coordinator on Duo" hint="Project chats run their coordinator on GitLab Duo, which starts by itself in the project folder when the chat opens. Chats without a project folder, like the master chat, keep their usual harness, and so do projects that aren't GitLab repos."><Bool f={f} path="duo.coordinator" /></Row>
-          <Row label="Coordinator model" hint="Used when the chat picks no model for Duo. Default: Opus 5.5."><Text f={f} path="duo.coordinatorModel" placeholder="claude-opus-5-5" /></Row>
+          <Row label="Coordinator model" hint="Used when the chat picks no model for Duo. Default: Opus 5.5."><Text f={f} path="duo.coordinatorModel" placeholder="claude_opus_5_5" /></Row>
+          <h4>Duo modes</h4>
+          <p className="muted small">The ECO / COMFORT / SPORT row under the chat bar while a chat runs on Duo. Each sets the model and thinking level of the chat's Duo agents.
+            Model ids are GitLab's own (e.g. <code>claude_opus_5_5</code>); <code>claude-opus-5-5</code> style ids are converted. GitLab Duo listed no Grok model in November 2026,
+            and duo-cli can't take a thinking level yet, so it is saved for when Duo accepts one.</p>
+          {DUO_MODES.map((m) => <div key={m} className="grid3">
+            <label className="field"><span>{MODE_TEXT[m].split(" — ")[0]}</span>
+              <input value={f.s.duo.modes[m].model} disabled={f.locked(`duo.modes.${m}`)} placeholder="claude_opus_5_5" onChange={(e) => f.set(`duo.modes.${m}.model`, e.target.value)} />
+            </label>
+            <label className="field"><span>Thinking</span>
+              <select value={f.s.duo.modes[m].thinking} disabled={f.locked(`duo.modes.${m}`)} onChange={(e) => f.set(`duo.modes.${m}.thinking`, e.target.value)}>
+                {["", "low", "medium", "high", "xhigh"].map((t) => <option key={t} value={t}>{t || "Duo default"}</option>)}
+              </select>
+            </label>
+          </div>)}
           <Row label="Orchestrator instructions" hint="The coordinator on Duo always gets TheFlashMaster's orchestrator brief: plan, delegate to specialists, unblock them with agent_status and message_agent, and come to you only when truly blocked. Anything you add here is sent after it."><Area f={f} path="duo.orchestratorRules" rows={4} /></Row>
           <Row label="Self-managed GitLab hosts" hint="Host names of your GitLab servers when they aren't gitlab.com or named gitlab…, e.g. git.company.com. Separate several with commas."><Text f={f} path="duo.hosts" placeholder="git.company.com" /></Row>
           <div className="warn-note">GitLab Duo runs in headless mode (no ACP) and auto-approves its own tools. Use read-only prompts or a sandbox.</div>

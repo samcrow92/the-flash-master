@@ -10,7 +10,7 @@ import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
-import type { Settings } from "@shared/settings";
+import type { DuoModeProfile, Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
 import { paragraphBreak } from "@shared/replySegments";
 import { agentLabel, pickInstanceName } from "@shared/instances";
@@ -2002,7 +2002,7 @@ export class Orchestrator {
     const session = await adapter.start({
       cwd: projectPath ?? this.d.homeDir,
       model,
-      thinking: mode?.thinking || null,
+      thinking: (live.harness === "duo" ? duoModeProfile(chatNow, s)?.thinking : null) || mode?.thinking || null,
       extraArgs: [ins.args.join(" "), hs?.args ?? "", live.launchArgs ?? ""].filter(Boolean).join(" "),
       executable: status?.path ?? (hs?.path || null),
       mcpServers: this.d.mcpServersFor(live.role, live.agentId),
@@ -2125,8 +2125,10 @@ export class Orchestrator {
     const baseModel = localPick ? localPick.model : pick?.model && (!pick.harness || harness === pick.harness) ? pick.model
       : pick?.harness && harness === pick.harness ? null : economy && s.tokens.economyModel ? s.tokens.economyModel : null;
     const onDuo = duoCoord && !!chat.projectId && harness === "duo" && !localPick;
-    // Opus 5.5 by default (Settings → Harnesses → GitLab Duo); a model picked for the chat on Duo wins.
-    const model = onDuo ? (chat.harness === "duo" && chat.model ? chat.model : s.duo.coordinatorModel.trim() || null) : baseModel;
+    // Opus 5.5 by default (Settings → Harnesses → GitLab Duo); a model picked for the chat on Duo wins, and the chat's
+    // Duo mode (ECO / COMFORT / SPORT) wins over both, for every Duo agent of the chat.
+    const duoPick = harness === "duo" && !localPick ? duoModeProfile(chat, s)?.model.trim() || null : null;
+    const model = duoPick ?? (onDuo ? (chat.harness === "duo" && chat.model ? chat.model : s.duo.coordinatorModel.trim() || null) : baseModel);
     const askedFor = pick?.harness ?? requested;
     if (localPick && askedFor && askedFor !== harness)
       this.system(chat.id, threadRoot, `🏠 ${role.title} must run on a local model, so it runs on **${harness}** · ${model} instead of ${askedFor}.`);
@@ -2687,4 +2689,9 @@ export function networkEnv(s: Settings): Record<string, string> {
   if (proxy) Object.assign(env, { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, https_proxy: proxy, http_proxy: proxy });
   if (s.network.caBundlePath) Object.assign(env, { NODE_EXTRA_CA_CERTS: s.network.caBundlePath, SSL_CERT_FILE: s.network.caBundlePath, REQUESTS_CA_BUNDLE: s.network.caBundlePath });
   return env;
+}
+
+/** The chat's GitLab Duo mode (Settings → Harnesses → GitLab Duo → modes), or null when it has none. */
+export function duoModeProfile(chat: Pick<Chat, "duoMode">, s: Settings): DuoModeProfile | null {
+  return chat.duoMode ? s.duo.modes?.[chat.duoMode] ?? null : null;
 }

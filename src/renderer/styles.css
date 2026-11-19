@@ -1791,3 +1791,10 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .proxy-form .pw-wrap { position: relative; display: block; }
 .proxy-form .pw-wrap input { width: 100%; padding-right: 34px; box-sizing: border-box; }
 .proxy-form .pw-wrap .icon-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 3px; border: none; background: none; color: var(--muted); }
+
+/* GitLab Duo's own ECO / COMFORT / SPORT row: a second tab under the drive modes, only while the chat runs on Duo */
+.composer-wrap > .mode-bar + .duo-mode-bar { margin-top: 3px; border-radius: 14px; border-top: 1px solid var(--line); }
+.duo-tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+  color: var(--muted); border-right: 1px solid var(--line); margin-right: 2px; height: 16px; }
+.duo-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fc6d26; }
+.duo-mode-bar .mode-model { max-width: 170px; }
