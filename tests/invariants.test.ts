@@ -434,3 +434,14 @@ describe("chat images", () => {
     expect(read("src/renderer/components/Markdown.tsx")).toContain("hydrateImages");
   });
 });
+
+describe("DOORS Next writes", () => {
+  it("only happen inside a changeset: one request path, always with the changeset as configuration context", () => {
+    const src = read("src/main/rm-write.ts");
+    expect(src.match(/\.request\(/g)).toHaveLength(1);
+    expect(src).toMatch(/private async call\(cs: string[\s\S]{0,200}?\.request\(method, url, body, \{[\s\S]{0,120}?"Configuration-Context": cs/);
+    expect(src).toMatch(/changeset\(input: unknown\): Promise<RmChangesetInfo> \{\s*const cs = changesetUri\(input\);/);
+    // The read-only module reader never writes.
+    expect(read("src/main/requirements.ts")).not.toMatch(/\.request\(/);
+  });
+});

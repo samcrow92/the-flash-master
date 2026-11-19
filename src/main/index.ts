@@ -28,6 +28,7 @@ import { Requirements, parseRmLink } from "./requirements";
 import { resolveLink } from "./links";
 import { MAX_INLINE_IMAGE_BYTES, resolveImage, setAgentImageDir } from "./images";
 import { EtmClient } from "./etm";
+import { RmWriter } from "./rm-write";
 import { ScmClient, type CliRunner } from "./scm";
 import { findScmCli, scmCliRunner } from "./scm-cli";
 import { ScmWriter } from "./scm-write";
@@ -371,6 +372,8 @@ const rmApi = (): JazzClient | null => {
 };
 const requirements = new Requirements(rmApi, join(dataDir, "rm-cache"), () => settings.get().jazz.rm.config,
   () => settings.get().jazz.rm.component || parseRmLink(settings.get().jazz.rm.serverUrl).componentUri, () => rmUrl());
+/** Agents create, edit and delete requirements only inside a DOORS Next changeset (same /rm session). */
+const rmWriter = new RmWriter(rmApi);
 // ---------------- ETM test management (/qm) and EWM source control (read-only, /ccm), same Jazz session ----------------
 const qmUrl = () => {
   const j = settings.get().jazz;
@@ -425,7 +428,7 @@ const jazzHosts = () => {
 };
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
-bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, etm, scm, scmWrite, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
+bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmWriter, etm, scm, scmWrite, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
   memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,

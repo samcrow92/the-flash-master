@@ -5,6 +5,7 @@ import type { Orchestrator } from "./orchestrator";
 import type { ToolDef } from "./bridge";
 import type { JazzClient } from "./jazz";
 import type { Requirements } from "./requirements";
+import { RM_LINK_TYPES, type RmLinkChange, type RmWriter } from "./rm-write";
 import { QM_TYPES, VERDICTS, qmType, type EtmClient, type QmWrite } from "./etm";
 import { normPath, type ScmClient } from "./scm";
 import type { ScmWriter } from "./scm-write";
@@ -24,7 +25,7 @@ const s = (description: string) => ({ type: "string", description });
 /** Tools exposed to agents through the flashmaster-core and jazz MCP servers. Results are kept compact on purpose. */
 export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
-  requirements?: Requirements; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
+  requirements?: Requirements; rmWriter?: RmWriter; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
   knowledge?: KnowledgeBase; codeGraph?: CodeGraph; readOnly?: () => boolean;
   etm?: () => EtmClient | null; scm?: () => ScmClient | null; scmWrite?: () => ScmWriter | null;
@@ -33,6 +34,14 @@ export function buildTools(d: {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
     return d.requirements;
   };
+  /** DOORS Next writes: refused in read-only mode; the changeset itself is checked by RmWriter (required, never a stream). */
+  const rmw = () => {
+    if (!d.rmWriter) throw new Error("DOORS Next requirements are not available");
+    if (d.readOnly?.()) throw new Error("read-only mode is on (Settings → Permissions): requirements can't be created, edited or deleted");
+    return d.rmWriter;
+  };
+  const links = (x: unknown): RmLinkChange[] | undefined => Array.isArray(x)
+    ? x.map((l: any) => ({ type: String(l?.type ?? ""), target: String(l?.target ?? "") })).filter((l) => l.type && l.target).slice(0, 50) : undefined;
   const jazz = () => {
     const j = d.jazz();
     if (!j) throw new Error("Jazz integration is not configured (Settings → Integrations → IBM Jazz)");
@@ -747,6 +756,52 @@ export function buildTools(d: {
         id: r.id, module: r.module, section: r.section, type: r.type, text: r.text.slice(0, 3000), attrs: r.attrs,
         links: r.links.slice(0, 10).map((l) => `${l.type}: ${l.title ?? l.target}`), url: r.uri,
       })),
+    },
+    // ---------------- DOORS Next writes: always inside a changeset the user named (never directly in a stream) ----------------
+    {
+      set: "jazz", name: "rm_changeset",
+      description: "Check a DOORS Next changeset before writing: its title, component and project, and the artifact types (with their attributes) you can create in it. changeset: the changeset URL (…/rm/cm/changeset/_…) or a DOORS Next link opened in it. Every rm_create / rm_update / rm_delete needs this changeset.",
+      inputSchema: obj({ changeset: s("changeset URL or DOORS Next link with oslc_config.context") }, ["changeset"]),
+      handler: async (a) => {
+        if (!d.rmWriter) throw new Error("DOORS Next requirements are not available");
+        const i = await d.rmWriter.changeset(a.changeset);
+        return { changeset: i.changeset, title: i.title, component: i.componentTitle, projectId: i.projectId,
+          types: i.shapes.map((x) => ({ type: x.title, attributes: [...new Set(x.props.map((p) => p.title))].slice(0, 40) })) };
+      },
+    },
+    {
+      set: "jazz", name: "rm_read",
+      description: "Read one requirement as it is in a changeset (its id, type, title, text, attributes, links), e.g. to check your own edits. requirement: numeric id or URL.",
+      inputSchema: obj({ changeset: s("changeset URL"), requirement: s("requirement id or URL") }, ["changeset", "requirement"]),
+      handler: async (a) => { if (!d.rmWriter) throw new Error("DOORS Next requirements are not available"); return d.rmWriter.read(a.changeset, String(a.requirement)); },
+    },
+    {
+      set: "jazz", name: "rm_create",
+      description: `Create a DOORS Next requirement inside a changeset (required — nothing is written to a stream; the user delivers the changeset). type: an artifact type from rm_changeset (default: "Requirement"/"System Requirement"). text: the requirement text (plain; blank line = new paragraph). attributes: name → value as shown in DOORS Next, enumerations by label. links: [{type, target URL}], type one of ${RM_LINK_TYPES.join(", ")}. folder: folder URL, optional. Returns the new requirement with its id.`,
+      inputSchema: obj({
+        changeset: s("changeset URL"), type: s("artifact type, optional"), title: s("title"), text: s("requirement text"), description: s("optional"),
+        attributes: { type: "object", description: "attribute name → value" },
+        links: { type: "array", items: obj({ type: s("link type"), target: s("target URL") }, ["type", "target"]) },
+        folder: s("folder URL, optional"),
+      }, ["changeset", "title"]),
+      handler: async (a) => rmw().create(a.changeset, { type: a.type, title: a.title, text: a.text, description: a.description, attributes: a.attributes, addLinks: links(a.links), folder: a.folder }),
+    },
+    {
+      set: "jazz", name: "rm_update",
+      description: "Edit a DOORS Next requirement inside a changeset (required): change title, text, description or attributes, add or remove links. Everything you don't pass stays as it is. requirement: numeric id or URL.",
+      inputSchema: obj({
+        changeset: s("changeset URL"), requirement: s("requirement id or URL"), title: s("optional"), text: s("optional, replaces the text"), description: s("optional"),
+        attributes: { type: "object", description: "attribute name → value" },
+        addLinks: { type: "array", items: obj({ type: s("link type"), target: s("target URL") }, ["type", "target"]) },
+        removeLinks: { type: "array", items: obj({ type: s("link type"), target: s("target URL") }, ["type", "target"]) },
+      }, ["changeset", "requirement"]),
+      handler: async (a) => rmw().update(a.changeset, String(a.requirement), { title: a.title, text: a.text, description: a.description, attributes: a.attributes, addLinks: links(a.addLinks), removeLinks: links(a.removeLinks) }),
+    },
+    {
+      set: "jazz", name: "rm_delete",
+      description: "Delete a DOORS Next requirement inside a changeset (required). Only delete when the user asked for it. confirm must repeat the requirement's id exactly (a mismatch deletes nothing and tells you the id). Modules and collections are refused. Undo: discard the changeset before it is delivered.",
+      inputSchema: obj({ changeset: s("changeset URL"), requirement: s("requirement id or URL"), confirm: s("the requirement's id again") }, ["changeset", "requirement", "confirm"]),
+      handler: async (a) => rmw().remove(a.changeset, String(a.requirement), a.confirm),
     },
   ];
 }

@@ -1,6 +1,6 @@
-# IBM Jazz for agents: tests (ETM) and source (EWM)
+# IBM Jazz for agents: requirements (DOORS Next), tests (ETM) and source (EWM)
 
-Agents reach IBM Engineering Lifecycle Management through the bundled `jazz` tool server. Work items (`jazz_*`) and DOORS Next requirements (`rm_*`) were already there; this page covers test management and source control.
+Agents reach IBM Engineering Lifecycle Management through the bundled `jazz` tool server. Work items (`jazz_*`) and reading DOORS Next requirements (`rm_modules`, `rm_search`, `rm_get`) were already there; this page covers writing requirements, test management and source control.
 
 ## Setup
 
@@ -15,6 +15,11 @@ Settings → Integrations → IBM Jazz:
 
 | Tool | What it does |
 | --- | --- |
+| `rm_changeset` | Check a DOORS Next changeset: title, component, project, and the artifact types (with attributes) that can be created |
+| `rm_read` | One requirement as it is in the changeset |
+| `rm_create` | New requirement in the changeset: type, title, text, attributes (enumerations by label), links, folder |
+| `rm_update` | Change title, text, description or attributes, add or remove links; everything else is kept |
+| `rm_delete` | Delete a requirement in the changeset; `confirm` must repeat its id, modules are refused |
 | `qm_projects` | ETM project areas you can see |
 | `qm_list` | Find test plans, suites, cases, scripts, execution records or results by words, ids or a server filter |
 | `qm_get` | One artifact: fields, links, script steps; `requirements: true` adds validated requirements |
@@ -36,11 +41,14 @@ Settings → Integrations → IBM Jazz:
 | `scm_deliver` | Deliver outgoing change sets to a stream; needs **Agents may deliver** and `confirm` = the stream name |
 | `scm_discard` | Discard an undelivered change set; `confirm` = the change set |
 
+DOORS Next writes need a changeset on every call: the changeset URL (`…/rm/cm/changeset/_…`) or any DOORS Next link opened in it. Streams, baselines and global configurations are refused, so nothing reaches a stream until a person delivers the changeset in DOORS Next, and a wrong edit or delete is undone by discarding the changeset. Read-only mode (Settings → Permissions) blocks the three write tools. `tests/invariants.test.ts` checks that every DOORS Next write goes through the one request path that sends the changeset.
+
 EWM source control changes happen only in repository workspaces: agents create one that flows to a stream, load it into a sandbox inside their working folder, edit the files with their usual tools, check in and accept there. A stream is refused wherever a workspace is needed, so a stream changes only by deliver, which is off until the user turns on **Agents may deliver**, and even then needs the stream's name repeated as `confirm`. Read-only mode (Settings → Permissions) blocks every change. `tests/invariants.test.ts` checks that the REST client only reads and that every changing command goes through the read-only guard.
 
 ## How it talks to the servers
 
 - **ETM:** the Reportable REST API (`/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/<project alias>/<type>`) for reading, creating (POST to the collection; PUT with an external id on servers that refuse POST) and editing (read the XML, change only the touched elements, PUT it back with `If-Match`). Requirement links use OSLC QM: `oslc_qm:validatesRequirement` on the test case's RDF resource.
+- **DOORS Next writes:** OSLC RM 2.0 with the changeset in the `Configuration-Context` header (and `vvc.configuration` for older servers). The changeset names its component (`oslc_config:component`), the component its project area; the project's `services.xml` gives the requirement creation factory, the query capability (find a requirement by its id) and the resource shapes (artifact types, attributes, enumeration values). Create is a POST of RDF/XML to the factory; edit reads the artifact's RDF, changes only the touched properties and PUTs it back with `If-Match`; delete is a DELETE with `If-Match`.
 - **EWM:** streams and components from the Reportable REST API (`/ccm/rpt/repository/scm`), file contents from `IFilesystemContentService/<stream id>/<component id>/<path>`. EWM has no public REST call for folder listings or any change, hence the command line: `scm create workspace`, `load`, `show status`, `checkin`, `changeset associate|comment|complete`, `list changesets|changes|workspaces`, `accept`, `deliver`, `discard`, each with `-r <server>` (and `-u`/`-P` with Basic or form sign-in) and `--json` where it has one.
 
 All HTTP goes through the same Jazz session as work items: form, Basic, Windows (Kerberos/NTLM) or browser SSO (Jazz Authorization Server / OIDC), the system proxy and the Windows certificate store.
@@ -49,6 +57,9 @@ All HTTP goes through the same Jazz session as work items: form, Basic, Windows 
 
 No Jazz server was available while building this, so it was written against IBM's documentation and Jazz forum answers and tested with recorded-style responses. Check these on the first real use:
 
+- **DOORS Next changesets:** reading the component from `oslc_config:component`, treating `oslc_config:committed` as delivered, and whether a server wants the `oslc_config.context` query parameter as well as the header.
+- **DOORS Next create without a folder** puts the requirement in the project's root folder; it is not placed in a module (module structure editing is not supported yet).
+- **DOORS Next enumeration labels** are read from the shape document (`rdfs:label` / `dcterms:title` of each allowed value); if a server only lists the value URLs, pass the URL as the value.
 - **ETM element names and order.** The created XML uses `dc:title`/`dc:description`, `alm:owner`/`alm:state`, link elements with `href`, `suiteelements/suiteelement/testcase` for suites and `steps/step` (testscript namespace) for scripts. Some ETM versions validate the element order.
 - **Execution result details.** Notes go into `details` as XHTML; the verdict uses `com.ibm.rqm.execution.common.state.<verdict>`. Step results are not written.
 - **Finding a test case through OSLC** for requirement links (`oslc:shortId`, then `dcterms:identifier`).
