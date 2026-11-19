@@ -248,6 +248,16 @@ describe("Orchestrator", () => {
     expect(all().some((m) => m.role === "reviewer" && m.author === "agent")).toBe(true);
   });
 
+  it("gives Vector's CANoe MCP tools to every agent's TOOL lines, not only roles that list them (Duo, Pi, text mode)", () => {
+    const { orch } = setup({ agents: { toolMode: "text" } }, {
+      listTools: (set: string) => set === "core" ? [{ name: "list_roles", description: "List roles.", inputSchema: { properties: {} } }]
+        : set === "vector" ? [{ name: "canoe_start_measurement", description: "[Vector CANoe MCP Server] Start.", inputSchema: { properties: {} } }] : [],
+    });
+    cleanup = () => orch.stopAll();
+    const tools = (orch as any).toolSetFor({ role: { name: "reviewer", tools: [] } });
+    expect(tools.find((t: any) => t.name === "canoe_start_measurement")).toMatchObject({ set: "vector" });
+  });
+
   it("keeps each command with its output on the reply (expandable in the chat)", async () => {
     const { db, orch, chat, events } = setup();
     cleanup = () => orch.stopAll();

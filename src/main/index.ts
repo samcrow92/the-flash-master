@@ -19,7 +19,8 @@ import { MemoryStore } from "./memory";
 import { KnowledgeBase, ensureFlashmasterIgnore } from "./knowledge";
 import { CodeGraph, GRAPHIFY_MIN_PYTHON, GRAPHIFY_PACKAGE } from "./graphify";
 import { noProjectFolder } from "./worktree";
-import { McpBootstrap, selfTestServer } from "./mcp";
+import { McpBootstrap, baseEnv, selfTestServer } from "./mcp";
+import { VectorMcp } from "./vector-mcp";
 import { JazzClient, type FetchLike } from "./jazz";
 import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeLocal, toUsage } from "./copilot-ledger";
 import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
@@ -166,6 +167,14 @@ const mcp = new McpBootstrap({
   pythonSrc: join(resources, "mcp-servers"),
   dataDir,
 }, () => settings.get(), (servers) => emit({ type: "mcp.status", servers }));
+// Vector's official MCP servers (CANoe 20 SP2+): one app-side connection, tools forwarded to every agent.
+const vectorMcp = new VectorMcp({
+  settings: () => settings.get(), baseEnv: () => ({ ...baseEnv(), ...networkEnv(settings.get()) }),
+  register: (defs) => bridge.register(defs), unregister: (set) => bridge.unregister(set),
+  onStatus: () => emit({ type: "mcp.status", servers: mcp.list() }),
+});
+mcp.setVendor({ list: () => vectorMcp.list(), tools: () => vectorMcp.toolCount() });
+settings.onChange(() => void vectorMcp.refresh());
 // Code graph (graphify) for the knowledge base: installed into its own venv on the first "Scan code", run on demand.
 const codeGraph = new CodeGraph({
   db, knowledge, python: () => mcp.toolPython("graphify"),
@@ -1010,7 +1019,7 @@ const api: FlashApi = {
   listModels: async (h, refresh) => (refresh || !modelState(h).fetchedAt ? refreshModels(h) : modelState(h)),
   allModels: async () => HARNESS_IDS.map(modelState),
   mcpStatus: async () => mcp.list(),
-  mcpReinstall: async () => mcp.ensure(true),
+  mcpReinstall: async () => { await vectorMcp.refresh(true); return mcp.ensure(true); },
   mcpInstall: async (id) => { await mcp.ensureCatalog(true, id); return mcp.list(); },
   mcpSelfTest: async () => {
     const role = roles.find((r) => r.name === "flashmaster") ?? roles[0]!;
@@ -1281,6 +1290,7 @@ app.whenReady().then(async () => {
     if (u.copilotMeter) void refreshCopilotUsage(); // local files only: cheap, so always fresh at start
     scheduleUsage();
   });
+  void vectorMcp.refresh();
   void mcp.ensure().then((servers) => { emit({ type: "mcp.status", servers }); if (settings.get().exam.autoSetup) void runExamSetup(true, true); });
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
   // Review status of my Flash server submissions: at start and every 15 minutes (status changes become notices).
@@ -1289,7 +1299,7 @@ app.whenReady().then(async () => {
   setInterval(pollQuietly, 15 * 60000);
 });
 
-app.on("before-quit", () => { terminals.closeAll(); void orch.stopAll(); bridge.stop(); db.close(); });
+app.on("before-quit", () => { terminals.closeAll(); vectorMcp.close(); void orch.stopAll(); bridge.stop(); db.close(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 // macOS: clicking the Dock icon with no window open brings the main window back.
 app.on("activate", () => { if (!app.isReady()) return; if (!win || win.isDestroyed()) createWindow(); else win.show(); });

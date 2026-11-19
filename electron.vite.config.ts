@@ -14,6 +14,7 @@ export default defineConfig({
           // MCP servers shipped with the app and launched by harness sessions.
           "mcp-flashmaster-core": resolve(import.meta.dirname, "mcp-servers/flashmaster-core/server.ts"),
           "mcp-jazz": resolve(import.meta.dirname, "mcp-servers/jazz/server.ts"),
+          "mcp-vector": resolve(import.meta.dirname, "mcp-servers/vector/server.ts"),
         },
         // .mjs: the MCP entries run unpacked from app.asar.unpacked, where no package.json declares "type": "module".
         output: {

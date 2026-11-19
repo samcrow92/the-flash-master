@@ -158,6 +158,20 @@ describe("role icons", () => {
   });
 });
 
+describe("bridged tool sets", () => {
+  // A tool set on the bridge reaches ACP harnesses only through a bundled forwarder of the same name.
+  it("every bridge tool set has a bundled forwarder built by electron-vite", () => {
+    const sets = [...read("src/main/bridge.ts").match(/set: ((?:"[a-z]+"(?: \| )?)+);/)![1]!.matchAll(/"([a-z]+)"/g)].map((m) => m[1]!);
+    expect(sets).toContain("vector");
+    const vite = read("electron.vite.config.ts");
+    for (const set of sets) {
+      const dir = set === "core" ? "flashmaster-core" : set;
+      expect(vite, `mcp-${dir} entry`).toContain(`"mcp-${dir}": resolve(import.meta.dirname, "mcp-servers/${dir}/server.ts")`);
+      if (set !== "core") expect(read(`mcp-servers/${dir}/server.ts`)).toContain(`runForwarder("${set}"`);
+    }
+  });
+});
+
 describe("native modules", () => {
   // The main bundle inlines devDependencies; a native module can't be inlined, so it must be a runtime dependency
   // (externalised by electron-vite, shipped by electron-builder) and unpacked from app.asar so its binaries can run.

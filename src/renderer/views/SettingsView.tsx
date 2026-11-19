@@ -804,6 +804,13 @@ function Integrations(f: F) {
     <Row label="CANoe version"><Text f={f} path="vector.canoeVersion" placeholder="e.g. 17 SP3" /></Row>
     <Row label="DaVinci Configurator CLI" hint="Path to DVCfgCmd.exe (or equivalent)."><Text f={f} path="vector.davinciCliPath" /></Row>
     <Row label="CAPL include paths" hint="Separated by ;"><Text f={f} path="vector.caplIncludePaths" /></Row>
+    <h4>Vector MCP servers</h4>
+    <p className="muted small">Vector's official CANoe MCP Server (CANoe 20 SP2 or later) and CANoe Documentation MCP Server (free CANoe AI Package). Once connected, their tools go to every agent and the coordinator, GitLab Duo included. Status: Settings → MCP servers.</p>
+    <Row label="Use Vector's MCP servers"><Bool f={f} path="vector.mcpEnabled" /></Row>
+    <Row label="Find them automatically" hint="Looks for Vector's mcp.json or an MCP executable in the CANoe and AI Package folders."><Bool f={f} path="vector.mcpAutoDetect" /></Row>
+    <Row label="Vector mcp.json" hint="The mcp.json from the CANoe AI Package, or its folder."><Text f={f} path="vector.mcpConfigPath" placeholder="auto" /></Row>
+    <Row label="CANoe MCP Server" hint="http(s) URL or command line. Blank = auto-detect. CANoe must be running."><Text f={f} path="vector.canoeMcp" placeholder="auto" /></Row>
+    <Row label="CANoe Documentation MCP Server" hint="http(s) URL or command line. Blank = auto-detect."><Text f={f} path="vector.canoeDocsMcp" placeholder="auto" /></Row>
   </>;
 }
 
