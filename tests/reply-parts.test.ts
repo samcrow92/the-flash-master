@@ -17,6 +17,16 @@ describe("replyParts: the coordinator's reply, easy to scan", () => {
     expect(parseTextDelegations(t).map((d) => d.role)).toEqual(["software-expert", "tester"]);
   });
 
+  it("shows a brief with blank lines and lists whole, exactly as the app runs it", () => {
+    const t = ["DELEGATE software-expert: Fix it.", "", "Memory:", "- debounce 20 ms", "", "Report the test output.", "", "DELEGATE tester: Run it.", "", "Both are running."].join("\n");
+    const parts = replyParts(t);
+    expect(parts[0]).toEqual({ kind: "delegations", items: [
+      { role: "software-expert", harness: null, brief: "Fix it.\n\nMemory:\n- debounce 20 ms\n\nReport the test output." },
+      { role: "tester", harness: null, brief: "Run it." }] });
+    expect(parts[1]).toEqual({ kind: "md", text: "\nBoth are running." });
+    expect(parseTextDelegations(t).map((d) => d.goal)).toEqual(parts[0]!.kind === "delegations" ? parts[0]!.items.map((x) => x.brief) : []);
+  });
+
   it("leaves DELEGATE lines inside code alone", () => {
     expect(replyParts("```\nDELEGATE tester: no\n```").map((p) => p.kind)).toEqual(["md"]);
   });

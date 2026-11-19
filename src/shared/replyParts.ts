@@ -4,6 +4,8 @@
  * brief, finding and detail is one click away.
  */
 
+import { briefBody } from "./briefs";
+
 export interface DelegationPart { role: string; harness: string | null; brief: string }
 export interface ResultPart { status: string; question: string | null; summary: string | null; findings: string[]; artifacts: string[] }
 
@@ -69,9 +71,9 @@ function lineParts(text: string, out: ReplyPart[]): void {
     if (fence) { md.push(line); continue; }
     const d = DELEGATE.exec(line);
     if (d) {
-      const brief = [d[4]!.trim()];
-      while (i + 1 < lines.length && lines[i + 1]!.trim() && !DELEGATE.test(lines[i + 1]!) && !AGENT.test(lines[i + 1]!) && !/^\s*```/.test(lines[i + 1]!)) brief.push(lines[++i]!.trim());
-      const item = { role: d[1]!, harness: d[2] ?? null, brief: brief.join("\n").trim() };
+      const { body, next } = briefBody(lines, i);
+      i = next - 1;
+      const item = { role: d[1]!, harness: d[2] ?? null, brief: [d[4]!.trim(), ...body].join("\n").trim() };
       const last = out[out.length - 1];
       // Blank lines between DELEGATE blocks keep them in one group.
       if (!md.join("").trim() && last?.kind === "delegations") { md = []; last.items.push(item); continue; }

@@ -11,6 +11,7 @@ describe("parseTextDelegations", () => {
       "module BCM, files req/*.md",
       "",
       "- **DELEGATE** presentation-expert@pi: Build the deck",
+      "END",
       "```",
       "DELEGATE tester: not this one",
       "```",
@@ -22,6 +23,50 @@ describe("parseTextDelegations", () => {
     ]);
   });
   it("returns nothing for normal text", () => { expect(parseTextDelegations("I will delegate this later.")).toEqual([]); });
+
+  // Mari: the Duo orchestrator's brief to a specialist was cut after its memory list ("Blank lines end a brief in text
+  // mode"). Coordinators write briefs with paragraphs, lists and code; they must reach the specialist whole.
+  it("keeps paragraphs, lists and code of a brief, up to the next DELEGATE line", () => {
+    const t = [
+      "Starting Oscar 2 on the fix.",
+      "DELEGATE software-expert: Fix issue 770724 in the brake light module.",
+      "",
+      "What memory says:",
+      "- debounce is 20 ms",
+      "- tests live in tests/bcm",
+      "",
+      "Steps:",
+      "1. Reproduce with `make test`.",
+      "2. Fix it.",
+      "",
+      "```c",
+      "DELEGATE tester: this is code, not a delegation",
+      "```",
+      "",
+      "Report back with the changed files and the test output.",
+      "",
+      "DELEGATE tester: Run the BCM suite.",
+    ].join("\n");
+    const d = parseTextDelegations(t);
+    expect(d.map((x) => x.role)).toEqual(["software-expert", "tester"]);
+    expect(d[0]!.goal).toBe(t.split("\n").slice(1, 16).join("\n").replace("DELEGATE software-expert: ", ""));
+    expect(d[0]!.goal).toContain("Report back with the changed files and the test output.");
+    expect(d[1]!.goal).toBe("Run the BCM suite.");
+  });
+
+  it("an END line closes a brief, so text for the user can follow it", () => {
+    const t = ["DELEGATE analyst: Read the spec.", "", "Focus on timing.", "END", "", "Analyst is reading the spec now.", "More for you here."].join("\n");
+    expect(parseTextDelegations(t)).toEqual([{ role: "analyst", goal: "Read the spec.\n\nFocus on timing." }]);
+  });
+
+  it("a closing one-line remark at the end of the reply stays out of the last brief, a structured line stays in", () => {
+    expect(parseTextDelegations(["DELEGATE analyst: Read the spec.", "", "- timing", "", "Then I'll integrate."].join("\n")))
+      .toEqual([{ role: "analyst", goal: "Read the spec.\n\n- timing" }]);
+    expect(parseTextDelegations(["DELEGATE analyst: Read the spec.", "", "Done when: the timing table is filled."].join("\n")))
+      .toEqual([{ role: "analyst", goal: "Read the spec.\n\nDone when: the timing table is filled." }]);
+    // Nothing on the DELEGATE line: the paragraph under it is the brief.
+    expect(parseTextDelegations(["DELEGATE analyst:", "", "Read the spec."].join("\n"))).toEqual([{ role: "analyst", goal: "Read the spec." }]);
+  });
 });
 
 describe("parseTextAgents", () => {
