@@ -30,6 +30,13 @@ describe("keyboard shortcuts", () => {
     expect(matchShortcut(key("ArrowDown", { altKey: true }), false)).toBe("nextChat");
   });
 
+  it("ignore keydown events without a key (autofill, IME, synthetic) instead of throwing", () => {
+    const noKey = { ctrlKey: true, metaKey: false, shiftKey: false, altKey: false } as unknown as KeyLike;
+    expect(matchShortcut(noKey, false)).toBeNull();
+    expect(matchShortcut({ ...noKey, key: undefined }, true)).toBeNull();
+    expect(matchShortcut({ ...noKey, key: "" }, false)).toBeNull();
+  });
+
   it("every listed shortcut is matched by the key it advertises", () => {
     const parse = (keys: string): KeyLike => {
       const parts = keys.split("+");
