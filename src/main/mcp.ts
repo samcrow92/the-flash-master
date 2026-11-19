@@ -4,6 +4,8 @@
  *  - bundled-python : vector-autosar, winidea, office, exam (copied to app data; private venv created and requirements installed once)
  *  - catalog        : recommended servers (Context7, MarkItDown, …) installed once into app data, attached per role
  *  - external       : user-defined servers from Settings → MCP
+ *  - vendor         : Vector's official MCP servers (CANoe), connected by the app (vector-mcp.ts) and forwarded to every
+ *                     agent through the bundled `vector` server
  * Servers are attached per ACP session (session/new mcpServers), so the user's global harness configs stay untouched.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -37,12 +39,18 @@ export class McpBootstrap {
   private status = new Map<string, McpServerStatus>();
   private python: string | null = null;
   private bridge = { url: "", token: "" };
+  /** Vendor servers the app connects itself (Vector CANoe): their status and how many tools they publish. */
+  private vendor: { list: () => McpServerStatus[]; tools: () => number } = { list: () => [], tools: () => 0 };
 
   constructor(private p: Paths, private settings: () => Settings, private onStatus: (s: McpServerStatus[]) => void) {
     this.set({ id: "flashmaster-core", label: "TheFlashMaster core (delegation, tasks, artifacts)", kind: "bundled-node", state: "ready", detail: null });
     this.set({ id: "jazz", label: "IBM Jazz: work items, tests (ETM), source (EWM), requirements", kind: "bundled-node", state: "ready", detail: null });
     for (const s of PY_SERVERS) this.set({ id: s.id, label: s.label, kind: "bundled-python", state: "missing", detail: "Not installed yet" });
     for (const c of MCP_CATALOG) this.set({ id: c.id, label: c.label, kind: "catalog", state: this.catalogReady(c) ? "ready" : "missing", detail: this.catalogReady(c) ? null : "Not installed yet" });
+  }
+
+  setVendor(v: { list: () => McpServerStatus[]; tools: () => number }): void {
+    this.vendor = v;
   }
 
   setBridge(url: string, token: string): void {
@@ -53,7 +61,7 @@ export class McpBootstrap {
     const disabled = new Set(this.settings().mcp.disabled);
     for (const c of MCP_CATALOG) if (!catalogState(c, this.settings().mcp.catalog).enabled) disabled.add(c.id);
     const ext: McpServerStatus[] = this.settings().mcp.external.map((e) => ({ id: e.id, label: e.label || e.id, kind: "external", state: "ready", detail: e.command }));
-    return [...this.status.values(), ...ext].map((s) => (disabled.has(s.id) && s.id !== "flashmaster-core" ? { ...s, state: "disabled" } : s));
+    return [...this.status.values(), ...ext, ...this.vendor.list()].map((s) => (disabled.has(s.id) && s.id !== "flashmaster-core" ? { ...s, state: "disabled" } : s));
   }
 
   /** Called at app start (non-blocking for the UI). */
@@ -209,15 +217,19 @@ export class McpBootstrap {
     const wanted = new Set(["flashmaster-core", ...role.tools]);
     // Every agent can read Jazz work items (and DOORS Next requirements) once Jazz is set up — not only the roles that list it.
     if (s.jazz.enabled) wanted.add("jazz");
+    // Vector's official CANoe MCP tools: every agent and the coordinator, once a Vector server is connected.
+    const vectorOn = this.vendor.tools() > 0;
+    if (vectorOn) wanted.add("vector");
     // Text mode: the app's own tools are reached through DELEGATE/AGENT/TOOL lines, so its MCP servers aren't sent.
-    if (s.agents.toolMode === "text") { wanted.delete("flashmaster-core"); wanted.delete("jazz"); }
+    if (s.agents.toolMode === "text") { wanted.delete("flashmaster-core"); wanted.delete("jazz"); wanted.delete("vector"); }
     for (const c of MCP_CATALOG) if (roleMatches(catalogState(c, s.mcp.catalog).roles, role.name)) wanted.add(c.id);
     for (const e of s.mcp.external) if (e.roles && roleMatches(e.roles.split(/[\s,]+/).filter(Boolean), role.name)) wanted.add(e.id);
     const out: McpServerSpec[] = [];
     const bridgeEnv = { FLASH_BRIDGE_URL: this.bridge.url, FLASH_BRIDGE_TOKEN: this.bridge.token, FLASH_AGENT_ID: agentId };
+    if (vectorOn) ready.add("vector");
     for (const id of wanted) {
       if (!ready.has(id)) continue;
-      if (id === "flashmaster-core" || id === "jazz") {
+      if (id === "flashmaster-core" || id === "jazz" || id === "vector") {
         out.push({ name: id, command: this.p.nodeExec,
           args: [this.p.nodeEntry(id), "--bridge", this.bridge.url, "--token", this.bridge.token, "--agent", agentId],
           env: { ...baseEnv(), ...networkEnv(s), ...this.p.nodeEnv, ...bridgeEnv } });

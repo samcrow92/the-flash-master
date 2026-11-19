@@ -2224,7 +2224,8 @@ export class Orchestrator {
   /** The app's own tools this agent's role may use (sets: core, plus jazz when the role has it). */
   private toolSetFor(live: Live): (ToolInfo & { set: string })[] {
     if (!this.d.listTools) return [];
-    const sets = ["core", ...(live.role.tools.includes("jazz") || this.d.settings().jazz.enabled ? ["jazz"] : [])];
+    // Vector's CANoe MCP tools (when a Vector server is connected) go to every agent, like the core set.
+    const sets = ["core", ...(live.role.tools.includes("jazz") || this.d.settings().jazz.enabled ? ["jazz"] : []), "vector"];
     return sets.flatMap((set) => this.d.listTools!(set).map((x) => ({ ...x, set })));
   }
   private textToolsFor(live: Live): string {

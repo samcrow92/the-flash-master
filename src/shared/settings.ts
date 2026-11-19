@@ -198,6 +198,12 @@ export interface Settings {
     canoeVersion: string;
     davinciCliPath: string;
     caplIncludePaths: string;
+    /** Vector's official MCP servers (CANoe 20 SP2+, CANoe AI Package): connect them and give their tools to every agent. */
+    mcpEnabled: boolean;
+    mcpAutoDetect: boolean; // look for Vector's mcp.json / MCP executables in the CANoe and AI Package folders
+    mcpConfigPath: string; // Vector's mcp.json (or the AI Package folder)
+    canoeMcp: string; // CANoe MCP Server: http(s) URL or command line ("" = auto-detect)
+    canoeDocsMcp: string; // CANoe Documentation MCP Server: http(s) URL or command line
   };
   network: {
     proxy: string;
@@ -337,7 +343,8 @@ export const DEFAULT_SETTINGS: Settings = {
   exam: { installPath: "", restPort: 8085, licenseHost: "", licensePort: 5053, modelName: "", targetEndpoint: "", modelConfigUuid: "",
     systemConfig: "", reportProject: "", pythonPath: "", workspace: "", javaOpts: "",
     pluginPackage: "", autoSetup: true },
-  vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "" },
+  vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "",
+    mcpEnabled: true, mcpAutoDetect: true, mcpConfigPath: "", canoeMcp: "", canoeDocsMcp: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
   memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true, knowledgeSync: true, knowledgeSyncMinutes: 2 },
   data: { retentionDays: 0 },
