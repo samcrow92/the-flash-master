@@ -12,6 +12,7 @@ import { decidePermission, insideRoot } from "./policy";
 import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { imageBlockMarkdown } from "../images";
 
 /** Pick the option of a select config whose value/name matches a wanted level (e.g. thinking "medium"). */
 export function pickOption(opt: Json | undefined, wanted: string): string | null {
@@ -279,6 +280,11 @@ export class AcpSession implements HarnessSession {
         break;
       case "agent_message_chunk":
         if (u.content?.type === "text") this.o.onEvent({ type: "text", text: u.content.text });
+        else if (u.content?.type === "image") {
+          // A picture the agent sends (screenshot, generated image): kept on disk, shown inline in the reply.
+          const md = imageBlockMarkdown(u.content);
+          if (md) this.o.onEvent({ type: "text", text: `\n\n${md}\n\n` });
+        }
         break;
       case "agent_thought_chunk":
         if (u.content?.type === "text") this.o.onEvent({ type: "thought", text: u.content.text });
@@ -448,6 +454,8 @@ export function toolOutputText(content: unknown, raw: unknown): string | undefin
     const x = c as Record<string, any>;
     if (x?.type === "content" && x.content?.type === "text" && typeof x.content.text === "string") parts.push(x.content.text);
     else if (x?.type === "text" && typeof x.text === "string") parts.push(x.text);
+    else if (x?.type === "content" && x.content?.type === "image") { const md = imageBlockMarkdown(x.content); if (md) parts.push(md); }
+    else if (x?.type === "image") { const md = imageBlockMarkdown(x); if (md) parts.push(md); }
     else if (x?.type === "diff" && typeof x.path === "string") parts.push(`(edited ${x.path})`);
   }
   if (!parts.length && raw != null) {

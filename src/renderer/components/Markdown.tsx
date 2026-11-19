@@ -1,5 +1,6 @@
-import { memo, useMemo, type MouseEvent } from "react";
-import { BARE_LOCAL_PATH, WEB_LINK, isLocalPathLink, trimTrailingPunctuation } from "@shared/links";
+import { memo, useEffect, useMemo, useRef, type MouseEvent } from "react";
+import { BARE_LOCAL_PATH, DATA_IMAGE, WEB_LINK, isLocalImage, isLocalPathLink, trimTrailingPunctuation } from "@shared/links";
+import { cachedImage, chatOf, hydrateImages, openImage } from "../images";
 import { Marked } from "marked";
 import { fishboneSvg } from "@shared/diagrams";
 
@@ -13,6 +14,20 @@ function linkHtml(href: string, inner: string): string | null {
   if (WEB_LINK.test(href)) return `<a href="${attr(href)}" data-link="${attr(href)}" target="_blank" rel="noreferrer" title="${attr(href)}">${inner}</a>`;
   if (isLocalPathLink(href)) return `<a href="#" class="file-link" data-link="${attr(href)}" title="Open ${attr(href)}">${FILE_SVG}${inner}</a>`;
   return null;
+}
+
+/** An inline picture. Local files are read by the main process after rendering (hydrateImages), since the page only loads
+ *  data: images; `preview` marks the picture shown under a link to an image file (it just disappears if unreadable). */
+function imageHtml(src: string, alt: string, preview = false): string {
+  if (DATA_IMAGE.test(src)) return `<span class="md-img-wrap loaded"><img class="md-img" src="${attr(src.replace(/\s+/g, ""))}" alt="${attr(alt)}" title="Click to enlarge" /></span>`;
+  const have = cachedImage(src);
+  return `<span class="md-img-wrap${have ? " loaded" : ""}"${preview ? ' data-preview="1"' : ""}><img class="md-img" data-img="${attr(src)}"`
+    + `${have ? ` src="${attr(have)}"` : ""} alt="${attr(alt)}" title="${attr(src)} — click to enlarge" /></span>`;
+}
+/** A link; links to local image files also get an inline preview. */
+function linkWithPreview(href: string, inner: string): string | null {
+  const a = linkHtml(href, inner);
+  return a && isLocalImage(href) ? `${a}${imageHtml(href, href.split(/[\\/]/).pop() ?? "", true)}` : a;
 }
 
 const md = new Marked({
@@ -29,12 +44,17 @@ const md = new Marked({
       const raw = trimTrailingPunctuation(m[0]);
       return raw.length > 3 ? { type: "localPath", raw, text: raw } : undefined;
     },
-    renderer: (t) => linkHtml(t.text as string, esc(t.text as string)) ?? esc(t.text as string),
+    renderer: (t) => linkWithPreview(t.text as string, esc(t.text as string)) ?? esc(t.text as string),
   }],
   renderer: {
     html: ({ text }) => esc(text),
-    link: ({ href, text }) => linkHtml(href, esc(text)) ?? esc(text),
-    image: ({ text }) => esc(`[image: ${text}]`),
+    link: ({ href, text }) => linkWithPreview(href, esc(text)) ?? esc(text),
+    // Local and data: images show inline; web images stay a link (the app never loads remote content by itself).
+    image: ({ href, text }) => {
+      const src = String(href ?? "").trim();
+      if (DATA_IMAGE.test(src) || isLocalPathLink(src)) return imageHtml(src, text);
+      return linkHtml(src, esc(`[image: ${text || src}]`)) ?? esc(`[image: ${text}]`);
+    },
     code: ({ text, lang }) => {
       if (lang === "ishikawa" || lang === "fishbone") {
         try { return `<div class="diagram-wrap">${fishboneSvg(JSON.parse(text))}</div>`; } catch { /* fall through: show the source */ }
@@ -74,6 +94,12 @@ function onLinkClick(e: MouseEvent<HTMLDivElement>, a: HTMLAnchorElement): void 
 /** Link clicks, copy buttons on code blocks and click-to-copy on inline code (event delegation: the HTML is static). */
 function onCopyClick(e: MouseEvent<HTMLDivElement>): void {
   const target = e.target as HTMLElement;
+  if (target instanceof HTMLImageElement && target.classList.contains("md-img") && target.src) {
+    e.preventDefault();
+    const path = target.dataset.img;
+    openImage({ src: target.src, name: target.alt || path?.split(/[\\/]/).pop(), path, chatId: chatOf(target) });
+    return;
+  }
   const link = target.closest<HTMLAnchorElement>("a[data-link]");
   if (link) { onLinkClick(e, link); return; }
   const btn = target.closest<HTMLButtonElement>(".code-copy");
@@ -93,5 +119,7 @@ const prettify = (s: string) => s.replace(/<result>/gi, "\n\n**Result**\n\n").re
 
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const html = useMemo(() => md.parse(prettify(text), { async: false }) as string, [text]);
-  return <div className="md" onClick={onCopyClick} dangerouslySetInnerHTML={{ __html: html }} />;
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (ref.current && html.includes("data-img=")) hydrateImages(ref.current); }, [html]);
+  return <div ref={ref} className="md" onClick={onCopyClick} dangerouslySetInnerHTML={{ __html: html }} />;
 });

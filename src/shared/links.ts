@@ -31,3 +31,26 @@ export const BARE_LOCAL_PATH = /(?:file:\/\/\/?[^\s<>"'`)\]]+|(?<![\w/\\:])[A-Za
 export function trimTrailingPunctuation(s: string): string {
   return s.replace(/[.,;:!]+$/, "");
 }
+
+/** Image files shown inline in chats (agent screenshots, diagrams, pasted pictures). */
+export const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i;
+/** data: images the renderer may show directly (the page's CSP allows data: images; SVG in <img> runs no script). */
+export const DATA_IMAGE = /^data:image\/(png|jpe?g|gif|webp|bmp|svg\+xml|avif);base64,[A-Za-z0-9+/=\s]+$/i;
+
+/** True for a local path / file:// URL that names an image file (a `:line` suffix or `#anchor` is not an image). */
+export function isLocalImage(s: string): boolean {
+  const t = s.trim();
+  return isLocalPathLink(t) && IMAGE_EXT.test(t.replace(/[?#].*$/, ""));
+}
+
+/** Local image paths mentioned in plain text (tool output, logs), in order, without repeats. */
+export function imagePathsIn(text: string, max = 8): string[] {
+  const out: string[] = [];
+  const re = /(?:file:\/\/\/?[^\s<>"'`)\]]+|(?<![\w/\\:])[A-Za-z]:[\\/][^\s<>"'`|?*)\]]*|(?<![\w:/\\.])\/[^\s<>"'`|?*)\]]+)/g;
+  for (const m of text.matchAll(re)) {
+    const p = trimTrailingPunctuation(m[0]);
+    if (isLocalImage(p) && !out.includes(p)) out.push(p);
+    if (out.length >= max) break;
+  }
+  return out;
+}

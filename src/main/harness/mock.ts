@@ -4,6 +4,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 import { join } from "node:path";
 import { renderDiagram } from "@shared/diagrams";
 import { pathToFileURL } from "node:url";
@@ -40,6 +41,18 @@ export class MockSession implements HarnessSession {
     } catch { return null; }
   }
 
+  /** "screenshot" in a request: a small PNG "capture" in <project>/reports, to show images in chats offline. */
+  private writeScreenshot(): string | null {
+    if (!this.o.cwd) return null;
+    try {
+      const dir = join(this.o.cwd, "reports");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, "cold-start-dashboard.png");
+      writeFileSync(file, mockPng(480, 270));
+      return file;
+    } catch { return null; }
+  }
+
   async prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     this.cancelled = false;
     this.turn += 1;
@@ -48,6 +61,7 @@ export class MockSession implements HarnessSession {
     // "html report" in a request, or being sent back by the app's deliverable check, makes the mock write a small report
     // with an Ishikawa and link it, as real agents are told to (shows the enforcement loop offline).
     const report = /\bhtml report\b/i.test(request) || /TheFlashMaster checked your result/.test(text) ? this.writeReport() : null;
+    const screenshot = /\bscreenshot\b/i.test(request) ? this.writeScreenshot() : null;
     const reply = [
       `**${role}** (mock harness, turn ${this.turn}) received:`,
       `> ${request.trim().split("\n")[0]!.slice(0, 160)}`,
@@ -66,6 +80,7 @@ export class MockSession implements HarnessSession {
         "```", ""] : []),
       ...(report ? ["Report written: [rca-report.html](" + pathToFileURL(report).href + ")", "",
         "Background: [ISO 26262 overview](https://www.iso.org/standard/68383.html). The file is also at `reports/rca-report.html`.", ""] : []),
+      ...(screenshot ? ["Captured the cold-start dashboard:", "", `![Cold-start dashboard](${pathToFileURL(screenshot).href})`, ""] : []),
       ...(/\b(fix|implement|change|edit|debounce)\b/i.test(request) ? [
         "Proposed change (mock) — also shown in **Artifacts → Changes**:", "",
         "```c", "// file: brake_light.c", ...MOCK_NEW.trimEnd().split("\n"), "```", ""] : []),
@@ -89,6 +104,10 @@ export class MockSession implements HarnessSession {
     this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "in_progress", kind: "execute", input: "git ls-files src | head -20" });
     this.o.onEvent({ type: "tool", id: `ls-${this.turn}`, title: "Reading project structure", status: "completed", kind: "execute",
       output: "src/brake_light.c\nsrc/brake_light.h\nsrc/can_signals.c\nsrc/can_signals.h\ntests/test_brake_light.c" });
+    if (screenshot) {
+      this.o.onEvent({ type: "tool", id: `shot-${this.turn}`, title: "Taking a screenshot", status: "completed", kind: "execute",
+        input: "capture --window \"Cold start dashboard\"", output: `Saved screenshot to ${screenshot}` });
+    }
     this.o.onEvent({ type: "plan", entries: plan(1) });
     // "[hang]" in a request starts a tool call that never finishes until the turn is cancelled, to try (and test)
     // stopping a hung tool call; "[hang-hard]" ignores the cancel too, like an agent stuck on its own tool.
@@ -203,3 +222,32 @@ testcase TC_BrakeLight_Debounce()
   testAssert(getSignal(BrakeLampOut) == 1, "lamp on after debounce");
 }
 `;
+
+/** A tiny PNG encoder for the mock "screenshot": a dashboard-like gradient with a few bars. */
+function mockPng(w: number, h: number): Buffer {
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  const bars = [0.35, 0.62, 0.48, 0.8, 0.56, 0.7];
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0;
+    for (let x = 0; x < w; x++) {
+      const o = y * (w * 3 + 1) + 1 + x * 3;
+      let r = 24 + Math.round(40 * x / w), g = 28 + Math.round(30 * y / h), b = 52 + Math.round(70 * x / w);
+      const bi = Math.floor((x - 40) / 70);
+      const inBar = x >= 40 && bi < bars.length && (x - 40) % 70 < 44 && y > h - 30 - bars[bi]! * (h - 70) && y < h - 30;
+      if (inBar) { r = 255 - bi * 18; g = 150 + bi * 12; b = 60 + bi * 30; }
+      if (y === h - 30 && x > 30 && x < w - 30) { r = g = b = 190; }
+      raw[o] = r; raw[o + 1] = g; raw[o + 2] = b;
+    }
+  }
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf: Buffer) => { let c = 0xffffffff; for (const v of buf) c = crcTable[(c ^ v) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}

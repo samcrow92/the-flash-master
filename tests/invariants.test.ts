@@ -397,3 +397,11 @@ describe("Flash server credentials", () => {
     expect(bi).toContain(`const FILE_RE = /${FILE_RE.source}/;`);
   });
 });
+
+describe("chat images", () => {
+  it("the renderer only loads images from the app and data: URLs (local files go through api.readImage)", () => {
+    const csp = /Content-Security-Policy" content="([^"]+)"/.exec(read("src/renderer/index.html"))?.[1] ?? "";
+    expect(csp).toMatch(/img-src 'self' data:(;|$)/);
+    expect(read("src/renderer/components/Markdown.tsx")).toContain("hydrateImages");
+  });
+});
