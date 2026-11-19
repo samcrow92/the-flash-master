@@ -10,7 +10,7 @@ import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
-import type { DuoModeProfile, Settings } from "@shared/settings";
+import { jazzToolsOn, type DuoModeProfile, type Settings } from "@shared/settings";
 import { diffLines } from "@shared/diff";
 import { paragraphBreak } from "@shared/replySegments";
 import { agentLabel, pickInstanceName } from "@shared/instances";
@@ -2225,7 +2225,7 @@ export class Orchestrator {
   private toolSetFor(live: Live): (ToolInfo & { set: string })[] {
     if (!this.d.listTools) return [];
     // Vector's CANoe MCP tools (when a Vector server is connected) go to every agent, like the core set.
-    const sets = ["core", ...(live.role.tools.includes("jazz") || this.d.settings().jazz.enabled ? ["jazz"] : []), "vector"];
+    const sets = ["core", ...(live.role.tools.includes("jazz") || jazzToolsOn(this.d.settings().jazz) ? ["jazz"] : []), "vector"];
     return sets.flatMap((set) => this.d.listTools!(set).map((x) => ({ ...x, set })));
   }
   private textToolsFor(live: Live): string {
