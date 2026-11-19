@@ -5,6 +5,7 @@
 // QUIET in a new session's goal: logs a step on stderr like the real CLI and prints a STATUS line, then says nothing for a
 // while (Duo thinking), until it is killed. A resumed session (--existing-session-id) answers at once.
 // Every run ends by echoing its goal, so tests can see what reached it.
+// Each run is a new process, like the real CLI: only a resumed session (--existing-session-id) has seen earlier goals.
 import { readFileSync } from "node:fs";
 const args = process.argv.slice(2);
 if (args.includes("--goal") || args.includes("-g")) {
@@ -16,7 +17,13 @@ const goalFile = /(\.flashmaster-duo\/goal-[\w-]+\.md)/.exec(goal)?.[1];
 if (goalFile) goal = `(from file) ${readFileSync(goalFile, "utf8")}`;
 const slow = goal.includes("SLOW");
 const resumed = args.includes("--existing-session-id");
-process.stderr.write("2026-11-17T09:59:59:000 [info]: Session ID: fakesession42\n");
+// Like duo-cli 9.x: the session (workflow) id only appears in these log lines. NOSESSION in the goal: no id is logged.
+const resumeId = resumed ? args[args.indexOf("--existing-session-id") + 1] : null;
+if (!goal.includes("NOSESSION")) {
+  process.stderr.write(resumed
+    ? `2026-11-17T09:59:59:000 [info]: Workflow source=local (resume); attaching to ${resumeId} (definition: chat, flow: chat)\n`
+    : "2026-11-17T09:59:59:000 [info]: Workflow source=local (fresh); created 4122303 (flow: chat), capabilities=[none]\n");
+}
 if (goal.includes("QUIET") && !resumed) {
   process.stderr.write("2026-11-17T10:00:00:000 [debug]: polling workflow\n");
   process.stderr.write("2026-11-17T10:00:01:000 [info]: Reading src/brake_light.c\n");

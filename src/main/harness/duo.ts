@@ -215,6 +215,19 @@ export class DuoToolLog {
 }
 
 const SESSION_RE = /session[\s_-]*id[\s:=]+([A-Za-z0-9_-]{6,})/i;
+// What headless Duo actually logs (duo-cli 9.x): "Workflow source=local (fresh); created 4122303 (flow: chat), …",
+// "Workflow source=local (resume); attaching to 4122303 (…)" and "Initialized workflow 4122303 capabilities: […]".
+const WORKFLOW_RE = /\bWorkflow source=\w+ \([^)]*\); (?:created|attaching to) (\d+)\b|\bInitialized workflow (\d+)\b/;
+
+/**
+ * The id of the Duo session (its workflow) named in a log line, for `--existing-session-id` on the next turn. Without it
+ * every turn would start a new Duo session that has never seen the rules, the tools or the conversation.
+ */
+export function duoSessionId(line: string): string | null {
+  const w = WORKFLOW_RE.exec(line);
+  if (w) return w[1] ?? w[2] ?? null;
+  return SESSION_RE.exec(line)?.[1] ?? null;
+}
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\u001b\[[0-9;?]*[A-Za-z]/g;
 
@@ -261,18 +274,16 @@ export class DuoSession implements HarnessSession {
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (d: string) => {
         const clean = d.replace(ANSI_RE, "");
-        const sid = SESSION_RE.exec(clean)?.[1];
-        if (sid) this.sessionId = sid;
         this.o.onEvent({ type: "text", text: clean });
       });
       child.stderr?.on("data", (d) => {
         const s = String(d).replace(ANSI_RE, "");
         errTail = (errTail + s).slice(-64000);
-        const sid = SESSION_RE.exec(s)?.[1];
-        if (sid) this.sessionId = sid;
         const lines = (errLine + s).split(/\r?\n/);
         errLine = (lines.pop() ?? "").slice(-4000);
         for (const l of lines) {
+          const sid = duoSessionId(l);
+          if (sid) this.sessionId = sid;
           const a = duoActivity(l);
           if (a) this.o.onEvent({ type: "activity", text: a });
           for (const e of tools.feed(l)) this.o.onEvent(e);
@@ -287,7 +298,11 @@ export class DuoSession implements HarnessSession {
         clearInterval(beat);
         dropGoalFile();
         this.current = null;
-        if (errLine) for (const e of tools.feed(errLine)) this.o.onEvent(e);
+        if (errLine) {
+          const sid = duoSessionId(errLine);
+          if (sid) this.sessionId = sid;
+          for (const e of tools.feed(errLine)) this.o.onEvent(e);
+        }
         for (const e of tools.finish(code === 0 && !cancelled)) this.o.onEvent(e);
         if (cancelled) resolve({ stopReason: "cancelled" });
         else if (code === 0) resolve({ stopReason: "end_turn" });

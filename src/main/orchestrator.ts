@@ -1486,7 +1486,9 @@ export class Orchestrator {
     let promptText: string;
     try {
       if (live.starting) await live.starting.catch(() => undefined);
-      const firstTurn = !live.session || !live.session.alive || !!live.prestarted;
+      // Headless harnesses (GitLab Duo) run a new process per turn and carry the conversation only through the session id
+      // they report. Without one, the next run starts from nothing: send it the rules, tools and history again.
+      const firstTurn = !live.session || !live.session.alive || !!live.prestarted || (live.harness === "duo" && !live.session.sessionId);
       live.prestarted = false;
       live.turnChanges = new Map();
       live.sink = (delta) => {
@@ -1635,6 +1637,8 @@ export class Orchestrator {
         }
       }
       this.d.db.updateMessage(reply.id, { content: text.slice(base) });
+      // Duo reports its session id during the turn, not at start: keep it so the next turn (and an app restart) resumes it.
+      if (live.session?.sessionId && live.session.sessionId !== this.d.db.getAgentSession(live.agentId)) this.d.db.updateAgent(live.agentId, { sessionId: live.session.sessionId });
       // The harness was given our MCP servers but none of them reached the app: tools did not load.
       if (toolsPending && !(await this.waitForTools(live, 3000))) { this.enterTextDelegation(live, t); switchedToText = true; }
       // The harness listed the app's tools but the model says it doesn't have `delegate` (filtered by policy, renamed…):
