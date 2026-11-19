@@ -341,7 +341,7 @@ function jazzSignIn(): Promise<{ ok: boolean; detail: string }> {
       clearTimeout(limit);
       if (!w.isDestroyed()) w.close();
       signInWin = null;
-      jazzClient = null; rmClient = null; etmClient = null; scmClient = null;
+      jazzClient = null; rmClient = null; etmClient = null; scmRepos.clear();
       resolve(r);
     };
     const check = async () => { const user = await jazzIdentity(base); if (user) finish({ ok: true, detail: `Signed in as ${user}` }); };
@@ -393,38 +393,59 @@ const etm = (): EtmClient | null => {
   }
   return etmClient;
 };
-let scmClient: ScmClient | null = null;
-let scmHttp: JazzClient | null = null;
+/** The EWM server root of a Jazz URL (…/ccm), without /web, query or fragment. */
+const repoRoot = (u: string) => u.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "");
+/** EWM servers reached through a link the user gave (same sign-in as Jazz); their hosts also get trustServerCert. */
+const scmRepos = new Map<string, { key: string; http: JazzClient }>();
+const scmClients = new WeakMap<JazzClient, { client: ScmClient; writer?: ScmWriter }>();
 /** EWM SCM command line (folder listings, and the changes in scm-write.ts); signs in with the Jazz user/password when those are set. */
-const scmCli = (timeoutMs = 180_000): { run: CliRunner; repo: string } | null => {
+const scmCli = (timeoutMs = 180_000, repo?: string): { run: CliRunner; repo: string } | null => {
   const j = settings.get().jazz;
   const exe = findScmCli(j.scm.cliPath);
   if (!exe) return null;
   const creds = (j.authType === "basic" || j.authType === "form") && j.username && j.hasPassword ? { user: j.username, password: readJazzPassword() } : null;
-  return { run: scmCliRunner(exe, creds, timeoutMs), repo: j.serverUrl.replace(/[#?].*$/, "").replace(/\/web(\/.*)?$/i, "").replace(/\/+$/, "") };
+  return { run: scmCliRunner(exe, creds, timeoutMs), repo: repoRoot(repo || j.serverUrl) };
 };
-const scm = (): ScmClient | null => {
+/**
+ * The Jazz connection for source control: the configured Jazz server, or the EWM server a link points at, signed in
+ * with the same credentials. Source control needs no setup of its own (Mari, 2026-11-19).
+ */
+const scmHttp = (repo?: string): JazzClient | null => {
   const j = settings.get().jazz;
-  if (!j.scm.enabled) return null;
-  const http = jazz();
+  if (!repo || (j.serverUrl && repoRoot(repo).toLowerCase() === repoRoot(j.serverUrl).toLowerCase())) return jazz();
+  if (!j.username && j.authType !== "windows" && j.authType !== "browser") return null; // no sign-in to reuse
+  const root = repoRoot(repo);
+  const key = JSON.stringify([j.authType, j.username, j.hasPassword]);
+  const hit = scmRepos.get(root.toLowerCase());
+  if (hit && hit.key === key) return hit.http;
+  if (j.authType === "windows" && app.isReady()) allowWindowsAuth(root);
+  const http = new JazzClient({ serverUrl: root, projectAreas: [], authType: j.authType, username: j.username, password: readJazzPassword() }, netFetch);
+  scmRepos.set(root.toLowerCase(), { key, http });
+  return http;
+};
+const scm = (repo?: string): ScmClient | null => {
+  const http = scmHttp(repo);
   if (!http) return null;
-  if (!scmClient || scmHttp !== http) { scmClient = new ScmClient(http, scmCli); scmHttp = http; }
-  return scmClient;
+  let e = scmClients.get(http);
+  if (!e) { const root = repoRoot(http === jazz() ? settings.get().jazz.serverUrl : repo ?? ""); e = { client: new ScmClient(http, () => scmCli(undefined, root)) }; scmClients.set(http, e); }
+  return e.client;
 };
 /** EWM source control changes (workspaces, check-in, accept, deliver). Loads and delivers can take long: 30 min per command. */
-let scmWriter: ScmWriter | null = null;
-const scmWrite = (): ScmWriter | null => {
-  if (!scm()) return null;
-  scmWriter ??= new ScmWriter({
-    cli: () => scmCli(30 * 60_000), readOnly: () => settings.get().permissions.readOnly, allowDeliver: () => settings.get().jazz.scm.deliver,
-    streamNames: async () => { const c = scm(); return c ? (await c.streams({ max: 500 })).map((x) => x.name) : []; },
+const scmWrite = (repo?: string): ScmWriter | null => {
+  const http = scmHttp(repo), c = scm(repo);
+  if (!http || !c) return null;
+  const e = scmClients.get(http)!;
+  const root = repoRoot(http === jazz() ? settings.get().jazz.serverUrl : repo ?? "");
+  e.writer ??= new ScmWriter({
+    cli: () => scmCli(30 * 60_000, root), readOnly: () => settings.get().permissions.readOnly, allowDeliver: () => settings.get().jazz.scm.deliver,
+    streamNames: async () => (await c.streams({ max: 500 })).map((x) => x.name),
   });
-  return scmWriter;
+  return e.writer;
 };
 /** Jazz hosts (work items, test management, requirements) whose certificate may be accepted when trustServerCert is on. */
 const jazzHosts = () => {
   const j = settings.get().jazz;
-  return new Set([j.serverUrl, qmUrl(), rmUrl()].map(jazzHost).filter(Boolean));
+  return new Set([j.serverUrl, qmUrl(), rmUrl(), ...scmRepos.keys()].map(jazzHost).filter(Boolean));
 };
 const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not configured (Settings → Integrations → IBM Jazz)"); return j; };
 
@@ -1062,7 +1083,7 @@ const api: FlashApi = {
   jazzSetPassword: async (password) => {
     await secrets.set(secretFile, password);
     settings.update({ jazz: { hasPassword: !!password } });
-    jazzClient = null; rmClient = null; etmClient = null; scmClient = null;
+    jazzClient = null; rmClient = null; etmClient = null; scmRepos.clear();
     await jazzSession().clearStorageData({ storages: ["cookies"] }); // new credentials → fresh login
   },
   jazzSignIn: async () => jazzSignIn(),
@@ -1074,9 +1095,9 @@ const api: FlashApi = {
   rmDiagnostics: async () => [`server: ${rmUrl()}`, `auth: ${settings.get().jazz.authType}`, ...requirements.lastLog],
   qmTest: async () => { const e = etm(); return e ? e.test() : { ok: false, detail: "Enable Jazz and Test management, and set the server URL first" }; },
   qmProjects: async () => { const e = etm(); if (!e) throw new Error("Enable Jazz and Test management first"); return e.projects(true); },
-  scmTest: async () => { const c = scm(); return c ? c.test() : { ok: false, detail: "Enable Jazz and Source control, and set the server URL first" }; },
+  scmTest: async () => { const c = scm(); return c ? c.test() : { ok: false, detail: "Turn on IBM Jazz and set the server URL and sign-in first" }; },
   rmCached: async () => requirements.allCached().map((d) => ({ module: d.module, fetchedAt: d.fetchedAt, count: d.requirements.filter((r) => !r.heading).length })),
-  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; rmClient = null; etmClient = null; scmClient = null; },
+  jazzSignOut: async () => { await jazzSession().clearStorageData({ storages: ["cookies"] }); jazzClient = null; rmClient = null; etmClient = null; scmRepos.clear(); },
   examSetup: async (install) => runExamSetup(install),
   jazzTest: async () => { const j = jazz(); return j ? j.test() : { ok: false, detail: "Enable Jazz and set the server URL first" }; },
   getSettings: async () => ({ settings: settings.get(), locked: settings.locked() }),

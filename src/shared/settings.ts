@@ -158,7 +158,8 @@ export interface Settings {
     qm: { enabled: boolean; serverUrl: string; projectArea: string; config: string };
     /**
      * EWM source control: streams, components, files (REST), plus repository workspaces, check-in, change sets and accept
-     * through the SCM command line. cliPath: lscm/scm; blank = find it on PATH. deliver: agents may deliver to streams.
+     * through the SCM command line. Always on with the Jazz connection; `enabled` is no longer read (kept for old settings
+     * files). cliPath: lscm/scm; blank = find it on PATH. deliver: agents may deliver to streams.
      */
     scm: { enabled: boolean; cliPath: string; deliver: boolean };
     /** Accept a self-signed or company-CA certificate from the Jazz servers (ccm, qm, rm hosts only) that Windows doesn't trust. */

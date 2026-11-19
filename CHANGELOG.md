@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: every EWM source control tool said "not configured".** Source control sat behind its own *Enabled* switch, off by default. It now runs on the Jazz connection you already have, with no setup of its own. Agents can also pass the EWM link you give them (`link`, or the URL as the stream): the server, stream, component and path come from it, and a link to another EWM server uses the same sign-in. New `scm_link` tool shows what a link points at.
 - **Agents work in IBM EWM source control, not only read it.** With the Jazz sign-in already set up, agents create a repository workspace on a stream (`scm_create_workspace`), load it into a sandbox in their working folder (`scm_load`), edit files with their usual tools, check in with a comment and work item (`scm_checkin`), look at status and change sets (`scm_status`, `scm_changesets`, `scm_changeset`), comment, link or complete change sets (`scm_changeset_update`), accept incoming changes (`scm_accept`), deliver (`scm_deliver`) and discard (`scm_discard`). It all runs through the EWM SCM command line.
   - Streams change only by deliver, and deliver is off until you turn on *Agents may deliver* in Settings → Integrations → IBM Jazz → Source control; the agent must also repeat the stream's name. Read-only mode blocks every change.
   - The software expert now has the `jazz` tools for this; the coordinator already had them.

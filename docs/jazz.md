@@ -8,7 +8,7 @@ Settings → Integrations → IBM Jazz:
 
 1. Fill in the server, sign-in and password as for work items. The password is encrypted with the OS keychain (Windows DPAPI).
 2. **IBM Engineering Test Management:** turn it on and pick the project area (**From server** lists them). The server defaults to the work item server with `/ccm` changed to `/qm`. Configuration-managed projects can set the stream or baseline URL. Press **Test**.
-3. **IBM EWM source control:** turn it on. Reading files needs nothing else. Listing folders, searching for files and every change (workspaces, load, check-in, accept, deliver) use the EWM SCM command line (`scm.exe` or `lscm` from the EWM client): it is found on PATH, or you set its path. **Agents may deliver** is off by default. Press **Test**.
+3. **IBM EWM source control** needs no setup of its own: it uses the Jazz server and sign-in above, or the EWM server of a link you give the agent (same sign-in). Reading files needs nothing else. Listing folders, searching for files and every change (workspaces, load, check-in, accept, deliver) use the EWM SCM command line (`scm.exe` or `lscm` from the EWM client): it is found on PATH, or you set its path. **Agents may deliver** is off by default. Press **Test**.
 4. Servers with a self-signed or company certificate that Windows doesn't trust: turn on **Trust the server's certificate**. It applies only to the Jazz hosts in these settings. Installing the company CA in Windows is the cleaner fix.
 
 ## Tools
@@ -31,6 +31,7 @@ Settings → Integrations → IBM Jazz:
 | `scm_read_file` | A text file from a stream, in windows of lines for big files |
 | `scm_download` | Copy text files from a stream into the agent's working folder |
 | `scm_list`, `scm_find_files` | Folder contents and glob search (EWM SCM command line) |
+| `scm_link` | What an EWM link names: server, stream, component (names and ids), path, change set. Every `scm_*` tool also takes `link` and fills stream, component and path from it |
 | `scm_workspaces`, `scm_create_workspace` | Repository workspaces; a new one that flows to a stream |
 | `scm_load` | Load a repository workspace into a sandbox in the agent's working folder (default `ewm/<workspace>`) |
 | `scm_status` | Local changes, outgoing and incoming change sets, conflicts of a sandbox |

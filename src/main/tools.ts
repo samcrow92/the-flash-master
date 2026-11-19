@@ -7,7 +7,7 @@ import type { JazzClient } from "./jazz";
 import type { Requirements } from "./requirements";
 import { RM_LINK_TYPES, type RmLinkChange, type RmWriter } from "./rm-write";
 import { QM_TYPES, VERDICTS, qmType, type EtmClient, type QmWrite } from "./etm";
-import { normPath, type ScmClient } from "./scm";
+import { normPath, scmTarget, type ScmClient } from "./scm";
 import type { ScmWriter } from "./scm-write";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -28,7 +28,7 @@ export function buildTools(d: {
   requirements?: Requirements; rmWriter?: RmWriter; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
   knowledge?: KnowledgeBase; codeGraph?: CodeGraph; readOnly?: () => boolean;
-  etm?: () => EtmClient | null; scm?: () => ScmClient | null; scmWrite?: () => ScmWriter | null;
+  etm?: () => EtmClient | null; scm?: (repo?: string) => ScmClient | null; scmWrite?: (repo?: string) => ScmWriter | null;
 }): ToolDef[] {
   const rm = () => {
     if (!d.requirements) throw new Error("DOORS Next requirements are not available");
@@ -52,14 +52,16 @@ export function buildTools(d: {
     if (!e) throw new Error("ETM test management is not configured (Settings → Integrations → IBM Jazz → Test management)");
     return e;
   };
-  const scm = () => {
-    const c = d.scm?.();
-    if (!c) throw new Error("EWM source control is not configured (Settings → Integrations → IBM Jazz → Source control)");
+  /** EWM source control on the Jazz connection; `a.repo` (from a link, see scmTarget) picks another EWM server with the same sign-in. */
+  const NO_SCM = "IBM Jazz is not set up: source control uses the Jazz server and sign-in from Settings → Integrations → IBM Jazz. Fill those in (or check Jazz is turned on); no separate source control setup is needed.";
+  const scm = (a?: { repo?: string }) => {
+    const c = d.scm?.(a?.repo);
+    if (!c) throw new Error(NO_SCM);
     return c;
   };
-  const scmw = () => {
-    const c = d.scmWrite?.();
-    if (!c) throw new Error("EWM source control is not configured (Settings → Integrations → IBM Jazz → Source control)");
+  const scmw = (a?: { repo?: string }) => {
+    const c = d.scmWrite?.(a?.repo);
+    if (!c) throw new Error(NO_SCM);
     return c;
   };
   /** A sandbox folder inside the agent's working folder (default ewm/<workspace>): returns its absolute path. */
@@ -101,7 +103,7 @@ export function buildTools(d: {
     importance: m.importance, ...(m.pinned ? { pinned: true } : {}), ...(m.expiresAt ? { expires: new Date(m.expiresAt).toISOString().slice(0, 10) } : {}) });
   const scopeProp = (what: string) => ({ type: "string", enum: [...MEMORY_SCOPES], description: what });
   const brief = (t: Task) => ({ id: t.id, title: t.title, status: t.status, priority: t.priority, assignee: t.assigneeRole, jazz: t.jazzId });
-  return [
+  const tools: ToolDef[] = [
     {
       set: "core", name: "delegate",
       description: "Hand a focused sub-task to a specialist agent. Send a brief (goal, context, files, acceptance), never transcripts. Returns the specialist's compact result. Every call starts a new, separate instance with its own name, session and task (two calls for one role = two specialists working in parallel); pass agentId to send a follow-up to one you started earlier. This is the only way to run another agent (including on Copilot/OpenCode/Pi/Duo via `harness`): it gets the project's tools and shows in the Agents tab.",
@@ -591,30 +593,30 @@ export function buildTools(d: {
     {
       set: "jazz", name: "scm_streams", description: "List EWM source control streams (name, id). query: words in the name, optional.",
       inputSchema: obj({ query: s("optional"), max: { type: "number", description: "default 50" } }),
-      handler: async (a) => scm().streams({ text: a.query, max: a.max ?? 50 }),
+      handler: async (a) => scm(a).streams({ text: a.query, max: a.max ?? 50 }),
     },
     {
       set: "jazz", name: "scm_components", description: "Components of an EWM stream.",
       inputSchema: obj({ stream: s("stream name or id") }, ["stream"]),
-      handler: async (a) => scm().components(String(a.stream)),
+      handler: async (a) => scm(a).components(String(a.stream)),
     },
     {
       set: "jazz", name: "scm_list", description: "Files and folders under a path of a component in a stream (needs the EWM SCM command line on this PC). depth: default 1.",
       inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("folder, default the component root"), depth: { type: "number" } }, ["stream", "component"]),
       handler: async (a) => {
-        const all = await scm().list(String(a.stream), String(a.component), a.path ?? "/", a.depth ?? 1);
+        const all = await scm(a).list(String(a.stream), String(a.component), a.path ?? "/", a.depth ?? 1);
         return { count: all.length, entries: all.slice(0, 500).map((e) => e.folder ? `${e.path}/` : e.path), ...(all.length > 500 ? { note: "first 500 shown; narrow the path" } : {}) };
       },
     },
     {
       set: "jazz", name: "scm_find_files", description: "Find files in a component by glob (\"*.c\", \"src/**/can_*.h\") or words in the path (needs the EWM SCM command line).",
       inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), pattern: s("glob or words"), path: s("folder to search, optional") }, ["stream", "component", "pattern"]),
-      handler: async (a) => { const hits = await scm().find(String(a.stream), String(a.component), String(a.pattern), a.path ?? "/"); return { count: hits.length, files: hits.slice(0, 200).map((e) => e.path) }; },
+      handler: async (a) => { const hits = await scm(a).find(String(a.stream), String(a.component), String(a.pattern), a.path ?? "/"); return { count: hits.length, files: hits.slice(0, 200).map((e) => e.path) }; },
     },
     {
       set: "jazz", name: "scm_read_file", description: "Read a text file from an EWM stream (latest version). Big files: pass startLine and lines (default 400 lines).",
       inputSchema: obj({ stream: s("stream name or id"), component: s("component name or id"), path: s("file path inside the component"), startLine: { type: "number" }, lines: { type: "number" } }, ["stream", "component", "path"]),
-      handler: async (a) => scm().readFile(String(a.stream), String(a.component), String(a.path), { startLine: a.startLine, lines: a.lines }),
+      handler: async (a) => scm(a).readFile(String(a.stream), String(a.component), String(a.path), { startLine: a.startLine, lines: a.lines }),
     },
     {
       set: "jazz", name: "scm_download", description: "Copy text files from an EWM stream into your working folder (read-only on the EWM side). to: folder relative to your working folder, default ewm/<component>.",
@@ -629,7 +631,7 @@ export function buildTools(d: {
         for (const p of (a.paths ?? []).slice(0, 50)) {
           try {
             const rel = normPath(String(p));
-            const text = await scm().fileText(String(a.stream), String(a.component), rel);
+            const text = await scm(a).fileText(String(a.stream), String(a.component), rel);
             const out = join(base, rel);
             mkdirSync(dirname(out), { recursive: true });
             writeFileSync(out, text);
@@ -639,17 +641,30 @@ export function buildTools(d: {
         return { saved, ...(failed.length ? { failed } : {}) };
       },
     },
+    {
+      set: "jazz", name: "scm_link",
+      description: "Read an EWM link the user gave (stream, workspace, component, folder, file or change set page): the server, stream, component (names and ids) and path in it. Every scm_* tool also takes the link directly as `link`.",
+      inputSchema: obj({ link: s("EWM / Jazz link") }, ["link"]),
+      handler: async (a) => {
+        if (!a.repo) throw new Error("not a link: pass the http(s) URL the user gave");
+        const c = scm(a);
+        const stream = a.stream ? await c.stream(String(a.stream)).catch(() => ({ id: String(a.stream), name: String(a.stream) })) : undefined;
+        const component = stream && a.component ? await c.component(stream.id, String(a.component)).then((x) => x.component).catch(() => ({ id: String(a.component), name: String(a.component) })) : undefined;
+        return { server: a.repo, ...(stream ? { stream: { id: stream.id, name: stream.name } } : {}), ...(component ? { component } : {}),
+          ...(a.path ? { path: a.path } : {}), ...(a.changeset ? { changeset: a.changeset } : {}) };
+      },
+    },
     // ---------------- EWM source control changes: only in repository workspaces; streams change only by deliver ----------------
     {
       set: "jazz", name: "scm_workspaces", description: "List EWM repository workspaces (name, owner, the stream it flows to). name: filter, optional.",
       inputSchema: obj({ name: s("name filter, optional"), max: { type: "number", description: "default 50" } }),
-      handler: async (a) => scmw().workspaces({ name: a.name, max: a.max }),
+      handler: async (a) => scmw(a).workspaces({ name: a.name, max: a.max }),
     },
     {
       set: "jazz", name: "scm_create_workspace",
       description: "Create an EWM repository workspace that flows to a stream (starts with the stream's current content). Name it after the task, e.g. \"<user> CAN timeout fix\". Then scm_load it.",
       inputSchema: obj({ name: s("new workspace name"), stream: s("stream it flows to"), description: s("optional") }, ["name", "stream"]),
-      handler: async (a) => scmw().createWorkspace(String(a.name), String(a.stream), a.description),
+      handler: async (a) => scmw(a).createWorkspace(String(a.name), String(a.stream), a.description),
     },
     {
       set: "jazz", name: "scm_load",
@@ -659,7 +674,7 @@ export function buildTools(d: {
       handler: async (a, ctx) => {
         const { root, dir } = sandbox(ctx.agentId, a.sandbox, a.workspace);
         mkdirSync(dir, { recursive: true });
-        const r = await scmw().load(String(a.workspace), dir, Array.isArray(a.components) ? a.components.map(String) : [], !!a.force);
+        const r = await scmw(a).load(String(a.workspace), dir, Array.isArray(a.components) ? a.components.map(String) : [], !!a.force);
         return { ...r, sandbox: relative(root, dir).replace(/\\/g, "/") || "." };
       },
     },
@@ -667,7 +682,7 @@ export function buildTools(d: {
       set: "jazz", name: "scm_status",
       description: "Status of a sandbox: unchecked-in local changes, outgoing and incoming change sets, conflicts. Run it before checking in, accepting or delivering.",
       inputSchema: obj({ sandbox: s("sandbox folder relative to your working folder") }, ["sandbox"]),
-      handler: async (a, ctx) => scmw().status(sandbox(ctx.agentId, a.sandbox).dir),
+      handler: async (a, ctx) => scmw(a).status(sandbox(ctx.agentId, a.sandbox).dir),
     },
     {
       set: "jazz", name: "scm_checkin",
@@ -678,31 +693,31 @@ export function buildTools(d: {
       handler: async (a, ctx) => {
         const { dir } = sandbox(ctx.agentId, a.sandbox);
         const paths = Array.isArray(a.paths) && a.paths.length ? a.paths.map((p: unknown) => join(dir, normPath(String(p)))) : [dir];
-        return scmw().checkin(paths, { comment: a.comment, changeset: a.changeset, workItem: a.workItem });
+        return scmw(a).checkin(paths, { comment: a.comment, changeset: a.changeset, workItem: a.workItem });
       },
     },
     {
       set: "jazz", name: "scm_changesets", description: "Recent change sets of a repository workspace (or stream), newest first: id, comment, author, complete, work items.",
       inputSchema: obj({ workspace: s("workspace or stream name"), component: s("optional"), max: { type: "number", description: "default 25" } }, ["workspace"]),
-      handler: async (a) => scmw().changesets(String(a.workspace), { component: a.component, max: a.max }),
+      handler: async (a) => scmw(a).changesets(String(a.workspace), { component: a.component, max: a.max }),
     },
     {
       set: "jazz", name: "scm_changeset", description: "The files a change set adds, changes, moves or deletes.",
       inputSchema: obj({ changeset: s("change set alias or uuid") }, ["changeset"]),
-      handler: async (a) => scmw().changes(String(a.changeset)),
+      handler: async (a) => scmw(a).changes(String(a.changeset)),
     },
     {
       set: "jazz", name: "scm_changeset_update",
       description: "Change a change set: new comment, link a work item, or complete it (complete: true can't be undone; complete only when the user's process asks for it, deliver completes it anyway).",
       inputSchema: obj({ changeset: s("change set alias or uuid"), comment: s("optional"), workItem: s("work item number, optional"), complete: { type: "boolean" } }, ["changeset"]),
-      handler: async (a) => scmw().updateChangeset(String(a.changeset), { comment: a.comment, workItem: a.workItem, complete: !!a.complete }),
+      handler: async (a) => scmw(a).updateChangeset(String(a.changeset), { comment: a.comment, workItem: a.workItem, complete: !!a.complete }),
     },
     {
       set: "jazz", name: "scm_accept",
       description: "Accept incoming change sets into a repository workspace (never a stream): all from the stream it flows to, or the change sets named. sandbox: the loaded sandbox to update, optional. Conflicts are reported; resolve them in the sandbox and check in.",
       inputSchema: obj({ workspace: s("repository workspace"), source: s("stream to accept from, default the flow target"),
         changesets: { type: "array", items: { type: "string" }, description: "optional" }, sandbox: s("sandbox folder relative to your working folder, optional") }, ["workspace"]),
-      handler: async (a, ctx) => scmw().accept(String(a.workspace), { source: a.source, changesets: Array.isArray(a.changesets) ? a.changesets.map(String) : undefined,
+      handler: async (a, ctx) => scmw(a).accept(String(a.workspace), { source: a.source, changesets: Array.isArray(a.changesets) ? a.changesets.map(String) : undefined,
         sandbox: a.sandbox ? sandbox(ctx.agentId, a.sandbox).dir : undefined }),
     },
     {
@@ -710,13 +725,13 @@ export function buildTools(d: {
       description: "Deliver outgoing change sets from a repository workspace to a stream, so the team gets them. Only when the user asked for the delivery; needs the user's \"Agents may deliver\" setting. confirm must repeat the stream name. changesets: optional, default all outgoing. Accept incoming changes first (scm_status).",
       inputSchema: obj({ workspace: s("repository workspace"), stream: s("target stream"), confirm: s("the target stream's name again"),
         changesets: { type: "array", items: { type: "string" }, description: "optional" } }, ["workspace", "stream", "confirm"]),
-      handler: async (a) => scmw().deliver(String(a.workspace), String(a.stream), a.confirm, Array.isArray(a.changesets) ? a.changesets.map(String) : []),
+      handler: async (a) => scmw(a).deliver(String(a.workspace), String(a.stream), a.confirm, Array.isArray(a.changesets) ? a.changesets.map(String) : []),
     },
     {
       set: "jazz", name: "scm_discard",
       description: "Discard an undelivered change set from a repository workspace (its changes leave the workspace and sandbox). Only when the user asked; confirm must repeat the change set.",
       inputSchema: obj({ workspace: s("repository workspace"), changeset: s("change set alias or uuid"), confirm: s("the change set again") }, ["workspace", "changeset", "confirm"]),
-      handler: async (a) => scmw().discard(String(a.workspace), String(a.changeset), a.confirm),
+      handler: async (a) => scmw(a).discard(String(a.workspace), String(a.changeset), a.confirm),
     },
     // ---------------- DOORS Next requirements (targeted retrieval: search → get, never whole modules) ----------------
     {
@@ -804,4 +819,32 @@ export function buildTools(d: {
       handler: async (a) => rmw().remove(a.changeset, String(a.requirement), a.confirm),
     },
   ];
+  return tools.map(withScmLink);
+}
+
+/** Fields an EWM link can fill: required only when there is no link. */
+const LINK_FIELDS = ["stream", "workspace", "component", "path", "changeset"];
+
+/**
+ * Every scm_* tool takes the link the user gave (`link`, or a URL pasted as stream/workspace/…): the server, stream,
+ * component and path come from it (scmTarget), so agents don't have to dig ids out of the URL.
+ */
+export function withScmLink(t: ToolDef): ToolDef {
+  if (!t.name.startsWith("scm_")) return t;
+  const schema = t.inputSchema as { properties: Record<string, unknown>; required?: string[] };
+  const required = schema.required ?? [];
+  return {
+    ...t,
+    inputSchema: {
+      ...schema,
+      properties: { ...schema.properties, link: { type: "string", description: "EWM link the user gave (stream, component, folder, file or change set): fills the server, stream, component and path" } },
+      required: required.filter((k) => !LINK_FIELDS.includes(k)),
+    },
+    handler: async (a: any, ctx) => {
+      const full = scmTarget({ ...(a ?? {}) });
+      const missing = required.filter((k) => full[k] === undefined || full[k] === "");
+      if (missing.length) throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required (or pass the EWM link as link)`);
+      return t.handler(full, ctx);
+    },
+  };
 }
