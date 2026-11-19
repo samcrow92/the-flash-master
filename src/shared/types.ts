@@ -19,6 +19,9 @@ export interface Project {
 
 export type DriveMode = "local" | "eco" | "comfort" | "sport";
 export const DRIVE_MODES: DriveMode[] = ["local", "eco", "comfort", "sport"];
+/** The ECO / COMFORT / SPORT row for GitLab Duo (Settings → Harnesses → GitLab Duo), shown only when the chat runs on Duo. */
+export type DuoMode = "eco" | "comfort" | "sport";
+export const DUO_MODES: DuoMode[] = ["eco", "comfort", "sport"];
 
 export interface Attachment {
   id: string;
@@ -40,6 +43,7 @@ export interface Chat {
   model: string | null;
   superpowers: boolean;
   mode: DriveMode | null; // LOCAL / ECO / COMFORT / SPORT model profile, null = chat harness/model
+  duoMode?: DuoMode | null; // GitLab Duo ECO / COMFORT / SPORT (model + thinking for Duo agents), null = Duo's usual model
   autopilot: boolean; // auto-approve tool calls and tell agents not to stop for feedback
   archived: boolean;
   pinned: boolean;

@@ -15,7 +15,7 @@ import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
 import { loadRoles, loadSkills } from "../src/main/roles";
 import { parseTextDelegations } from "../src/main/context";
-import { DEFAULT_SETTINGS, mergeSettings, type Settings } from "../src/shared/settings";
+import { DEFAULT_SETTINGS, DUO_MODE_DEFAULTS, mergeSettings, type Settings } from "../src/shared/settings";
 import type { SessionOptions } from "../src/main/harness/types";
 
 const FAKE_DUO = join(__dirname, "fixtures", "fake-duo.mjs");
@@ -54,7 +54,7 @@ describe("what counts as a GitLab repo", () => {
     expect(hasGitLabRemote("origin\thttps://git.corp/g/p.git (fetch)", ["git.corp"])).toBe(true);
     expect(hostList("https://Git.Corp/x, code.lab:8443 git@other.host")).toEqual(["git.corp", "code.lab", "other.host"]);
     expect(duoGitlabHosts({ hosts: "git.corp" }, { GITLAB_BASE_URL: "https://lab.internal" })).toEqual(["git.corp", "lab.internal"]);
-    expect(DEFAULT_SETTINGS.duo).toEqual({ hosts: "", coordinator: false, coordinatorModel: "claude-opus-5-5", orchestratorRules: "" });
+    expect(DEFAULT_SETTINGS.duo).toEqual({ hosts: "", coordinator: false, coordinatorModel: "claude_opus_5_5", orchestratorRules: "", modes: DUO_MODE_DEFAULTS });
   });
 
   it("explains why a folder isn't one", async () => {

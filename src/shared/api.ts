@@ -31,7 +31,7 @@ export interface FlashApi {
   listChats(projectId: string | null): Promise<Chat[]>;
   getMasterChat(): Promise<Chat>;
   createChat(input: { projectId: string | null; title?: string; agentRole?: string }): Promise<Chat>;
-  updateChat(id: string, patch: Partial<Pick<Chat, "title" | "agentRole" | "harness" | "model" | "superpowers" | "mode" | "autopilot" | "archived" | "pinned">>): Promise<Chat>;
+  updateChat(id: string, patch: Partial<Pick<Chat, "title" | "agentRole" | "harness" | "model" | "superpowers" | "mode" | "duoMode" | "autopilot" | "archived" | "pinned">>): Promise<Chat>;
   /** Fresh start for the agents of a chat: closes their sessions; earlier messages stay visible but are no longer sent. */
   resetContext(chatId: string): Promise<Message>;
   exportChat(chatId: string): Promise<string>; // Markdown transcript

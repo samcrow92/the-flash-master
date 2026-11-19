@@ -10,7 +10,7 @@ import type { ChildProcess } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessStatus } from "@shared/types";
-import type { Settings } from "@shared/settings";
+import { duoModelId, type Settings } from "@shared/settings";
 import { detectExecutable, killTree, runCapture, spawnTool, splitArgs } from "./process";
 import type { HarnessAdapter, HarnessEvent, HarnessSession, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
 
@@ -231,6 +231,18 @@ export function duoSessionId(line: string): string | null {
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\u001b\[[0-9;?]*[A-Za-z]/g;
 
+/**
+ * The `duo run` arguments of one turn. Duo takes GitLab's model identifier (claude_opus_5_5), so an Anthropic-style id is
+ * mapped to it. duo-cli has no thinking-effort option yet (9.16), so the thinking level is not passed: an unknown flag
+ * would make Duo refuse the turn.
+ */
+export function duoRunArgs(prefixArgs: string[], extraArgs: string | undefined, sessionId: string | null, model: string | null | undefined): string[] {
+  const args = [...prefixArgs, "run", ...splitArgs(extraArgs ?? "")];
+  if (sessionId) args.push("--existing-session-id", sessionId);
+  if (model) args.push("--model", duoModelId(model));
+  return args;
+}
+
 export class DuoSession implements HarnessSession {
   /** How often a running Duo process reports that it is alive (tests shorten it). */
   static heartbeatMs = 15_000;
@@ -249,9 +261,7 @@ export class DuoSession implements HarnessSession {
 
   prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
     const goal = attachments?.length ? `${text}\n\nAttached files:\n${attachments.map((a) => `- ${a.name}: ${a.path}`).join("\n")}` : text;
-    const args = [...this.prefixArgs, "run", ...splitArgs(this.o.extraArgs)];
-    if (this.sessionId) args.push("--existing-session-id", this.sessionId);
-    if (this.o.model) args.push("--model", this.o.model);
+    const args = duoRunArgs(this.prefixArgs, this.o.extraArgs, this.sessionId, this.o.model);
     const turn = ++this.turns;
     const g = duoGoal(goal, this.o.cwd, `${Date.now().toString(36)}-${turn}`);
     if (g.file) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Attachment, Chat, DriveMode } from "@shared/types";
-import { DRIVE_MODES } from "@shared/types";
+import type { Attachment, Chat, DriveMode, DuoMode } from "@shared/types";
+import { DRIVE_MODES, DUO_MODES } from "@shared/types";
+import { chatOnDuo } from "@shared/settings";
 import type { ReactNode } from "react";
 import { api, useStore } from "../store";
 import { draftKey, drafts } from "../drafts";
@@ -184,6 +185,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
         </div>
       </div>
       {!compact && <ModeBar chat={chat} onChange={(mode) => patchChat({ mode })} />}
+      {!compact && <DuoModeBar chat={chat} onChange={(duoMode) => patchChat({ duoMode })} />}
     </div>
   );
 }
@@ -208,6 +210,34 @@ function ModeBar({ chat, onChange }: { chat: Chat; onChange: (m: DriveMode | nul
         );
       })}
       <button className="mode-gear" title="Configure modes" onClick={() => st.setView({ kind: "settings", tab: "modes" })}><Settings size={13} /></button>
+    </div>
+  );
+}
+
+/**
+ * GitLab Duo's own ECO / COMFORT / SPORT row, only while the chat runs on Duo: each sets the model and thinking level of
+ * the chat's Duo agents (Settings → Harnesses → GitLab Duo). Click the active one again for Duo's usual model.
+ */
+function DuoModeBar({ chat, onChange }: { chat: Chat; onChange: (m: DuoMode | null) => void }) {
+  const st = useStore();
+  const s = st.settings;
+  if (!s?.duo?.modes || !chatOnDuo(chat, s)) return null;
+  return (
+    <div className="mode-bar duo-mode-bar" title="GitLab Duo modes: model and thinking for this chat's Duo agents (configure them in Settings → Harnesses → GitLab Duo). Click the active mode again to go back to Duo's usual model.">
+      <span className="duo-tag">Duo</span>
+      {DUO_MODES.map((m) => {
+        const p = s.duo.modes[m];
+        const meta = MODE_META[m];
+        return (
+          <button key={m} className={`mode-btn mode-${m} ${chat.duoMode === m ? "on" : ""}`}
+            title={`${meta.hint} on Duo: ${p.model || "Duo's default model"}${p.thinking ? ` · ${p.thinking} thinking` : ""}`}
+            onClick={() => onChange(chat.duoMode === m ? null : m)}>
+            <span className="mode-label">{meta.icon} {meta.label}</span>
+            <span className="mode-model">{p.model || "default"}{p.thinking ? ` · ${p.thinking}` : ""}</span>
+          </button>
+        );
+      })}
+      <button className="mode-gear" title="Configure Duo modes" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}><Settings size={13} /></button>
     </div>
   );
 }

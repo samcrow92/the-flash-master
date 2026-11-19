@@ -62,7 +62,7 @@ afterEach(async () => { await cleanup?.(); cleanup = null; vi.restoreAllMocks();
 describe("coordinator on GitLab Duo", () => {
   it("is off by default and defaults to Opus 5.5", () => {
     expect(DEFAULT_SETTINGS.duo.coordinator).toBe(false);
-    expect(DEFAULT_SETTINGS.duo.coordinatorModel).toBe("claude-opus-5-5");
+    expect(DEFAULT_SETTINGS.duo.coordinatorModel).toBe("claude_opus_5_5");
   });
 
   it("with the setting on, Duo starts by itself in the project folder on Opus 5.5, and its first turn still gets the coordinator brief", async () => {
@@ -78,9 +78,9 @@ describe("coordinator on GitLab Duo", () => {
     expect(r).toEqual({ harness: "duo", folder: project.path, ready: true });
     expect(starts).toHaveLength(1);
     expect(starts[0]!.cwd).toBe(project.path);
-    expect(starts[0]!.model).toBe("claude-opus-5-5");
+    expect(starts[0]!.model).toBe("claude_opus_5_5");
     const agent = db.listAgents().find((a) => a.chatId === chat.id)!;
-    expect(agent).toMatchObject({ harness: "duo", model: "claude-opus-5-5", status: "idle" });
+    expect(agent).toMatchObject({ harness: "duo", model: "claude_opus_5_5", status: "idle" });
     // Opening the chat again doesn't start a second session.
     await orch.prepareChat(chat.id);
     expect(starts).toHaveLength(1);
@@ -115,7 +115,7 @@ describe("coordinator on GitLab Duo", () => {
     expect((await orch.prepareChat(chat.id)).ready).toBe(false); // setting off, chat on auto: nothing to start
     db.updateChat(chat.id, { harness: "duo" });
     expect(await orch.prepareChat(chat.id)).toEqual({ harness: "duo", folder: project.path, ready: true });
-    expect(starts[0]!.model).toBe("claude-opus-5-5");
+    expect(starts[0]!.model).toBe("claude_opus_5_5");
   }, 30000);
 
   it("the master chat has no project folder: it keeps its usual harness", async () => {
