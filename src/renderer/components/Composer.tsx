@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, Chat, DriveMode, DuoMode } from "@shared/types";
 import { DRIVE_MODES, DUO_MODES } from "@shared/types";
-import { chatOnDuo } from "@shared/settings";
+import { chatOnDuo, modeClickPatch } from "@shared/settings";
 import type { ReactNode } from "react";
 import { api, useStore } from "../store";
 import { draftKey, drafts } from "../drafts";
@@ -184,8 +184,8 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
             {busy ? (whileBusy === "steer" ? <CornerDownRight size={15} strokeWidth={2.2} /> : <Hourglass size={14} strokeWidth={2.2} />) : <ArrowUp size={16} strokeWidth={2.4} />}</button>
         </div>
       </div>
-      {!compact && <ModeBar chat={chat} onChange={(mode) => patchChat({ mode })} />}
-      {!compact && <DuoModeBar chat={chat} onChange={(duoMode) => patchChat({ duoMode })} />}
+      {!compact && settings && <ModeBar chat={chat} onChange={(mode) => patchChat(modeClickPatch(chat, settings, { mode }))} />}
+      {!compact && settings && <DuoModeBar chat={chat} onChange={(duoMode) => patchChat(modeClickPatch(chat, settings, { duoMode }))} />}
     </div>
   );
 }

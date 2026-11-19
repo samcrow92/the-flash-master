@@ -252,13 +252,27 @@ export function duoModelId(model: string): string {
 }
 
 /**
- * True when the chat's coordinator runs on GitLab Duo: Duo picked for the chat, or "Coordinator on Duo" in a project chat
- * (the master chat and chats without a project keep their usual harness). The Duo mode row shows only then.
+ * True when the chat is a GitLab Duo chat: Duo picked for the chat, or "Coordinator on Duo" in a project chat (the master
+ * chat and chats without a project keep their usual harness). The Duo mode row shows then, whatever drive mode is picked:
+ * a drive mode never hides it (Mari, 2026-11-19).
  */
-export function chatOnDuo(chat: Pick<Chat, "harness" | "projectId" | "mode">, settings: Pick<Settings, "duo" | "modes">): boolean {
+export function chatOnDuo(chat: Pick<Chat, "harness" | "projectId">, settings: Pick<Settings, "duo">): boolean {
   if (!chat.projectId) return false;
-  if (chat.mode && settings.modes[chat.mode]?.harness) return settings.modes[chat.mode].harness === "duo";
   return chat.harness === "duo" || (settings.duo.coordinator && !chat.harness);
+}
+
+/**
+ * The chat patch for a click on a drive mode or a Duo mode. The two rows can't both steer the coordinator: a Duo mode
+ * drops a drive mode that moves the chat to another harness, and such a drive mode drops the Duo mode.
+ */
+export function modeClickPatch(chat: Pick<Chat, "mode" | "duoMode">, settings: Pick<Settings, "modes">,
+  click: { mode: DriveMode | null } | { duoMode: DuoMode | null }): Partial<Pick<Chat, "mode" | "duoMode">> {
+  const offDuo = (m: DriveMode | null | undefined) => {
+    const h = m ? settings.modes[m]?.harness : "";
+    return !!h && h !== "duo";
+  };
+  if ("mode" in click) return offDuo(click.mode) && chat.duoMode ? { mode: click.mode, duoMode: null } : { mode: click.mode };
+  return click.duoMode && offDuo(chat.mode) ? { duoMode: click.duoMode, mode: null } : { duoMode: click.duoMode };
 }
 
 const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ enabled, path: "", args: "", defaultModel });
