@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { api, useStore } from "../store";
 import { draftKey, drafts } from "../drafts";
 import { canBrowse, sentHistory, stepHistory } from "../history";
+import { applyToken, BUILTIN_COMMANDS, insertTrigger, tokenAt } from "@shared/inline-commands";
 import { RoleIcon, ArrowUp, AtSign, File, Flag, Home, Hourglass, Leaf, Paperclip, Plane, RotateCcw, Settings, Slash, Sofa, Sparkles, CornerDownRight, X } from "./icons";
 
 const MODE_META: Record<DriveMode, { label: string; icon: ReactNode; hint: string }> = {
@@ -71,20 +72,23 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
     return () => window.removeEventListener("flash:focus-composer", focus);
   }, [parentId]);
 
+  // The @mention or /command the caret is in, anywhere in the message (start of text or after whitespace).
+  const [caret, setCaret] = useState(() => text.length);
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const token = useMemo(() => { const t = tokenAt(text, caret); return t && t.start !== dismissed ? t : null; }, [text, caret, dismissed]);
   const suggestions = useMemo(() => {
-    const at = /^@([\w-]*)$/.exec(text);
-    if (at) return roles.filter((r) => r.name.startsWith(at[1]!.toLowerCase())).map((r) => ({ insert: `@${r.name} `, label: <span className="row gap-s"><RoleIcon role={r.name} size={18} /> @{r.name}</span>, hint: r.title }));
-    const sl = /^\/([\w-]*)$/.exec(text);
-    if (sl) {
-      const cmds = [
-        { c: "superpowers", d: "toggle the superpowers workflow for this chat" }, { c: "stop", d: "stop agents in this chat" }, { c: "help", d: "list commands and specialists" },
-        { c: "kb", d: "build or update this project's knowledge base (add words to focus it)" }, { c: "kb-sync", d: "sync the knowledge base with .flashmaster/knowledge in the repo" },
-        ...skills.filter((s) => s.command !== "superpowers-index").map((s) => ({ c: s.command, d: s.description })),
-      ];
-      return cmds.filter((x) => x.c.startsWith(sl[1]!.toLowerCase())).map((x) => ({ insert: `/${x.c} `, label: <span>/{x.c}</span>, hint: x.d }));
-    }
-    return [];
-  }, [text, roles, skills]);
+    if (!token) return [];
+    const q = token.query.toLowerCase();
+    if (token.kind === "@") return roles.filter((r) => r.name.startsWith(q)).map((r) => ({ insert: `@${r.name} `, label: <span className="row gap-s"><RoleIcon role={r.name} size={18} /> @{r.name}</span>, hint: r.title }));
+    const cmds = [...BUILTIN_COMMANDS, ...skills.filter((s) => s.command !== "superpowers-index").map((s) => ({ c: s.command, d: s.description }))];
+    return cmds.filter((x) => x.c.startsWith(q)).map((x) => ({ insert: `/${x.c} `, label: <span>/{x.c}</span>, hint: x.d }));
+  }, [token, roles, skills]);
+  const putText = (next: { text: string; caret: number }) => {
+    setText(next.text); setCaret(next.caret); setSel(0); setHistIdx(null);
+    requestAnimationFrame(() => { ta.current?.focus(); ta.current?.setSelectionRange(next.caret, next.caret); });
+  };
+  const pick = (insert: string) => { if (token) putText(applyToken(text, token, insert)); };
+  const trigger = (ch: "@" | "/") => { const t = ta.current; setDismissed(null); putText(insertTrigger(text, t?.selectionStart ?? text.length, t?.selectionEnd ?? text.length, ch)); };
 
   const addFiles = async (files: File[]) => {
     for (const f of files) {
@@ -124,7 +128,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
         {suggestions.length > 0 && (
           <div className="suggest">
             {suggestions.map((s, i) => (
-              <button key={s.insert} className={i === sel ? "sel" : ""} onMouseDown={(e) => { e.preventDefault(); setText(s.insert); ta.current?.focus(); }}>
+              <button key={s.insert} className={i === sel ? "sel" : ""} onMouseDown={(e) => { e.preventDefault(); pick(s.insert); }}>
                 <span>{s.label}</span><span className="muted small">{s.hint}</span>
               </button>
             ))}
@@ -144,10 +148,12 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
         )}
         <textarea ref={ta} value={text} placeholder={busy ? (whileBusy === "steer" ? "Steer the running agent… (Enter)" : "Queue a message for when the agent finishes… (Enter)") : placeholder}
           rows={Math.min(10, Math.max(compact ? 2 : 3, text.split("\n").length))}
-          onChange={(e) => { setText(e.target.value); setSel(0); setHistIdx(null); }}
+          onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); setDismissed(null); setSel(0); setHistIdx(null); }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); void addFiles(files); } }}
           onKeyDown={(e) => {
-            if (suggestions.length && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) { e.preventDefault(); setText(suggestions[sel]!.insert); return; }
+            if (suggestions.length && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) { e.preventDefault(); pick(suggestions[sel]!.insert); return; }
+            if (suggestions.length && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setDismissed(token?.start ?? null); return; }
             if (suggestions.length && e.key === "ArrowDown") { e.preventDefault(); setSel((sel + 1) % suggestions.length); return; }
             if (suggestions.length && e.key === "ArrowUp") { e.preventDefault(); setSel((sel - 1 + suggestions.length) % suggestions.length); return; }
             if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -159,8 +165,8 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
           }} />
         <div className="composer-bar">
           <button className="cb-btn" title="Attach files or images (you can also paste or drop them)" onClick={async () => setAtts([...atts, ...(await api().pickAttachments(chat.id))])}><Paperclip size={16} /></button>
-          <button className="cb-btn" title="Route to a specialist" onClick={() => { setText((t) => (t.startsWith("@") ? t : `@${t}`)); ta.current?.focus(); }}><AtSign size={16} /></button>
-          <button className="cb-btn" title="Commands and workflows" onClick={() => { setText((t) => (t.startsWith("/") ? t : `/${t}`)); ta.current?.focus(); }}><Slash size={15} /></button>
+          <button className="cb-btn" title="Route to a specialist" onClick={() => trigger("@")}><AtSign size={16} /></button>
+          <button className="cb-btn" title="Commands and workflows" onClick={() => trigger("/")}><Slash size={15} /></button>
           {!compact && <>
             <span className="cb-sep" />
             <button className={`cb-toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}><Sparkles size={14} /> Superpowers</button>

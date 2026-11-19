@@ -9,6 +9,7 @@
  */
 import type { Message, RoleDef, SkillDef } from "@shared/types";
 import { briefBody } from "@shared/briefs";
+import { cutToken, findCommand, findMention } from "@shared/inline-commands";
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 
@@ -34,11 +35,16 @@ export interface MentionParse {
   text: string;
 }
 
-/** "@reviewer please check" → { role: "reviewer", text: "please check" } when role exists. */
+/**
+ * "@reviewer please check" → { role: "reviewer", text: "please check" } when the role exists.
+ * A mention later in the message routes too ("thanks, @reviewer can you check?"): the text is kept as written then.
+ * Emails, URLs and code spans never count (see findMention).
+ */
 export function parseMention(input: string, roles: string[]): MentionParse {
   const m = /^\s*@([a-z][\w-]*)\b\s*/i.exec(input);
   if (m && roles.includes(m[1]!.toLowerCase())) return { role: m[1]!.toLowerCase(), text: input.slice(m[0].length) };
-  return { role: null, text: input };
+  const mid = findMention(input, (n) => roles.includes(n));
+  return mid ? { role: mid.name, text: input } : { role: null, text: input };
 }
 
 export interface SlashParse {
@@ -46,10 +52,17 @@ export interface SlashParse {
   text: string;
 }
 
-export function parseSlash(input: string): SlashParse {
+/**
+ * "/tdd write tests" → { command: "tdd", text: "write tests" }. A leading command counts whatever it is (unknown ones
+ * are reported by the caller as before). Later in the message ("write tests /tdd") only commands in `known` count,
+ * so a path like "/usr" or "see /docs" stays plain text; the command is cut out of the text.
+ */
+export function parseSlash(input: string, known?: readonly string[]): SlashParse {
   const m = /^\s*\/([a-z][\w-]*)\b\s*/i.exec(input);
-  if (!m) return { command: null, text: input };
-  return { command: m[1]!.toLowerCase(), text: input.slice(m[0].length) };
+  if (m) return { command: m[1]!.toLowerCase(), text: input.slice(m[0].length) };
+  const mid = known?.length ? findCommand(input, (n) => known.includes(n)) : null;
+  if (!mid) return { command: null, text: input };
+  return { command: mid.name, text: cutToken(input, mid.index, mid.length) };
 }
 
 export const RESULT_CONTRACT = (maxTokens: number) =>
