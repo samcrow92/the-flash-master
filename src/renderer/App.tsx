@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
+import { dragReducer, hasFiles, idle } from "./fileDrag";
 import { reportImports } from "./components/AgentImport";
 import { api, applyWindow, useStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
@@ -19,13 +20,31 @@ import { SearchDialog } from "./components/SearchDialog";
 import { TitleBar } from "./components/TitleBar";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { Dots } from "./components/Dots";
-import { Zap } from "./components/icons";
+import { X, Zap } from "./components/icons";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export function App() {
   const { ready, view, toasts, init, apply, toast } = useStore();
-  const [dragging, setDragging] = useState(false);
+  const [drag, dispatch] = useReducer(dragReducer, idle);
+  const dragging = drag.active;
   useShortcuts();
+
+  // File-drag overlay: window-level tracking so a drag that leaves for (or ends in) another window never sticks.
+  useEffect(() => {
+    const end = () => dispatch({ type: "end" });
+    const onEnter = (e: DragEvent) => dispatch({ type: "enter", files: hasFiles(e.dataTransfer), at: Date.now() });
+    const onOver = (e: DragEvent) => dispatch({ type: "over", files: hasFiles(e.dataTransfer), at: Date.now() });
+    const onLeave = (e: DragEvent) => dispatch({ type: "leave", outside: !e.relatedTarget });
+    const onMove = (e: MouseEvent) => { if (e.buttons === 0) end(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") end(); };
+    const timer = window.setInterval(() => dispatch({ type: "tick", at: Date.now() }), 250);
+    const on: [string, EventListener][] = [
+      ["dragenter", onEnter as EventListener], ["dragover", onOver as EventListener], ["dragleave", onLeave as EventListener],
+      ["drop", end], ["dragend", end], ["blur", end], ["mousemove", onMove as EventListener], ["mousedown", end], ["keydown", onKey as EventListener],
+    ];
+    for (const [t, f] of on) window.addEventListener(t, f, true);
+    return () => { window.clearInterval(timer); for (const [t, f] of on) window.removeEventListener(t, f, true); };
+  }, []);
 
   useEffect(() => {
     const off = window.flash.onEvent((e) => apply(e));
@@ -47,16 +66,21 @@ export function App() {
     <TitleBar terminal />
     <TerminalPanel />
     <div className="app"
-      onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
+      onDragOver={(e) => { if (hasFiles(e.dataTransfer)) e.preventDefault(); }}
       onDrop={async (e) => {
         const files = [...e.dataTransfer.files].filter((f) => f.name.toLowerCase().endsWith(".md"));
-        setDragging(false);
+        dispatch({ type: "end" });
         if (!files.length) return;
         e.preventDefault();
         reportImports(await Promise.all(files.map(async (f) => api().importAgentText(await f.text(), f.name))), toast);
       }}>
-      {dragging && <div className="drop-hint">Drop agent .md files to import them</div>}
+      {dragging && (
+        <div className="drop-hint" onClick={() => dispatch({ type: "end" })}>
+          <button className="drop-hint-close" title="Dismiss (Esc)" aria-label="Dismiss" onClick={() => dispatch({ type: "end" })}><X size={14} /></button>
+          <div>Drop agent .md files to import them</div>
+          <div className="drop-hint-sub">Esc to dismiss</div>
+        </div>
+      )}
       <Sidebar />
       <main className="main" key={view.kind === "chat" ? "chat" : view.kind}>
         <ErrorBoundary name="this view" resetKey={JSON.stringify(view)}>
