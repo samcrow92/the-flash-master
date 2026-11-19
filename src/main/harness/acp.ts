@@ -39,6 +39,7 @@ export function promptBlocks(text: string, atts: PromptAttachment[] | undefined,
   return blocks;
 }
 import { runCapture } from "./process";
+import { uniqueModels } from "@shared/models";
 
 /** Read models from an ACP session response: `models.availableModels` or a select config option of category "model". */
 export function modelsFromSession(r: Json | undefined): { models: ModelInfo[]; modelOptionId: string | null } {
@@ -56,7 +57,7 @@ export function modelsFromSession(r: Json | undefined): { models: ModelInfo[]; m
       for (const o of flat) if (o?.value) out.push({ id: String(o.value), name: String(o.name ?? o.value), description: o.description ?? null, current: o.value === opt.currentValue });
     }
   }
-  return { models: out.slice(0, 256), modelOptionId };
+  return { models: uniqueModels(out).slice(0, 256), modelOptionId };
 }
 
 type Json = Record<string, any>;
@@ -377,7 +378,7 @@ export class AcpAdapter implements HarnessAdapter {
     // OpenCode also lists models on its CLI (provider/model per line).
     if (this.id === "opencode") {
       const r = await runCapture(p.executable ?? "opencode", ["models"], 30000, p.cwd);
-      return r.out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[\w.-]+\/[\w.:@-]+$/.test(l)).slice(0, 256).map((id) => ({ id, name: id }));
+      return r.out.split(/\r?\n/).map((l) => l.trim()).filter((l, i, all) => /^[\w.-]+\/[\w.:@-]+$/.test(l) && all.indexOf(l) === i).slice(0, 256).map((id) => ({ id, name: id }));
     }
     return [];
   }

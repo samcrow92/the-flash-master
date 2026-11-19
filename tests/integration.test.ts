@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AcpAdapter, modelsFromSession } from "../src/main/harness/acp";
+import { uniqueModels } from "../src/shared/models";
 import { PiAdapter, PiSession } from "../src/main/harness/pi";
 import { MockAdapter } from "../src/main/harness/mock";
 import { HarnessRegistry } from "../src/main/harness/registry";
@@ -458,6 +459,13 @@ describe("model discovery", () => {
     expect(viaOption.modelOptionId).toBe("model");
     expect(viaOption.models.map((m) => [m.id, m.current])).toEqual([["x", true], ["y", false]]);
     expect(modelsFromSession(undefined).models).toEqual([]);
+  });
+
+  it("lists each model id once, even when option groups repeat it (Cursor's \"auto\")", () => {
+    const r = modelsFromSession({ configOptions: [{ id: "model", type: "select", category: "model", currentValue: "auto",
+      options: [{ groupId: "a", options: [{ value: "auto", name: "Auto" }, { value: "x", name: "X" }] }, { groupId: "b", options: [{ value: "auto", name: "Auto" }] }] }] });
+    expect(r.models.map((m) => m.id)).toEqual(["auto", "x"]);
+    expect(uniqueModels([{ id: "auto", name: "Auto" }, { id: "auto", name: "Auto", current: true }])).toEqual([{ id: "auto", name: "Auto", current: true }]);
   });
 
   it("probes an ACP harness for its models and selects the chosen one", async () => {

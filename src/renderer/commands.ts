@@ -18,9 +18,11 @@ export const SHORTCUTS: Record<ShortcutId, { keys: string; label: string }> = {
   search: { keys: "Mod+Shift+F", label: "Search all chats" },
 };
 
-export interface KeyLike { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }
+export interface KeyLike { key?: string | null; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }
 
 export function matchShortcut(e: KeyLike, mac: boolean): ShortcutId | null {
+  // Autofill, IME and some synthetic keydown events arrive without a key; they are never a shortcut.
+  if (typeof e.key !== "string" || !e.key) return null;
   const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (mod && !e.altKey && !e.shiftKey) {

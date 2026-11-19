@@ -7,6 +7,7 @@
  */
 import type { ChildProcess } from "node:child_process";
 import type { HarnessStatus, ModelInfo } from "@shared/types";
+import { uniqueModels } from "@shared/models";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
 import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
 import { readFileSync } from "node:fs";
@@ -75,10 +76,10 @@ export class PiSession implements HarnessSession {
   async availableModels(): Promise<ModelInfo[]> {
     const r = await this.command({ type: "get_available_models" });
     if (!r.success) return [];
-    return (r.data?.models ?? []).slice(0, 256).map((m: Json) => {
+    return uniqueModels((r.data?.models ?? []).slice(0, 256).map((m: Json) => {
       const id = m.provider ? `${m.provider}/${m.id}` : String(m.id);
       return { id, name: m.name ? `${m.name} (${m.provider ?? ""})` : id, description: m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k context` : null, current: id === this.currentModel };
-    });
+    }));
   }
 
   prompt(text: string, attachments?: PromptAttachment[]): Promise<TurnResult> {
