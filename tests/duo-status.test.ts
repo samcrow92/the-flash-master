@@ -79,7 +79,7 @@ describe("Duo progress", () => {
       // Wait for the log lines too: on a slow or busy machine (antivirus on Windows) the process can take longer to
       // start than three heartbeats, and the test used to fail with no activity yet.
       await until(() => events.filter((e) => e.type === "heartbeat").length >= 3 && events.filter((e) => e.type === "activity").length >= 2);
-      expect(events.filter((e) => e.type === "activity").map((e) => (e as { text: string }).text)).toEqual(["Session ID: fakesession42", "Reading src/brake_light.c"]);
+      expect(events.filter((e) => e.type === "activity").map((e) => (e as { text: string }).text)).toEqual(["Workflow source=local (fresh); created 4122303 (flow: chat), capabilities=[none]", "Reading src/brake_light.c"]);
       await s.cancel();
       expect((await turn).stopReason).toBe("cancelled");
       const n = events.length;
@@ -113,7 +113,7 @@ describe("the coordinator and a Duo specialist", () => {
     const st = orch.agentStatus(parentId, r.agentId);
     expect(st).toMatchObject({ harness: "duo", working: true, processAlive: true, statusLine: { text: "reading the brake light sources" } });
     // stdout and stderr are separate pipes, so their lines may arrive in either order.
-    expect([...(st.recent as string[])].sort()).toEqual(["Reading src/brake_light.c", "STATUS: reading the brake light sources", "Session ID: fakesession42"]);
+    expect([...(st.recent as string[])].sort()).toEqual(["Reading src/brake_light.c", "STATUS: reading the brake light sources", "Workflow source=local (fresh); created 4122303 (flow: chat), capabilities=[none]"]);
     expect(st.writingNow).toContain("STATUS: reading");
     expect(st.hint).toMatch(/Quiet is not stuck while processAlive/);
   }, 30000);
