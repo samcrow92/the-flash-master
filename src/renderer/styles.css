@@ -1796,12 +1796,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .proxy-form .pw-wrap input { width: 100%; padding-right: 34px; box-sizing: border-box; }
 .proxy-form .pw-wrap .icon-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 3px; border: none; background: none; color: var(--muted); }
 
-/* GitLab Duo's own ECO / COMFORT / SPORT row: a second tab under the drive modes, only while the chat runs on Duo */
-.composer-wrap > .mode-bar + .duo-mode-bar { margin-top: 3px; border-radius: 14px; border-top: 1px solid var(--line); }
-.duo-tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
-  color: var(--muted); border-right: 1px solid var(--line); margin-right: 2px; height: 16px; }
-.duo-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fc6d26; }
-.duo-mode-bar .mode-model { max-width: 170px; }
 
 /* ---------- images in chats (Markdown images, links to image files, tool screenshots, attachments) ---------- */
 .md-img-wrap { display: block; margin: 6px 0; max-width: 100%; }
@@ -1827,3 +1821,37 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .img-viewer-bar { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 14px; border-radius: 999px; background: var(--glass-strong); border: 1px solid var(--rim);
   backdrop-filter: blur(30px) saturate(180%); box-shadow: var(--hi), var(--shadow); cursor: default; max-width: min(92vw, 640px); }
 .img-viewer-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+/* ---------- GitLab Duo drive-mode dial, beside Send: a knurled knob that turns AUTO → ECO → COMFORT → SPORT ---------- */
+.duo-dial { --mc: var(--muted); position: relative; display: flex; align-items: center; gap: 8px; flex: none; }
+.duo-dial.dial-eco { --mc: var(--green); } .duo-dial.dial-comfort { --mc: var(--blue); } .duo-dial.dial-sport { --mc: var(--red); }
+.dial-read { display: grid; justify-items: end; line-height: 1.1; min-width: 0; }
+.dial-name { font-size: 11px; font-weight: 800; font-style: italic; letter-spacing: .08em; color: var(--mc); transition: color .3s; }
+.dial-model { font-size: 10px; color: var(--muted); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dial-knob { --rot: -60deg; position: relative; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: none; background: none; box-shadow: none; flex: none; }
+.dial-knob:hover:not(:disabled) { background: none; }
+.dial-knob:focus-visible { outline: 2px solid var(--mc); outline-offset: 2px; }
+.dial-ring { position: absolute; inset: 0; border-radius: 50%; opacity: .5; transform: rotate(-30deg);
+  background: conic-gradient(from -105deg, var(--muted) 0 22deg, transparent 0 30deg, var(--green) 0 52deg, transparent 0 60deg, var(--blue) 0 82deg, transparent 0 90deg, var(--red) 0 112deg, transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 12.5px, #000 13px); mask: radial-gradient(circle, transparent 12.5px, #000 13px); }
+.dial-glow { position: absolute; inset: -2px; border-radius: 50%; box-shadow: 0 0 12px -2px var(--mc); opacity: .75; animation: dial-pulse .5s ease-out; }
+@keyframes dial-pulse { from { box-shadow: 0 0 22px 2px var(--mc); } }
+.dial-cap { position: absolute; inset: 3px; border-radius: 50%; transform: rotate(var(--rot)); transition: transform .55s cubic-bezier(.3, 1.55, .45, 1);
+  background: repeating-conic-gradient(rgba(255, 255, 255, .07) 0 4deg, rgba(0, 0, 0, .12) 4deg 8deg), radial-gradient(circle at 35% 30%, #3a3d4a, #15171e);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .35), inset 0 -2px 3px rgba(0, 0, 0, .35), 0 3px 8px -2px rgba(0, 0, 0, .55); }
+[data-theme="light"] .dial-cap { background: repeating-conic-gradient(rgba(255, 255, 255, .5) 0 4deg, rgba(0, 0, 0, .06) 4deg 8deg), radial-gradient(circle at 35% 30%, #fff, #c9ccd6); }
+.dial-cap::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: inherit; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35); }
+.dial-cap::after { content: ""; position: absolute; left: 50%; top: 2px; width: 3px; height: 7px; margin-left: -1.5px; border-radius: 2px;
+  background: var(--mc); box-shadow: 0 0 6px var(--mc); transition: background .3s, box-shadow .3s; }
+.dial-fly { position: absolute; right: -14px; bottom: 38px; width: 180px; height: 100px; z-index: 20; pointer-events: none; opacity: 0;
+  transform: translateY(6px) scale(.96); transform-origin: 85% 100%; transition: opacity .18s, transform .25s cubic-bezier(.2, 1.3, .4, 1);
+  border-radius: 90px 90px 14px 14px; background: var(--glass-strong); border: 1px solid var(--rim); backdrop-filter: var(--blur); box-shadow: var(--hi), var(--shadow); }
+.duo-dial:hover .dial-fly, .duo-dial:focus-within .dial-fly { opacity: 1; transform: none; pointer-events: auto; }
+.dial-pos { position: absolute; transform: translate(-50%, -50%); padding: 3px 5px; border-radius: 6px; border: none; background: none; box-shadow: none;
+  font-size: 10px; font-weight: 800; font-style: italic; letter-spacing: .07em; color: var(--muted); transition: color .2s; }
+.dial-pos:hover:not(:disabled) { color: var(--fg); background: var(--quiet); }
+.dial-pos.on.dial-auto { color: var(--fg); } .dial-pos.on.dial-eco { color: var(--green); } .dial-pos.on.dial-comfort { color: var(--blue); } .dial-pos.on.dial-sport { color: var(--red); }
+.dial-gear { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; border: none; background: none; box-shadow: none; color: var(--muted); }
+.dial-gear:hover:not(:disabled) { color: var(--fg); background: var(--quiet); }
+@media (prefers-reduced-motion: reduce) { .dial-cap, .dial-fly { transition: none; } .dial-glow { animation: none; } }

@@ -184,7 +184,7 @@ function Harnesses(f: F) {
           <Row label="Coordinator on Duo" hint="Project chats run their coordinator on GitLab Duo, which starts by itself in the project folder when the chat opens. Chats without a project folder, like the master chat, keep their usual harness, and so do projects that aren't GitLab repos."><Bool f={f} path="duo.coordinator" /></Row>
           <Row label="Coordinator model" hint="Used when the chat picks no model for Duo. Default: Opus 5.5."><Text f={f} path="duo.coordinatorModel" placeholder="claude_opus_5_5" /></Row>
           <h4>Duo modes</h4>
-          <p className="muted small">The ECO / COMFORT / SPORT row under the chat bar while a chat runs on Duo. Each sets the model and thinking level of the chat's Duo agents.
+          <p className="muted small">The drive-mode dial beside Send while a chat runs on Duo: it turns AUTO (Duo's usual model), ECO, COMFORT and SPORT. Each mode sets the model and thinking level of the chat's Duo agents.
             Model ids are GitLab's own (e.g. <code>claude_opus_5_5</code>); <code>claude-opus-5-5</code> style ids are converted. GitLab Duo listed no Grok model in November 2026,
             and duo-cli can't take a thinking level yet, so it is saved for when Duo accepts one.</p>
           {DUO_MODES.map((m) => <div key={m} className="grid3">

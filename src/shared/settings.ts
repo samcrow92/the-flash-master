@@ -1,4 +1,5 @@
 import type { Chat, DriveMode, DuoMode, HarnessId } from "./types";
+import { DUO_MODES } from "./types";
 
 export type ThinkingLevel = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export interface ModeProfile {
@@ -50,7 +51,7 @@ export interface Settings {
     coordinatorModel: string;
     /** Extra instructions for the coordinator on Duo, sent after its orchestrator brief (how you want it to plan and delegate). */
     orchestratorRules: string;
-    /** The ECO / COMFORT / SPORT row under the chat bar while the chat runs on Duo: model + thinking for its Duo agents. */
+    /** The ECO / COMFORT / SPORT dial beside Send while the chat runs on Duo: model + thinking for its Duo agents. */
     modes: Record<DuoMode, DuoModeProfile>;
   };
   chat: {
@@ -271,7 +272,7 @@ export function duoModelId(model: string): string {
 
 /**
  * True when the chat is a GitLab Duo chat: Duo picked for the chat, or "Coordinator on Duo" in a project chat (the master
- * chat and chats without a project keep their usual harness). The Duo mode row shows then, whatever drive mode is picked:
+ * chat and chats without a project keep their usual harness). The Duo drive-mode dial shows then, whatever drive mode is picked:
  * a drive mode never hides it (Mari, 2026-11-19).
  */
 export function chatOnDuo(chat: Pick<Chat, "harness" | "projectId">, settings: Pick<Settings, "duo">): boolean {
@@ -291,6 +292,20 @@ export function modeClickPatch(chat: Pick<Chat, "mode" | "duoMode">, settings: P
   };
   if ("mode" in click) return offDuo(click.mode) && chat.duoMode ? { mode: click.mode, duoMode: null } : { mode: click.mode };
   return click.duoMode && offDuo(chat.mode) ? { duoMode: click.duoMode, mode: null } : { duoMode: click.duoMode };
+}
+
+/** The Duo drive-mode dial's positions, left to right: AUTO (Duo's usual model), then ECO, COMFORT, SPORT. */
+export const DUO_DIAL: (DuoMode | null)[] = [null, ...DUO_MODES];
+
+/**
+ * Where the Duo dial lands: `step` turns it (scroll wheel, arrow keys) and stops at the ends; `cycle` is a click on the
+ * knob, which wraps from SPORT back to AUTO.
+ */
+export function duoDialTurn(current: DuoMode | null | undefined, step: number, cycle = false): DuoMode | null {
+  const i = Math.max(0, DUO_DIAL.indexOf(current ?? null));
+  const n = DUO_DIAL.length;
+  const j = cycle ? (((i + step) % n) + n) % n : Math.min(n - 1, Math.max(0, i + step));
+  return DUO_DIAL[j] ?? null;
 }
 
 const harness = (enabled: boolean, defaultModel = ""): HarnessSettings => ({ enabled, path: "", args: "", defaultModel });
