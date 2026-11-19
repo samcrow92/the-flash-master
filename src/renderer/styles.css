@@ -1796,12 +1796,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .proxy-form .pw-wrap input { width: 100%; padding-right: 34px; box-sizing: border-box; }
 .proxy-form .pw-wrap .icon-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 3px; border: none; background: none; color: var(--muted); }
 
-/* GitLab Duo's own ECO / COMFORT / SPORT row: a second tab under the drive modes, only while the chat runs on Duo */
-.composer-wrap > .mode-bar + .duo-mode-bar { margin-top: 3px; border-radius: 14px; border-top: 1px solid var(--line); }
-.duo-tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
-  color: var(--muted); border-right: 1px solid var(--line); margin-right: 2px; height: 16px; }
-.duo-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fc6d26; }
-.duo-mode-bar .mode-model { max-width: 170px; }
 
 /* ---------- images in chats (Markdown images, links to image files, tool screenshots, attachments) ---------- */
 .md-img-wrap { display: block; margin: 6px 0; max-width: 100%; }
@@ -1827,3 +1821,36 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .img-viewer-bar { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 14px; border-radius: 999px; background: var(--glass-strong); border: 1px solid var(--rim);
   backdrop-filter: blur(30px) saturate(180%); box-shadow: var(--hi), var(--shadow); cursor: default; max-width: min(92vw, 640px); }
 .img-viewer-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+/* ---------- GitLab Duo drive modes beside Send: a slanted, sports-car style strip AUTO · ECO · COMFORT · SPORT ---------- */
+.duo-strip { --mc: var(--muted); display: flex; align-items: center; gap: 6px; flex: none; min-width: 0; }
+.duo-strip.ds-eco { --mc: var(--green); } .duo-strip.ds-comfort { --mc: var(--blue); } .duo-strip.ds-sport { --mc: var(--red); }
+.ds-duo { width: 6px; height: 6px; border-radius: 50%; background: #fc6d26; flex: none; }
+.ds-segs { display: flex; gap: 2px; }
+.ds-seg { --sc: var(--muted); position: relative; height: 24px; padding: 0 9px; border: none; border-radius: 2px; overflow: hidden; transform: skewX(-18deg);
+  background: var(--quiet); box-shadow: none; transition: background .3s, box-shadow .3s; }
+.ds-seg.ds-eco { --sc: var(--green); } .ds-seg.ds-comfort { --sc: var(--blue); } .ds-seg.ds-sport { --sc: var(--red); }
+.ds-seg:first-child { border-radius: 7px 2px 2px 7px; } .ds-seg:last-child { border-radius: 2px 7px 7px 2px; }
+.ds-seg > span { display: inline-flex; align-items: center; gap: 4px; transform: skewX(18deg); font-size: 10px; font-weight: 800; font-style: italic;
+  letter-spacing: .09em; color: var(--muted); transition: color .3s; }
+.ds-seg:hover:not(:disabled) { background: var(--quiet-hover); border-color: transparent; }
+.ds-seg:hover:not(.on) > span { color: var(--fg); }
+.ds-seg:focus-visible { outline: 2px solid var(--sc); outline-offset: 1px; }
+.ds-seg.on, .ds-seg.on:hover:not(:disabled) { background: linear-gradient(90deg, color-mix(in srgb, var(--sc) 78%, #000), var(--sc)); box-shadow: 0 0 14px -4px var(--sc); }
+.ds-seg.on > span { color: #fff; }
+.ds-seg.ds-auto.on { --sc: color-mix(in srgb, var(--fg) 45%, transparent); }
+.ds-glint { position: absolute; top: 0; bottom: 0; left: -60%; width: 40%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .7), transparent); animation: ds-glint .6s ease-out .05s both; }
+@keyframes ds-glint { to { left: 130%; } }
+.ds-chev { display: inline-flex; gap: 1px; }
+.ds-chev i { width: 4px; height: 8px; background: currentColor; clip-path: polygon(0 0, 50% 0, 100% 50%, 50% 100%, 0 100%, 50% 50%); }
+.ds-rev { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+.ds-rev i { width: 3px; border-radius: 1px; background: color-mix(in srgb, var(--fg) 14%, transparent); transition: background .25s; }
+.ds-rev i.lit { background: var(--mc); }
+.ds-gear { width: 22px; height: 22px; padding: 0; border-radius: 50%; display: grid; place-items: center; border: none; background: none; box-shadow: none; color: var(--muted); }
+.ds-gear:hover:not(:disabled) { color: var(--fg); background: var(--quiet); }
+.composer2 { container-type: inline-size; }
+.ds-short { display: none; }
+/* a narrower chat box keeps the strip: no rev bar, and only the lit mode spells its name */
+@container (max-width: 900px) { .ds-rev { display: none; } .ds-seg:not(.on) .ds-full { display: none; } .ds-seg:not(.on) .ds-short { display: inline; } .ds-seg { padding: 0 8px; } }
+@media (prefers-reduced-motion: reduce) { .ds-glint { animation: none; display: none; } }

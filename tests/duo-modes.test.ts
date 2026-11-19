@@ -14,7 +14,7 @@ import { HarnessRegistry } from "../src/main/harness/registry";
 import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
 import { loadRoles, loadSkills } from "../src/main/roles";
-import { chatOnDuo, DEFAULT_SETTINGS, modeClickPatch, DUO_COORDINATOR_MODEL, duoModelId, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
+import { chatOnDuo, DEFAULT_SETTINGS, duoDialTurn, modeClickPatch, DUO_COORDINATOR_MODEL, duoModelId, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
 import type { SessionOptions } from "../src/main/harness/types";
 
 const FAKE_DUO = join(__dirname, "fixtures", "fake-duo.mjs");
@@ -95,6 +95,17 @@ describe("GitLab Duo modes", () => {
     expect(modeClickPatch({ mode: null, duoMode: "sport" }, s, { mode: "local" })).toEqual({ mode: "local", duoMode: null });
     expect(modeClickPatch({ mode: null, duoMode: "sport" }, s, { mode: "comfort" })).toEqual({ mode: "comfort" });
     expect(modeClickPatch({ mode: "local", duoMode: "eco" }, s, { duoMode: null })).toEqual({ duoMode: null });
+  });
+
+  it("turn on a dial: AUTO, ECO, COMFORT, SPORT; scrolling stops at the ends, a click on the knob wraps round", () => {
+    expect(duoDialTurn(null, 1)).toBe("eco");
+    expect(duoDialTurn(undefined, 1)).toBe("eco");
+    expect(duoDialTurn("comfort", 1)).toBe("sport");
+    expect(duoDialTurn("sport", 1)).toBe("sport");
+    expect(duoDialTurn("eco", -1)).toBeNull();
+    expect(duoDialTurn(null, -1)).toBeNull();
+    expect(duoDialTurn("sport", 1, true)).toBeNull();
+    expect(duoDialTurn(null, -1, true)).toBe("sport");
   });
 
   it("are saved on the chat", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, Chat, DriveMode, DuoMode } from "@shared/types";
-import { DRIVE_MODES, DUO_MODES } from "@shared/types";
-import { chatOnDuo, modeClickPatch } from "@shared/settings";
+import { DRIVE_MODES } from "@shared/types";
+import { chatOnDuo, DUO_DIAL, duoDialTurn, modeClickPatch } from "@shared/settings";
 import type { ReactNode } from "react";
 import { api, useStore } from "../store";
 import { draftKey, drafts } from "../drafts";
@@ -178,6 +178,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
           )}
           <span className="grow" />
           {text && <span className="muted small" title="Estimated tokens of this message">~{draftTokens} tok</span>}
+          {!compact && settings && <DuoStrip chat={chat} onChange={(duoMode) => patchChat(modeClickPatch(chat, settings, { duoMode }))} />}
           <button className="primary send" onClick={() => send()} disabled={!text.trim() && !atts.length}
             title={busy ? (whileBusy === "steer" ? "Steer the running agent (Enter)" : "Queue for when the agent finishes (Enter)") : "Send (Enter)"}
             aria-label={busy ? (whileBusy === "steer" ? "Steer" : "Queue") : "Send"}>
@@ -185,7 +186,6 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
         </div>
       </div>
       {!compact && settings && <ModeBar chat={chat} onChange={(mode) => patchChat(modeClickPatch(chat, settings, { mode }))} />}
-      {!compact && settings && <DuoModeBar chat={chat} onChange={(duoMode) => patchChat(modeClickPatch(chat, settings, { duoMode }))} />}
     </div>
   );
 }
@@ -215,29 +215,70 @@ function ModeBar({ chat, onChange }: { chat: Chat; onChange: (m: DriveMode | nul
 }
 
 /**
- * GitLab Duo's own ECO / COMFORT / SPORT row, only while the chat runs on Duo: each sets the model and thinking level of
- * the chat's Duo agents (Settings → Harnesses → GitLab Duo). Click the active one again for Duo's usual model.
+ * GitLab Duo's drive modes, beside Send while the chat runs on Duo: a slanted strip, like a sports car's mode selector,
+ * with AUTO (Duo's usual model), ECO, COMFORT and SPORT. Each sets the model and thinking level of the chat's Duo agents
+ * (Settings → Harnesses → GitLab Duo). Click a mode (click the lit one again for AUTO); the scroll wheel and arrow keys
+ * step along the strip. Chevrons and the rev bar grow with power, and a glint runs across the mode you pick.
  */
-function DuoModeBar({ chat, onChange }: { chat: Chat; onChange: (m: DuoMode | null) => void }) {
+function DuoStrip({ chat, onChange }: { chat: Chat; onChange: (m: DuoMode | null) => void }) {
   const st = useStore();
   const s = st.settings;
-  if (!s?.duo?.modes || !chatOnDuo(chat, s)) return null;
+  const strip = useRef<HTMLDivElement>(null);
+  const wheel = useRef(0);
+  const cur = chat.duoMode ?? null;
+  const shown = !!s?.duo?.modes && chatOnDuo(chat, s);
+  const turn = useRef(onChange);
+  turn.current = (m) => { if (m !== cur) onChange(m); };
+  useEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    // A native listener, so the wheel steps the modes instead of scrolling the chat.
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      wheel.current += e.deltaY;
+      if (Math.abs(wheel.current) < 40) return;
+      turn.current(duoDialTurn(cur, wheel.current < 0 ? 1 : -1));
+      wheel.current = 0;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [shown, cur]);
+  if (!shown || !s) return null;
+  const label = (m: DuoMode | null) => (m ? MODE_META[m].label : "AUTO");
+  const model = (m: DuoMode | null) => {
+    if (!m) return "Duo's usual model";
+    const p = s.duo.modes[m];
+    return `${p.model || "Duo's default model"}${p.thinking ? ` · ${p.thinking} thinking` : ""}`;
+  };
+  const idx = Math.max(0, DUO_DIAL.indexOf(cur));
+  const lit = [1, 3, 5, 7][idx]!;
   return (
-    <div className="mode-bar duo-mode-bar" title="GitLab Duo modes: model and thinking for this chat's Duo agents (configure them in Settings → Harnesses → GitLab Duo). Click the active mode again to go back to Duo's usual model.">
-      <span className="duo-tag">Duo</span>
-      {DUO_MODES.map((m) => {
-        const p = s.duo.modes[m];
-        const meta = MODE_META[m];
-        return (
-          <button key={m} className={`mode-btn mode-${m} ${chat.duoMode === m ? "on" : ""}`}
-            title={`${meta.hint} on Duo: ${p.model || "Duo's default model"}${p.thinking ? ` · ${p.thinking} thinking` : ""}`}
-            onClick={() => onChange(chat.duoMode === m ? null : m)}>
-            <span className="mode-label">{meta.icon} {meta.label}</span>
-            <span className="mode-model">{p.model || "default"}{p.thinking ? ` · ${p.thinking}` : ""}</span>
-          </button>
-        );
-      })}
-      <button className="mode-gear" title="Configure Duo modes" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}><Settings size={13} /></button>
+    <div ref={strip} className={`duo-strip ds-${cur ?? "auto"}`} role="radiogroup"
+      aria-label="GitLab Duo drive mode" title="GitLab Duo drive mode: model and thinking for this chat's Duo agents. Scroll or use the arrow keys to change it."
+      onKeyDown={(e) => {
+        const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const next = duoDialTurn(cur, step);
+        turn.current(next);
+        (strip.current?.querySelectorAll<HTMLButtonElement>(".ds-seg")[DUO_DIAL.indexOf(next)])?.focus();
+      }}>
+      <span className="ds-duo" aria-hidden />
+      <div className="ds-segs">
+        {DUO_DIAL.map((m, i) => {
+          const on = i === idx;
+          return (
+            <button key={m ?? "auto"} className={`ds-seg ds-${m ?? "auto"} ${on ? "on" : ""}`} role="radio" aria-checked={on} tabIndex={on ? 0 : -1}
+              title={`${label(m)}: ${m ? MODE_META[m].hint : "Duo picks"} · ${model(m)}${on && m ? " (click again for AUTO)" : ""}`}
+              onClick={() => turn.current(on ? null : m)}>
+              {on && <i key={m ?? "auto"} className="ds-glint" />}
+              <span>{i > 0 && <span className="ds-chev">{Array.from({ length: i }, (_, k) => <i key={k} />)}</span>}<span className="ds-full">{label(m)}</span><span className="ds-short">{label(m)[0]}</span></span>
+            </button>
+          );
+        })}
+      </div>
+      <span className="ds-rev" aria-hidden>{Array.from({ length: 7 }, (_, k) => <i key={k} className={k < lit ? "lit" : ""} style={{ height: 5 + k }} />)}</span>
+      <button className="ds-gear" title="Configure Duo modes" onClick={() => st.setView({ kind: "settings", tab: "harnesses" })}><Settings size={12} /></button>
     </div>
   );
 }
