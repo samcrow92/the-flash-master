@@ -8,6 +8,7 @@
  *  - buildBrief / parseResult: delegation hands over briefs, not transcripts, and gets capped results back.
  */
 import type { Message, RoleDef, SkillDef } from "@shared/types";
+import { briefBody } from "@shared/briefs";
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 
@@ -300,7 +301,8 @@ whatever Duo's own instructions say: you own the plan, decide who does what, and
 - Brief well: a specialist sees only its brief. Give the goal, the key facts, the files and paths, the constraints and
   what "done" means.
 - You run headless: DELEGATE, AGENT and TOOL lines run when your turn ends, and their results come back to you as your next
-  message. Write them, say in one line what is now running, and end the turn. Don't wait, poll or repeat them in the same turn.
+  message. Write them, say in one line what is now running (above them, or after an END line that closes the last
+  brief), and end the turn. Don't wait, poll or repeat them in the same turn.
 - Use TheFlashMaster's tools for what they are for, instead of doing it by hand:
   - delegate (DELEGATE lines) and create_agent (AGENT blocks): start specialists, or a new role when none fits.
   - agent_status: look at a specialist that seems quiet (Duo specialists say little until they finish). It is alive and
@@ -389,7 +391,8 @@ DELEGATE <role>@<harness> args "<extra launch arguments>": <brief>   (rarely nee
 DELEGATE <role> agent "<agentId>": <answer or next step>   (a follow-up to a specialist you started: it continues with its context, e.g. to answer its question)
 in, model, args and agent can be combined in any order. Always use model "…" when the user or brief names a model or provider:
 a model named only in the brief text is not applied.
-A brief may continue on the following lines until a blank line.
+A brief may run over several lines, paragraphs, lists and code blocks: it lasts until the next DELEGATE, AGENT or TOOL
+line, or a line with only END. Write END after a brief when text for the user follows it.
 To create a new agent first (when no existing specialist fits), write a block before the DELEGATE lines:
 AGENT <name>[@<harness>]: <one-line description>
 <its complete instructions: role, how it works, what it returns; several lines and blank lines are fine>
@@ -399,26 +402,24 @@ Then delegate to it by name. Then end your reply. TheFlashMaster runs those spec
 follow-ups the same way. Keep the team small: one DELEGATE per area of work with a combined brief, not one per file.
 Don't do the work yourself, and don't call tools to do it.`;
 
-/** DELEGATE lines written by a coordinator in text mode (outside code fences). */
+/** DELEGATE blocks written by a coordinator in text mode (outside code fences). Where a brief ends: src/shared/briefs.ts. */
 export function parseTextDelegations(text: string): TextDelegation[] {
   const out: TextDelegation[] = [];
-  let cur: TextDelegation | null = null;
+  const lines = text.split(/\r?\n/);
   let fence = false;
-  for (const raw of text.split(/\r?\n/)) {
-    if (/^\s*```/.test(raw)) { fence = !fence; cur = null; continue; }
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
+    if (/^\s*```/.test(raw)) { fence = !fence; continue; }
     if (fence) continue;
     const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?((?:\s+(?:in|model|args|agent)\s+(?:"[^"]*"|`[^`]*`))*)\s*:\s*(.*)$/.exec(raw);
-    if (m) {
-      const opt: Record<string, string> = {};
-      for (const o of m[3]!.matchAll(/(in|model|args|agent)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
-      cur = { role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(opt.in ? { folder: opt.in } : {}),
-        ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), ...(opt.agent ? { agentId: opt.agent } : {}), goal: m[4]!.trim() };
-      out.push(cur);
-      continue;
-    }
-    if (/^\s*(?:\*\*)?(?:AGENT|END)\b/.test(raw)) { cur = null; continue; }
-    if (!raw.trim() || /^<\/?result>/.test(raw.trim())) { cur = null; continue; }
-    if (cur) cur.goal = `${cur.goal}\n${raw.trim()}`.trim();
+    if (!m) continue;
+    const opt: Record<string, string> = {};
+    for (const o of m[3]!.matchAll(/(in|model|args|agent)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
+    const { body, next } = briefBody(lines, i);
+    const goal = [m[4]!.trim(), ...body].join("\n").trim();
+    out.push({ role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(opt.in ? { folder: opt.in } : {}),
+      ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), ...(opt.agent ? { agentId: opt.agent } : {}), goal });
+    i = next - 1;
   }
   return out.filter((d) => d.goal);
 }
