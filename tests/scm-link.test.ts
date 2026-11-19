@@ -7,7 +7,7 @@ const WEB = "https://jazz.corp.com/ccm/web/projects/Body%20SW#action=com.ibm.tea
 
 describe("EWM links", () => {
   it("reads server, stream, component and path from a web UI link", () => {
-    expect(parseScmLink(WEB)).toEqual({ repo: "https://jazz.corp.com/ccm", stream: "_PpQZIJsxEe6j6IPBMoyyTQ", component: "_Pp2PAJsxEe6j6IPBMoyyTQ", path: "/specs/hw_removal" });
+    expect(parseScmLink(WEB)).toEqual({ repo: "https://jazz.corp.com/ccm", stream: "_PpQZIJsxEe6j6IPBMoyyTQ", component: "_Pp2PAJsxEe6j6IPBMoyyTQ", path: "/specs/hw_removal", folder: "_F1aaaaaaaa" });
     expect(parseScmLink("https://jazz.corp.com/ccm1/web/projects/X#action=com.ibm.team.scm.viewStream&id=_S1aaaaaaaa")).toEqual({ repo: "https://jazz.corp.com/ccm1", stream: "_S1aaaaaaaa" });
     expect(parseScmLink("https://alm/ccm/web/projects/X#action=com.ibm.team.scm.viewChangeSet&id=_CS1aaaaaaa")).toEqual({ repo: "https://alm/ccm", changeset: "_CS1aaaaaaa" });
     expect(parseScmLink("https://alm/ccm/service/com.ibm.team.filesystem.service.internal.rest.IFilesystemContentService/_S1/_C1/src/my%20can.c"))

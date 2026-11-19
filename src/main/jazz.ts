@@ -14,7 +14,7 @@ import type { JazzComment, JazzSearch, JazzWorkItem } from "@shared/types";
  * always follows redirects and relies on a cookie-keeping session (persist:jazz) for the login cookies set on 302s.
  */
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
-  Promise<{ status: number; ok: boolean; url?: string; headers: { get(name: string): string | null; getSetCookie?: () => string[] }; text(): Promise<string> }>;
+  Promise<{ status: number; ok: boolean; url?: string; headers: { get(name: string): string | null; getSetCookie?: () => string[] }; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
 
 const AUTH_MSG = "x-com-ibm-team-repository-web-auth-msg";
 

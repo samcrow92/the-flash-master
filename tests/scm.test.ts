@@ -69,16 +69,16 @@ describe("EWM source control client", () => {
     expect(await new ScmClient(http, () => null).components("Body Release 2.1")).toEqual([{ id: "_C9", name: "Release Docs" }]);
   });
 
-  it("lists and finds files through the SCM command line, and says when it is missing", async () => {
+  it("falls back to the SCM command line when the server refuses the folder zip, and says why when there is none", async () => {
     const seen: string[][] = [];
     const run: CliRunner = async (args) => { seen.push(args); return { code: 0, stderr: "", stdout: JSON.stringify([{ path: "/src/" }, { path: "/src/can/can_if.h" }, { path: "/src/can/can_if.c" }, { path: "/doc/can.md" }]) }; };
     const { http } = fake(streamsRoute);
     const c = new ScmClient(http, () => ({ run, repo: "https://alm/ccm" }));
     expect((await c.find("Body Main", "BodyCtrl", "src/**/can_*.h")).map((e) => e.path)).toEqual(["/src/can/can_if.h"]);
     expect((await c.find("Body Main", "BodyCtrl", "can md")).map((e) => e.path)).toEqual(["/doc/can.md"]);
-    expect(seen[0]).toEqual(["list", "remotefiles", "-r", "https://alm/ccm", "--json", "--depth", "12", "Body Main", "BodyCtrl"]);
+    expect(seen[0]).toEqual(["list", "remotefiles", "-r", "https://alm/ccm", "--json", "--depth", "50", "Body Main", "BodyCtrl"]);
     expect(seen).toHaveLength(1); // second search reused the cached listing
-    await expect(new ScmClient(http, () => null).list("Body Main", "BodyCtrl")).rejects.toThrow(/command line/);
+    await expect(new ScmClient(http, () => null).list("Body Main", "BodyCtrl")).rejects.toThrow(/could not list the folder in BodyCtrl \(Body Main\): EWM did not send the folder \(Stream: HTTP 404; Workspace: HTTP 404\)/);
   });
 
   it("never sends anything but GET to EWM", async () => {
