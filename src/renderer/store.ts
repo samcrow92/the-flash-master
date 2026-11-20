@@ -49,6 +49,8 @@ interface State {
   panelFocus: { rootId: string; at: number; reply?: boolean } | null;
   /** The chat last opened in each project (key: chatKey(projectId)), which the project's sidebar row reopens. */
   lastChatByProject: Record<string, string>;
+  /** The sidebar is folded away (title bar button or Ctrl/Cmd+B); remembered across launches. */
+  sidebarCollapsed: boolean;
   flowPanel: { chatId: string; agentId: string | null } | null;
   artifactsPanel: string | null; // chat id whose artifacts panel is open
   artifactsRev: Record<string, number>;
@@ -95,6 +97,7 @@ interface State {
   openSideThread(chatId: string, rootId: string, opts?: { reply?: boolean }): void;
   /** `chatId`: opened explicitly for this chat, so the tab shows even when the chat has no thread yet. */
   setThreadsPanel(open: boolean, chatId?: string): void;
+  toggleSidebar(collapsed?: boolean): void;
   togglePanelThread(chatId: string, rootId: string): void;
   /** Expand or collapse every listed thread in the panel. */
   setPanelThreads(chatId: string, rootIds: string[], open: boolean): void;
@@ -122,6 +125,11 @@ function readLastChats(): Record<string, string> {
     const v: unknown = JSON.parse(globalThis.localStorage?.getItem(LAST_CHATS) ?? "{}");
     return v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).filter(([, id]) => typeof id === "string")) as Record<string, string> : {};
   } catch { return {}; }
+}
+
+const SIDEBAR_PREF = "sidebarCollapsed";
+export function readSidebarPref(): boolean {
+  try { return globalThis.localStorage?.getItem(SIDEBAR_PREF) === "1"; } catch { return false; }
 }
 
 const bySeq = (a: Message, b: Message) => a.seq - b.seq;
@@ -172,6 +180,7 @@ export const useStore = create<State>((set, get) => ({
   panelThreads: {},
   panelFocus: null,
   lastChatByProject: readLastChats(),
+  sidebarCollapsed: readSidebarPref(),
   flowPanel: null,
   artifactsPanel: null,
   artifactsRev: {},
@@ -285,6 +294,11 @@ export const useStore = create<State>((set, get) => ({
     void get().loadThread(chatId, rootId);
   },
 
+  toggleSidebar(collapsed) {
+    const next = collapsed ?? !get().sidebarCollapsed;
+    set({ sidebarCollapsed: next });
+    try { globalThis.localStorage?.setItem(SIDEBAR_PREF, next ? "1" : "0"); } catch { /* storage unavailable */ }
+  },
   setThreadsPanel(open, chatId) {
     set(open && chatId ? { threadsPanelOpen: true, threadsShownEmpty: chatId, flowPanel: null, artifactsPanel: null } : { threadsPanelOpen: open });
     try { localStorage.setItem(PANEL_PREF, open ? "1" : "0"); } catch { /* storage unavailable */ }

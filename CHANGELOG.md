@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Fix: the drive modes hung under the message box and Duo's modes showed only A, E, C, S.** Everything now sits in the one row under your message. The drive modes (LOCAL, ECO, COMFORT, SPORT) are beside Send. On a Duo chat, Duo's strip takes their place with its full AUTO, ECO, COMFORT and SPORT labels. When the window gets narrow, the Superpowers and Autopilot words go first, then the mode names, and the icons stay.
+- **Collapsible sidebar.** Hide it with the button next to the app icon at the top left, or Ctrl/Cmd+B, and the chat gets the width. The same button brings it back, and the app remembers your choice.
 - **A cleaner, Codex-style layout.** The chat is one centred reading column. Agent replies read like a document, and your messages are a soft bubble on the right. The top bar shows the project and chat name (click either to switch chats), the Specialists and Agents pills, and the Threads, Progress and Artifacts buttons. The agent, harness and model pickers sit quietly under the message box.
   - **One floating side sheet.** Threads, Progress and Artifacts open as tabs of one glass sheet instead of fixed columns. In a wide window the chat moves aside for it. In a narrow one it floats over the chat. Esc or the X closes it.
   - **Threads open in the sheet.** A message with replies shows an "N replies" chip. Clicking it, or Reply, opens the thread in the sheet, ready to answer. The inline thread card is gone. Each thread row can still open in its own window.
