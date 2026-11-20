@@ -190,15 +190,16 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
             </div>
           )}
           {busy && (
-            <div className="ds-segs cb-group" role="radiogroup" title="What sending does while the agent is still working">
-              <button className={`ds-seg cb-toggle ${whileBusy === "steer" ? "on" : ""}`} role="radio" aria-checked={whileBusy === "steer"} onClick={() => setWhileBusy("steer")}>
+            <div className="ds-segs cb-group cb-busy" role="radiogroup" title="What sending does while the agent is still working">
+              <button className={`ds-seg cb-toggle ${whileBusy === "steer" ? "on" : ""}`} role="radio" aria-checked={whileBusy === "steer"} title="Steer: Enter sends to the running agent now" onClick={() => setWhileBusy("steer")}>
                 <span><CornerDownRight size={12} /> <span className="cb-label">Steer</span></span></button>
-              <button className={`ds-seg cb-toggle ${whileBusy === "queue" ? "on" : ""}`} role="radio" aria-checked={whileBusy === "queue"} onClick={() => setWhileBusy("queue")}>
+              <button className={`ds-seg cb-toggle ${whileBusy === "queue" ? "on" : ""}`} role="radio" aria-checked={whileBusy === "queue"} title="Queue: Enter sends when the agent finishes" onClick={() => setWhileBusy("queue")}>
                 <span><Hourglass size={12} /> <span className="cb-label">Queue</span></span></button>
             </div>
           )}
           <span className="grow" />
           {text && <span className="muted small" title="Estimated tokens of this message">~{draftTokens} tok</span>}
+          <div className="cb-drive">
           {/* One drive selector beside Send: Duo's strip while the chat runs on Duo, else the drive modes. */}
           {!compact && settings && !duo && <ModeBar chat={chat} onChange={(mode) => patchChat(modeClickPatch(chat, settings, { mode }))} />}
           {!compact && settings && <DuoStrip chat={chat} onChange={(duoMode) => patchChat(modeClickPatch(chat, settings, { duoMode }))} />}
@@ -206,6 +207,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
             title={busy ? (whileBusy === "steer" ? "Steer the running agent (Enter)" : "Queue for when the agent finishes (Enter)") : "Send (Enter)"}
             aria-label={busy ? (whileBusy === "steer" ? "Steer" : "Queue") : "Send"}>
             <span>{busy ? (whileBusy === "steer" ? <CornerDownRight size={15} strokeWidth={2.2} /> : <Hourglass size={14} strokeWidth={2.2} />) : <ArrowUp size={16} strokeWidth={2.4} />}</span></button>
+          </div>
         </div>
       </div>
     </div>

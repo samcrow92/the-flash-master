@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: the message bar's buttons spilled past the chat box while an agent ran.** Steer and Queue join the row while an agent works, so Superpowers, Autopilot, Steer and Queue then show only their icons (names in the tooltips). If the row still doesn't fit (a narrow window), the drive strip and Send move together onto a second line inside the box.
 - **Fix: a Duo chat showed both mode strips side by side.** With GitLab Duo selected, the Duo strip (AUTO, ECO, COMFORT, SPORT) now takes the drive modes' place. Picking Duo as the harness clears a drive mode the chat had, so a hidden mode can't keep steering the chat.
 - **One automotive look for the whole message bar.** Attach, @, /, Superpowers, Autopilot, reset context, Steer / Queue and Send now share the drive strip's slanted segments. Tools stay quiet until you hover them. Superpowers (gold) and Autopilot (blue) light up with the same glint as a drive mode when switched on. Send is the accent "start" key at the end of the row.
 - **Fix: project chats in the sidebar no longer expanded.** Click a project to fold its chats open or shut again, with pinned chats on top and archived ones behind a toggle. Each chat row has its menu (rename, pin, reset context, copy, archive, delete). The app remembers which projects are open, and the project of the chat you open expands by itself. Thread replies still stay out of the sidebar and open in the chat's side sheet.
