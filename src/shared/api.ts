@@ -1,5 +1,5 @@
 import type {
-  AgentChecks, CheckRun, Span, TraceSummary, EvalSuite, EvalProgress, EvalCaseResult, TaskPlan, PlanTask, AgentState,
+  AgentChecks, CheckRun, Span, TraceSummary, EvalSuite, EvalProgress, EvalCaseResult, TaskPlan, PlanTask, AgentState, MemoryHealth,
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
   Project, RoleDef, SkillDef, Task, Submission, ServerTestResult, SubmitDraft, SubmitMeta, SubmitResult, SubmitSource, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult, CodeGraphStatus,
 } from "./types";
@@ -155,6 +155,12 @@ export interface FlashApi {
   deleteMemory(id: number): Promise<void>;
   /** Short-term → project / user, or project → user; it stops expiring. */
   promoteMemory(id: number, to: "project" | "user"): Promise<Memory>;
+  /** Memory hygiene for a project: near-duplicates, maybe-stale (mentioned files gone or changed since the memory's commit), unused. */
+  memoryHealth(projectId: string | null): Promise<MemoryHealth>;
+  /** Merge near-duplicates into `keepId`; the others are deleted. */
+  mergeMemories(ids: number[], keepId: number): Promise<Memory>;
+  /** It still holds: stamp it with the project's current commit so it no longer shows as stale or unused. */
+  confirmMemory(id: number): Promise<Memory>;
   /** Project knowledge base (entries in the database and in <project>/.flashmaster/knowledge): checkpoint, commits since, conflicts. */
   knowledgeStatus(projectId: string): Promise<KnowledgeStatus>;
   /** Sync the knowledge base with the repo folder both ways now. */
@@ -296,7 +302,7 @@ export const API_METHODS: (keyof FlashApi)[] = [
   "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "listTraces", "getTrace", "exportTrace", "listEvalSuites", "runEvals", "cancelEvals", "evalState", "evalResults", "getPlan", "updatePlan", "approvePlan", "cancelPlan", "agentState", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
-  "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
+  "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "memoryHealth", "mergeMemories", "confirmMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
   "marketplaceTest", "pluginInstructions", "marketplaceSubmitPick", "marketplaceSubmit", "marketplaceSubmissions", "marketplaceWithdraw", "listModels", "instructionSetup", "allModels",
   "mcpStatus", "mcpReinstall", "mcpInstall", "mcpSelfTest", "jazzQuery", "jazzGet", "jazzSearch", "jazzDetail", "jazzComment", "jazzUpdate", "jazzProjectAreas", "jazzSetPassword", "jazzTest", "examSetup", "jazzSignIn", "jazzSignOut", "rmTest", "rmProjects", "rmModules", "rmModule", "rmSearch", "rmCached", "rmDiagnostics", "qmTest", "qmProjects", "scmTest", "getSettings",
   "updateSettings", "resetSettings", "exportData", "updateState", "updateCheck", "updateDownload", "updateInstall", "updateSignIn", "updateSetToken", "serverTest", "serverSetToken", "proxyTest", "proxyEnvState", "proxyEnvSet", "appInfo",

@@ -12,6 +12,7 @@
  *   FLASH_SMOKE_TRACES=<dir>      only traces and evals: a request with a delegation on the Timeline, then an eval suite run on
  *                                 two targets on the Evals page, dark and light (FLASH_SMOKE_PROJECT = a git repo)
  *   FLASH_SMOKE_PLAN=<dir>        only task plans: a proposed plan being edited, then the same plan after it ran, dark and light
+ *   FLASH_SMOKE_MEMORY=<dir>      only memory health (near-duplicates, a memory whose file is gone) on the Memory page, dark and light
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
@@ -220,6 +221,34 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       const good = pass.chip && pass.pop && pass.rules;
       log(good ? "info" : "error", `smoke-checks: ${JSON.stringify(pass)}`);
       app.exit(good ? 0 : 1);
+      return;
+    }
+    const memDir = process.env.FLASH_SMOKE_MEMORY;
+    if (ok && memDir && hooks) {
+      mkdirSync(memDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      const project = hooks.db.createProject("brake-ecu", proj);
+      const save = (content: string, importance = 3) => js(`window.flash.api.saveMemory(${JSON.stringify({ content, scope: "project", projectId: project.id, importance })})`);
+      await save("Brake light debounce is 20 ms, set in src/brake.c", 4);
+      await save("src/brake.c sets the brake lamp debounce to 20 ms", 2);
+      await save("CAN ids for the lamp ECU are listed in can/ids_old.dbc");
+      await save("Release builds use the IAR toolchain 9.40");
+      win.webContents.reload();
+      await sleep(2500);
+      const pass = { health: false };
+      for (const theme of ["dark", "light"] as const) {
+        if (theme === "light") { await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`); win.webContents.reload(); await sleep(2500); }
+        await click("Memory", ".sidebar button");
+        await sleep(800);
+        await js(`(()=>{const s=document.querySelector('.memory-page select');const set=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;set.call(s,${JSON.stringify(project.id)});s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+        await sleep(1200);
+        await click("Review", ".memory-health button");
+        await sleep(600);
+        pass.health = await js<boolean>(`document.querySelectorAll('.health-item').length >= 2`);
+        await shot(join(memDir, `memory-health-${theme}.png`));
+      }
+      log(pass.health ? "info" : "error", `smoke-memory: ${JSON.stringify(pass)}`);
+      app.exit(pass.health ? 0 : 1);
       return;
     }
     const planDir = process.env.FLASH_SMOKE_PLAN;

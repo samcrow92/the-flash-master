@@ -85,6 +85,9 @@ export const MIGRATIONS: string[] = [
      tasks TEXT NOT NULL, message_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
    CREATE INDEX plans_chat ON plans(chat_id, created_at);
    CREATE TABLE agent_state(agent_id TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL);`,
+  // v18: memory provenance (the project commit a memory was saved or confirmed at) and optional local embeddings
+  `ALTER TABLE memories ADD COLUMN commit_sha TEXT;
+   CREATE TABLE memory_vectors(memory_id INTEGER PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);`,
 ];
 
 type Row = Record<string, any>;

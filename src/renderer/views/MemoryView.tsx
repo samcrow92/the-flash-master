@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, BookOpen, Brain, ExternalLink, FolderOpen, Loader2, Network, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
+import { ArrowUpRight, BookOpen, Brain, CircleCheck, Clock, Copy, Merge, TriangleAlert, ExternalLink, FolderOpen, Loader2, Network, Pin, PinOff, Plus, RefreshCw, Search, Sparkles, Trash2 } from "../components/icons";
 import { openMenu, type MenuItem } from "../components/ContextMenu";
-import type { CodeGraphStatus, KnowledgeStatus, Memory, MemoryKind, MemoryScope } from "@shared/types";
+import type { CodeGraphStatus, KnowledgeStatus, Memory, MemoryHealth, MemoryKind, MemoryScope } from "@shared/types";
 import { MEMORY_KINDS } from "@shared/types";
 import { api, ago, roleOf, useStore } from "../store";
 
@@ -67,6 +67,7 @@ export function MemoryView() {
         </div>
       </header>
       {project && project !== "none" && st.projects.some((p) => p.id === project) && <KnowledgePanel projectId={project} rev={rev} onError={failed} onShow={() => setScope("kb")} />}
+      {project !== "" && <HealthPanel projectId={project === "none" ? null : project} rev={rev} onError={failed} />}
       <div className="seg memory-scopes">
         <button className={scope === "" ? "on" : ""} onClick={() => setScope("")}>All</button>
         {SCOPES.map((s) => <button key={s} className={scope === s ? "on" : ""} title={SCOPE_HINT[s]} onClick={() => setScope(s)}>
@@ -105,6 +106,69 @@ export function MemoryView() {
       </div>
       {editing && <MemoryEditor memory={editing} onClose={() => setEditing(null)} onError={failed} />}
     </div>
+  );
+}
+
+/**
+ * Memory health for one project: near-duplicates to merge, memories that may be out of date (a file they mention is
+ * gone or changed since they were saved) and memories nobody has used for months. Nothing changes without a click.
+ */
+function HealthPanel({ projectId, rev, onError }: { projectId: string | null; rev: number; onError: (e: unknown) => void }) {
+  const [h, setH] = useState<MemoryHealth | null>(null);
+  const [all, setAll] = useState<Map<number, Memory>>(new Map());
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void Promise.all([api().memoryHealth(projectId), api().listMemories({ projectId })]).then(([x, ms]) => {
+      if (live) { setH(x); setAll(new Map(ms.map((m) => [m.id, m]))); }
+    }).catch(() => { if (live) setH(null); });
+    return () => { live = false; };
+  }, [projectId, rev]);
+  if (!h) return null;
+  const n = h.duplicates.length + h.stale.length + h.unused.length;
+  const text = (id: number) => clipText(all.get(id)?.content ?? `#${id}`, 220);
+  const run = (fn: () => Promise<unknown>) => void fn().catch(onError);
+  return (
+    <section className={`memory-health ${n ? "has" : "ok"}`}>
+      <div className="row gap">
+        {n ? <TriangleAlert size={15} className="warn-text" /> : <CircleCheck size={15} className="ok-text" />}
+        <b>Memory health</b>
+        <span className="muted small">{n ? [h.duplicates.length && `${h.duplicates.length} to merge`, h.stale.length && `${h.stale.length} may be out of date`, h.unused.length && `${h.unused.length} unused`].filter(Boolean).join(" · ") : "No duplicates, nothing stale."}</span>
+        <span className="grow" />
+        {n > 0 && <button className="ghost small" onClick={() => setOpen(!open)}>{open ? "Hide" : "Review"}</button>}
+      </div>
+      {open && (
+        <div className="health-lists">
+          {h.duplicates.map((g) => (
+            <div key={g.ids.join("-")} className="health-item">
+              <div className="health-why"><Copy size={12} /> Near-duplicates ({Math.round(g.similarity * 100)}% alike)</div>
+              {g.ids.map((id, i) => <div key={id} className={`health-text ${i === 0 ? "keep" : ""}`}>{i === 0 ? "Keep: " : ""}{text(id)}</div>)}
+              <div className="row gap"><button className="small" onClick={() => run(() => api().mergeMemories(g.ids, g.ids[0]!))}><Merge size={12} /> Merge into the first</button></div>
+            </div>
+          ))}
+          {h.stale.map((x) => (
+            <div key={x.id} className="health-item">
+              <div className="health-why"><Clock size={12} /> {x.reason}</div>
+              <div className="health-text">{text(x.id)}</div>
+              <div className="row gap">
+                <button className="small" onClick={() => run(() => api().confirmMemory(x.id))}><CircleCheck size={12} /> Still true</button>
+                <button className="small ghost danger" onClick={() => run(() => api().deleteMemory(x.id))}><Trash2 size={12} /> Delete</button>
+              </div>
+            </div>
+          ))}
+          {h.unused.map((id) => (
+            <div key={id} className="health-item">
+              <div className="health-why"><Clock size={12} /> Low importance and not used for 3 months</div>
+              <div className="health-text">{text(id)}</div>
+              <div className="row gap">
+                <button className="small" onClick={() => run(() => api().confirmMemory(id))}><CircleCheck size={12} /> Keep</button>
+                <button className="small ghost danger" onClick={() => run(() => api().deleteMemory(id))}><Trash2 size={12} /> Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
