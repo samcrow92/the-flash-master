@@ -11,6 +11,7 @@ import { openImage } from "../images";
 import { Markdown } from "../components/Markdown";
 import { ReplyBody } from "../components/ReplyBody";
 import { AskCard } from "../components/AskCard";
+import { PlanCard } from "../components/PlanCard";
 import { FlowPanel } from "./FlowView";
 import { ModelInput } from "../components/ModelInput";
 import { UsageMeter } from "../components/UsageMeter";
@@ -338,6 +339,7 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
           {m.author === "user" ? (editing ? <EditBox m={m} onDone={() => setEditing(false)} /> : <div className="plain">{m.content}</div>)
             : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} messageId={m.id} live={m.status === "streaming"} />
             : m.ask ? <AskCard m={m} />
+            : m.planId ? <PlanCard m={m} />
             : <>{!!m.tools?.length && <ToolRuns tools={m.tools} />}<Markdown text={m.content} /></>}
           {m.attachments.length > 0 && (
             <div className="msg-atts">

@@ -1,5 +1,5 @@
 import type {
-  AgentChecks, CheckRun, Span, TraceSummary, EvalSuite, EvalProgress, EvalCaseResult,
+  AgentChecks, CheckRun, Span, TraceSummary, EvalSuite, EvalProgress, EvalCaseResult, TaskPlan, PlanTask, AgentState,
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
   Project, RoleDef, SkillDef, Task, Submission, ServerTestResult, SubmitDraft, SubmitMeta, SubmitResult, SubmitSource, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult, CodeGraphStatus,
 } from "./types";
@@ -97,6 +97,13 @@ export interface FlashApi {
   cancelEvals(): Promise<void>;
   evalState(): Promise<EvalProgress>;
   evalResults(projectId: string): Promise<EvalCaseResult[]>;
+  /** Task plans a coordinator proposed: read, edit while a draft, approve (it runs in waves) or cancel. Changes come as plan.updated events. */
+  getPlan(planId: string): Promise<TaskPlan | null>;
+  updatePlan(planId: string, patch: { title?: string; tasks?: PlanTask[] }): Promise<TaskPlan>;
+  approvePlan(planId: string, patch?: { title?: string; tasks?: PlanTask[] }): Promise<TaskPlan>;
+  cancelPlan(planId: string): Promise<TaskPlan>;
+  /** An agent's working state (what a fresh session of it continues from). */
+  agentState(agentId: string): Promise<AgentState | null>;
   /** Timeline: recent traces (one per request), optionally of one chat; a trace's spans in waterfall order; OTLP/JSON export. */
   listTraces(chatId?: string | null): Promise<TraceSummary[]>;
   getTrace(traceId: string): Promise<{ span: Span; depth: number }[]>;
@@ -286,7 +293,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "listTraces", "getTrace", "exportTrace", "listEvalSuites", "runEvals", "cancelEvals", "evalState", "evalResults", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "listTraces", "getTrace", "exportTrace", "listEvalSuites", "runEvals", "cancelEvals", "evalState", "evalResults", "getPlan", "updatePlan", "approvePlan", "cancelPlan", "agentState", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

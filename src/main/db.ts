@@ -80,6 +80,11 @@ export const MIGRATIONS: string[] = [
    CREATE TABLE eval_runs(id TEXT PRIMARY KEY, suite TEXT NOT NULL, case_id TEXT NOT NULL, target TEXT NOT NULL, batch TEXT NOT NULL, project_id TEXT,
      passed INTEGER NOT NULL, score REAL NOT NULL, tokens INTEGER NOT NULL, ms INTEGER NOT NULL, detail TEXT NOT NULL, trace_id TEXT, at INTEGER NOT NULL);
    CREATE INDEX eval_runs_case ON eval_runs(suite, case_id, target, at);`,
+  // v17: task plans (editable task graphs the app runs in waves) and each agent's working state
+  `CREATE TABLE plans(id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, agent_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL,
+     tasks TEXT NOT NULL, message_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE INDEX plans_chat ON plans(chat_id, created_at);
+   CREATE TABLE agent_state(agent_id TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL);`,
 ];
 
 type Row = Record<string, any>;
@@ -220,6 +225,7 @@ export class Db {
   }
   deleteChat(id: string): void {
     this.run("DELETE FROM chats WHERE id=?", id);
+    this.run("DELETE FROM plans WHERE chat_id=?", id);
   }
   /** Highest message seq of a chat (context-reset boundary). */
   lastSeq(chatId: string): number {
@@ -257,11 +263,11 @@ export class Db {
     return r ? this.hydrate(r) : null;
   }
   addMessage(i: { chatId: string; parentId?: string | null; author: Message["author"]; content: string; agentId?: string | null;
-    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; ask?: AskCard }): Message {
+    role?: string | null; status?: MessageStatus; attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; ask?: AskCard; planId?: string }): Message {
     const id = newId();
     this.seq += 1;
-    const meta = i.attachments?.length || i.steer || i.marker || i.delivery || i.ask
-      ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}), ...(i.delivery ? { delivery: i.delivery } : {}), ...(i.ask ? { ask: i.ask } : {}) }) : null;
+    const meta = i.attachments?.length || i.steer || i.marker || i.delivery || i.ask || i.planId
+      ? JSON.stringify({ attachments: i.attachments ?? [], steer: !!i.steer, ...(i.marker ? { marker: i.marker } : {}), ...(i.delivery ? { delivery: i.delivery } : {}), ...(i.ask ? { ask: i.ask } : {}), ...(i.planId ? { planId: i.planId } : {}) }) : null;
     this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,seq,created_at,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       id, i.chatId, i.parentId ?? null, i.author, i.agentId ?? null, i.role ?? null, i.content, i.status ?? "done", this.seq, now(), meta);
     // A new reply brings an archived thread back.
@@ -387,13 +393,13 @@ export class Db {
   }
   private hydrate(r: Row): Message {
     const replyCount = r.parent_id ? 0 : Number(this.get("SELECT COUNT(*) AS c FROM messages WHERE parent_id=?", r.id)?.c ?? 0);
-    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[]; threadArchived?: boolean; ask?: AskCard } = {};
+    let meta: { attachments?: Attachment[]; steer?: boolean; marker?: Message["marker"]; delivery?: Message["delivery"]; tools?: ToolRun[]; threadArchived?: boolean; ask?: AskCard; planId?: string } = {};
     try { meta = r.meta ? JSON.parse(r.meta) : {}; } catch { /* ignore corrupt meta */ }
     return {
       id: r.id, chatId: r.chat_id, parentId: r.parent_id ?? null, author: r.author, agentId: r.agent_id ?? null,
       role: r.role ?? null, content: r.content, status: r.status, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out),
       estimated: !!r.estimated, createdAt: Number(r.created_at), seq: Number(r.seq), attachments: meta.attachments ?? [], steer: !!meta.steer, ...(meta.marker ? { marker: meta.marker } : {}), ...(meta.delivery ? { delivery: meta.delivery } : {}), ...(meta.tools?.length ? { tools: meta.tools } : {}),
-      ...(meta.ask ? { ask: meta.ask } : {}), reactions: this.reactions(r.id), replyCount, ...(meta.threadArchived && !r.parent_id ? { threadArchived: true } : {}),
+      ...(meta.ask ? { ask: meta.ask } : {}), ...(meta.planId ? { planId: meta.planId } : {}), reactions: this.reactions(r.id), replyCount, ...(meta.threadArchived && !r.parent_id ? { threadArchived: true } : {}),
     };
   }
 
@@ -452,6 +458,33 @@ export class Db {
     this.run("UPDATE agents SET worktree=?, branch=? WHERE id=?", worktree, branch, id);
     return this.getAgent(id)!;
   }
+  // ---------- task plans and agent state ----------
+  savePlan(p: import("@shared/types").TaskPlan): void {
+    this.run(`INSERT INTO plans(id, chat_id, agent_id, title, status, tasks, message_id, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET title=excluded.title, status=excluded.status, tasks=excluded.tasks, message_id=excluded.message_id, updated_at=excluded.updated_at`,
+      p.id, p.chatId, p.agentId, p.title, p.status, JSON.stringify(p.tasks), p.messageId, p.createdAt, p.updatedAt);
+  }
+  getPlan(id: string): import("@shared/types").TaskPlan | null {
+    const r = this.get("SELECT * FROM plans WHERE id=?", id);
+    if (!r) return null;
+    let tasks = [];
+    try { tasks = JSON.parse(r.tasks); } catch { /* keep empty */ }
+    return { id: r.id, chatId: r.chat_id, agentId: r.agent_id, title: r.title, status: r.status, tasks, messageId: r.message_id ?? null,
+      createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) };
+  }
+  listPlans(chatId: string): import("@shared/types").TaskPlan[] {
+    return this.all("SELECT id FROM plans WHERE chat_id=? ORDER BY created_at DESC", chatId).map((r) => this.getPlan(r.id as string)!).filter(Boolean);
+  }
+  getAgentState(agentId: string): import("@shared/types").AgentState | null {
+    const r = this.get("SELECT state FROM agent_state WHERE agent_id=?", agentId);
+    if (!r) return null;
+    try { return JSON.parse(r.state as string); } catch { return null; }
+  }
+  setAgentState(agentId: string, s: import("@shared/types").AgentState): void {
+    this.run("INSERT INTO agent_state(agent_id, state, updated_at) VALUES(?,?,?) ON CONFLICT(agent_id) DO UPDATE SET state=excluded.state, updated_at=excluded.updated_at",
+      agentId, JSON.stringify(s), s.updatedAt);
+  }
+
   saveEvalRun(r: import("@shared/types").EvalCaseResult): void {
     this.run("INSERT INTO eval_runs(id, suite, case_id, target, batch, project_id, passed, score, tokens, ms, detail, trace_id, at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
       r.id, r.suite, r.caseId, r.target, r.batch, r.projectId, r.passed ? 1 : 0, r.score, r.tokens, r.ms, JSON.stringify({ assertions: r.assertions, reply: r.reply }), r.traceId, r.at);
