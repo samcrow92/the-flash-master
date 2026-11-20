@@ -1,4 +1,6 @@
 import type { Task } from "@shared/types";
+import { matrixText } from "./traceability";
+import type { TraceMatrix } from "@shared/types";
 import { TASK_STATUSES } from "@shared/types";
 import type { Db } from "./db";
 import type { Orchestrator } from "./orchestrator";
@@ -27,6 +29,7 @@ export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmWriter?: RmWriter; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
   memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void; headCommit?: (projectId: string | null) => string | null;
+  traceMatrix?: (projectId: string) => TraceMatrix;
   knowledge?: KnowledgeBase; codeGraph?: CodeGraph; readOnly?: () => boolean;
   etm?: () => EtmClient | null; scm?: (repo?: string) => ScmClient | null; scmWrite?: (repo?: string) => ScmWriter | null;
 }): ToolDef[] {
@@ -235,6 +238,17 @@ export function buildTools(d: {
         }, ["id", "role", "goal"]) },
       }, ["title", "tasks"]),
       handler: async (a, c) => d.orch.proposePlan(c.agentId, a),
+    },
+    {
+      set: "core", name: "trace_matrix",
+      description: "The project's traceability (requirement → test → latest result) from its trace files, ReqIF exports, cached DOORS Next modules, "
+        + "requirement tags in test code (@req REQ-12, Verifies: 4711) and JUnit XML results. Shows the gaps by default: requirements without a test, failing, or tested without a result.",
+      inputSchema: obj({ show: { type: "string", enum: ["gaps", "all"], description: "gaps (default) or every requirement" } }),
+      handler: async (a, c) => {
+        const ctx = memCtx(c.agentId);
+        if (!ctx.projectId || !d.traceMatrix) throw new Error("traceability belongs to a project: this chat has no project folder");
+        return matrixText(d.traceMatrix(ctx.projectId), a.show === "all" ? "all" : "gaps");
+      },
     },
     {
       set: "core", name: "use_skill",

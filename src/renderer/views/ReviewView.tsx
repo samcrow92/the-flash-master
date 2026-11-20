@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { InboxPanel } from "../components/InboxPanel";
 import { ChecksStatus, mergeWithChecks } from "../components/ChecksStatus";
 import type { AgentWorkChanges } from "@shared/api";
 import type { ReviewComment } from "@shared/review";
@@ -30,6 +31,7 @@ export function ReviewView({ agentId }: { agentId?: string }) {
         <h2><GitBranch size={20} className="h-icon" /> Review changes</h2>
         <span className="muted small">Each code-writing specialist works on its own branch. Read its changes, comment on lines, then merge or discard.</span>
       </header>
+      <InboxPanel />
       {!list.length ? (
         <div className="review-empty muted">
           <GitBranch size={28} />

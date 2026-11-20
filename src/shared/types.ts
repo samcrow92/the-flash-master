@@ -823,3 +823,45 @@ export interface AgentState {
   notes: string;
   updatedAt: number;
 }
+
+// ---------- Traceability (requirement → test → result), tool-agnostic with pluggable sources ----------
+export type TraceKind = "requirement" | "test" | "result";
+export interface TraceItem {
+  /** Requirement id (REQ-12, 4711), test id (file::name) or result id. */
+  id: string;
+  kind: TraceKind;
+  title: string;
+  /** Which source it came from, e.g. "csv", "reqif", "doors", "code tags", "junit". */
+  source: string;
+  /** Where it lives: a file (relative, with line) or a URL. */
+  where?: string;
+  /** Tests: the requirements they verify. Results: the test they belong to. */
+  links: string[];
+  /** Results: passed | failed | skipped. */
+  outcome?: "passed" | "failed" | "skipped";
+  at?: number;
+}
+export type TraceStatus = "verified" | "failed" | "untested" | "uncovered";
+export interface TraceRow { req: TraceItem; tests: (TraceItem & { outcome?: TraceItem["outcome"] })[]; status: TraceStatus }
+export interface TraceSourceStatus { id: string; label: string; items: number; detail: string | null }
+export interface TraceMatrix {
+  projectId: string;
+  at: number;
+  rows: TraceRow[];
+  /** Tests that verify no known requirement (or name an unknown id). */
+  orphanTests: TraceItem[];
+  sources: TraceSourceStatus[];
+  counts: Record<TraceStatus, number>;
+}
+
+/** Everything waiting on the user, across chats: questions, plans to approve, branches to merge, failed checks. */
+export interface InboxItem {
+  kind: "ask" | "plan" | "merge" | "checks";
+  id: string;
+  chatId: string | null;
+  messageId: string | null;
+  agentId: string | null;
+  title: string;
+  detail: string;
+  at: number;
+}

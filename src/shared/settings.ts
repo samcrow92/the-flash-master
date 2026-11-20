@@ -174,6 +174,8 @@ export interface Settings {
   };
   /** Local traces of requests, turns, tool calls and delegations (Timeline page). Never leave the machine. */
   traces: { enabled: boolean; retentionDays: number };
+  /** Traceability: how test code names the requirements it verifies (regex, first group = ids), and where test results (JUnit XML) are. */
+  traceability: { tagPattern: string; resultDirs: string };
   /** Eval suites (.flashmaster/evals): nightly replay at `hour`; `targets` (harness/model per line) overrides the suites' own. */
   evals: { nightly: boolean; hour: number; targets: string };
   /** Checks before merge: the project's own commands, run by the app in an agent's worktree (see src/main/checks.ts). */
@@ -415,6 +417,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force", rules: DEFAULT_RULES, hooks: "" },
   traces: { enabled: true, retentionDays: 30 },
+  traceability: { tagPattern: "", resultDirs: "test-results, reports, build/test-results, build/reports, TestReports" },
   evals: { nightly: false, hour: 2, targets: "" },
   checks: { enabled: true, commands: "", autoRun: true, requireForMerge: true, maxFixRounds: 2, timeoutMinutes: 15 },
   mcp: { autoInstall: true, pythonPath: "", pipIndexUrl: "", disabled: [], npmRegistry: "", catalog: {}, external: [] },

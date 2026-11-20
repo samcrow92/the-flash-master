@@ -1,4 +1,6 @@
 import { fixPath } from "./shell-path";
+import { collect, codeTagSource, DEFAULT_TAG_PATTERN, doorsSource, evidenceReport, fileSource, junitSource, reqifSource, splitDirs } from "./traceability";
+import { buildInbox } from "./inbox";
 import { execFileSync } from "node:child_process";
 import { memoryHealth } from "./memory-health";
 import { ollamaEmbedder } from "./embeddings";
@@ -142,6 +144,14 @@ const applyEmbeddings = () => {
 };
 applyEmbeddings();
 settings.onChange(() => applyEmbeddings());
+/** The project's traceability matrix from every source that has something (all offline). */
+function traceMatrixFor(projectId: string) {
+  const p = db.getProject(projectId);
+  if (!p) throw new Error("unknown project");
+  const t = settings.get().traceability;
+  return collect(projectId, p.path, [fileSource, reqifSource, doorsSource(() => requirements.allCached()), codeTagSource(t?.tagPattern?.trim() || DEFAULT_TAG_PATTERN),
+    junitSource(splitDirs(t?.resultDirs))]);
+}
 const sweepMemory = () => { try { if (memory.sweep()) emit({ type: "memory.changed" }); } catch (e) { log("warn", `memory sweep: ${String(e)}`); } };
 
 let roles: RoleDef[] = [];
@@ -533,7 +543,7 @@ const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmWriter, etm, scm, scmWrite, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
-  memory, headCommit: projectHead, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,
+  memory, headCommit: projectHead, traceMatrix: (id) => traceMatrixFor(id), memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,
   readOnly: () => settings.get().permissions.readOnly }));
 
 // ---------------- chat attachments ----------------
@@ -921,6 +931,19 @@ const api: FlashApi = {
   approvePlan: async (planId, patch) => orch.approvePlan(planId, patch),
   cancelPlan: async (planId) => orch.cancelPlan(planId),
   agentState: async (agentId) => orch.agentState(agentId),
+  traceMatrix: async (projectId) => traceMatrixFor(projectId),
+  traceReport: async (projectId) => {
+    const p = db.getProject(projectId);
+    if (!p) throw new Error("unknown project");
+    const m = traceMatrixFor(projectId);
+    const dir = join(p.path, "reports");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `traceability-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.html`);
+    writeFileSync(file, evidenceReport(m, { project: p.name, commit: projectHead(projectId) }));
+    return file;
+  },
+  inbox: async () => buildInbox({ asks: db.openAsks(), plans: db.draftPlans(), agents: db.listAgents({}), checks: (id) => db.getCheckRun(id),
+    chatTitle: (id) => db.getChat(id)?.title ?? null }),
   listTraces: async (chatId) => traces.list({ chatId: chatId ?? null, limit: 40 }),
   getTrace: async (traceId) => waterfall(traces.spans(traceId)),
   exportTrace: async (traceId) => JSON.stringify(toOtlp(traces.spans(traceId)), null, 1),
@@ -1320,7 +1343,7 @@ function createWindow(): void {
   // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
-  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER || process.env.FLASH_SMOKE_TRACES) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
+  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER || process.env.FLASH_SMOKE_TRACES || process.env.FLASH_SMOKE_TRACE) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
   win.webContents.setWindowOpenHandler(openInBrowser);
   guardReportFrames(win.webContents);
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });

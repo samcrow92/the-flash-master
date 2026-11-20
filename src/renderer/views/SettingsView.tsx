@@ -925,6 +925,8 @@ function Data(f: F) {
     <Row label="Run evals nightly" hint="Replays every project's .flashmaster/evals suites once a night and flags regressions on the Evals page. Uses your agents and tokens like any request."><Bool f={f} path="evals.nightly" /></Row>
     <Row label="Nightly eval hour (0–23)"><Num f={f} path="evals.hour" /></Row>
     <Row label="Eval targets" hint="One harness/model per line (e.g. copilot/claude-sonnet-5.5, pi/qwen-local/qwen3-coder). Empty = each suite's own targets."><Area f={f} path="evals.targets" rows={3} /></Row>
+    <Row label="Traceability tag pattern" hint="Regular expression for requirement tags in test code; its first group holds the ids. Empty = @req, Verifies:, Covers:, Satisfies:."><Text f={f} path="traceability.tagPattern" placeholder="@req REQ-12 · Verifies: 4711" /></Row>
+    <Row label="Test result folders" hint="Where the Traceability page looks for JUnit XML results, relative to the project, comma separated."><Text f={f} path="traceability.resultDirs" placeholder="test-results, reports" /></Row>
     <Row label="Export all data"><button onClick={async () => { const p = await api().exportData(); if (p) st.toast("info", `Exported to ${p}`); }}>Export JSON…</button></Row>
     <Row label="Reset settings to defaults"><button className="danger" onClick={async () => { if (confirm("Reset all settings?")) st.setSettings(await api().resetSettings()); }}>Reset</button></Row>
   </>;
