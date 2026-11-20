@@ -1,4 +1,6 @@
 import { fixPath } from "./shell-path";
+import { EvalRunner, loadSuites, regressions } from "./evals";
+import { TraceStore, toOtlp, waterfall } from "./traces";
 import { evaluateRules, parseRules } from "./harness/rules";
 import { parseHooks } from "./hooks";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, safeStorage, session, shell, Notification, type WebContents } from "electron";
@@ -221,8 +223,11 @@ const codeGraph = new CodeGraph({
   onStatus: (status) => emit({ type: "codegraph.changed", status }),
 });
 
+const traces = new TraceStore(db.raw, () => settings.get().traces?.enabled !== false);
+traces.closeDangling();
+traces.prune(settings.get().traces?.retentionDays ?? 30);
 const orch = new Orchestrator({
-  db, harnesses, log, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory, knowledge,
+  db, harnesses, log, traces, settings: () => settings.get(), roles: () => roles, skills: () => skills, emit, memory, knowledge,
   mcpServersFor: (role, agentId) => mcp.specsFor(role, agentId), homeDir: homedir(), dataDir,
   noProjectDir: () => noProjectFolder(settings.get().agents.noProjectFolder ?? "", process.platform, homedir()),
   extraRules: () => marketplace.instructions(),
@@ -246,6 +251,23 @@ const orch = new Orchestrator({
 orch.announceInterrupted(interruptedAtStart);
 // Stuck-agent watchdog: warns (once per silence) about working agents that have sent nothing for a while.
 setInterval(() => { orch.checkStuck(); orch.checkToolTimeouts(); orch.checkTimeLimits(); }, 30_000).unref();
+const evals = new EvalRunner({ db, orch, traces, settings: () => settings.get(), emit: (progress) => emit({ type: "evals.updated", progress }), log: (m) => log("warn", m) });
+// Nightly evals (Settings → Evals): once a day, at the chosen hour, every project with suites in .flashmaster/evals.
+let lastNightly = "";
+setInterval(() => {
+  const e = settings.get().evals;
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  if (!e?.nightly || now.getHours() !== e.hour || lastNightly === day || evals.state.running) return;
+  lastNightly = day;
+  const targets = (e.targets ?? "").split(/\r?\n/).map((x) => x.trim()).filter((x) => x && !x.startsWith("#"));
+  void (async () => {
+    for (const p of db.listProjects()) {
+      if (!loadSuites(p.path).some((x) => x.cases.length)) continue;
+      await evals.run(p.id, targets.length ? { targets } : {}).catch((err) => log("warn", `nightly evals ${p.name}: ${String(err?.message ?? err)}`));
+    }
+  })();
+}, 10 * 60_000).unref();
 // Closes delegated specialists that finished and stayed idle (Settings → Agents); work waiting for review is kept.
 setInterval(() => { void orch.closeIdle(); }, 60_000).unref();
 // Deletes finished, stopped and stale tasks (Settings → Agents → Tasks); Review tasks and tasks with a working agent stay.
@@ -861,6 +883,19 @@ const api: FlashApi = {
   agentWorkState: async (id) => orch.workState(id),
   mergeAgentWork: async (id, force) => orch.mergeWork(id, !!force),
   agentChecks: async (id) => orch.agentChecks(id),
+  listEvalSuites: async (projectId) => { const p = db.getProject(projectId); return p ? loadSuites(p.path) : []; },
+  runEvals: async (projectId, o) => { void evals.run(projectId, o ?? {}).catch((e) => emit({ type: "notice", level: "error", text: `Evals: ${String(e?.message ?? e)}` })); return evals.state; },
+  cancelEvals: async () => evals.cancel(),
+  evalState: async () => evals.state,
+  evalResults: async (projectId) => {
+    const all = db.listEvalRuns(projectId, 10);
+    const batches = [...new Set(all.map((r) => r.batch))];
+    const flags = batches.length > 1 ? regressions(all.filter((r) => r.batch === batches[0]), all.filter((r) => r.batch === batches[1])) : new Map<string, string>();
+    return all.map((r) => (flags.has(r.id) ? { ...r, regression: flags.get(r.id) } : r));
+  },
+  listTraces: async (chatId) => traces.list({ chatId: chatId ?? null, limit: 40 }),
+  getTrace: async (traceId) => waterfall(traces.spans(traceId)),
+  exportTrace: async (traceId) => JSON.stringify(toOtlp(traces.spans(traceId)), null, 1),
   runAgentChecks: async (id) => orch.runAgentChecks(id),
   testPermissions: async (rules, hooks, sample) => {
     const r = parseRules(rules);
@@ -1241,7 +1276,7 @@ function createWindow(): void {
   // A reload starts a fresh renderer that knows none of the open shells: end them instead of leaving them orphaned.
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
-  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
+  if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER || process.env.FLASH_SMOKE_TRACES) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
   win.webContents.setWindowOpenHandler(openInBrowser);
   guardReportFrames(win.webContents);
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });

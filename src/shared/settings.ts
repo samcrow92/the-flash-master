@@ -164,6 +164,10 @@ export interface Settings {
     /** Your own scripts around agent work, one per line: `<event> [match] => <command>` (see src/main/hooks.ts). */
     hooks: string;
   };
+  /** Local traces of requests, turns, tool calls and delegations (Timeline page). Never leave the machine. */
+  traces: { enabled: boolean; retentionDays: number };
+  /** Eval suites (.flashmaster/evals): nightly replay at `hour`; `targets` (harness/model per line) overrides the suites' own. */
+  evals: { nightly: boolean; hour: number; targets: string };
   /** Checks before merge: the project's own commands, run by the app in an agent's worktree (see src/main/checks.ts). */
   checks: {
     enabled: boolean;
@@ -398,6 +402,8 @@ export const DEFAULT_SETTINGS: Settings = {
     taskBudget: 1_000_000,
   },
   permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force", rules: DEFAULT_RULES, hooks: "" },
+  traces: { enabled: true, retentionDays: 30 },
+  evals: { nightly: false, hour: 2, targets: "" },
   checks: { enabled: true, commands: "", autoRun: true, requireForMerge: true, maxFixRounds: 2, timeoutMinutes: 15 },
   mcp: { autoInstall: true, pythonPath: "", pipIndexUrl: "", disabled: [], npmRegistry: "", catalog: {}, external: [] },
   jazz: {

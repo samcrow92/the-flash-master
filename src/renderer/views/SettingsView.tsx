@@ -914,6 +914,11 @@ function Data(f: F) {
   const st = useStore();
   return <>
     <Row label="Retention (days)" hint="Usage records, artifacts and finished agent runs older than this are removed at start. 0 = keep forever."><Num f={f} path="data.retentionDays" /></Row>
+    <Row label="Traces" hint="Record each request's turns, tool calls, delegations and checks for the Timeline page (OpenTelemetry GenAI names; export as OTLP/JSON). Kept on this computer only."><Bool f={f} path="traces.enabled" /></Row>
+    <Row label="Keep traces (days)"><Num f={f} path="traces.retentionDays" min={1} /></Row>
+    <Row label="Run evals nightly" hint="Replays every project's .flashmaster/evals suites once a night and flags regressions on the Evals page. Uses your agents and tokens like any request."><Bool f={f} path="evals.nightly" /></Row>
+    <Row label="Nightly eval hour (0–23)"><Num f={f} path="evals.hour" /></Row>
+    <Row label="Eval targets" hint="One harness/model per line (e.g. copilot/claude-sonnet-5.5, pi/qwen-local/qwen3-coder). Empty = each suite's own targets."><Area f={f} path="evals.targets" rows={3} /></Row>
     <Row label="Export all data"><button onClick={async () => { const p = await api().exportData(); if (p) st.toast("info", `Exported to ${p}`); }}>Export JSON…</button></Row>
     <Row label="Reset settings to defaults"><button className="danger" onClick={async () => { if (confirm("Reset all settings?")) st.setSettings(await api().resetSettings()); }}>Reset</button></Row>
   </>;

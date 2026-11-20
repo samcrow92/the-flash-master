@@ -2024,3 +2024,39 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .perm-verdict { font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--bg2); }
 .perm-verdict.deny { color: var(--red); } .perm-verdict.ask { color: var(--amber); } .perm-verdict.allow { color: var(--green); } .perm-verdict.none { color: var(--muted); }
 .warn-text { color: var(--amber); }
+
+/* Timeline: requests on the left, the selected one as a waterfall */
+.timeline { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 12px; min-height: 0; flex: 1; }
+.trace-list { display: flex; flex-direction: column; gap: 4px; overflow: auto; max-height: calc(100vh - 210px); }
+.trace-item { text-align: left; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; background: var(--bg2); }
+.trace-item.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--bg2)); }
+.trace-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.trace-name .dot.running { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+.waterfall { position: relative; overflow: auto; max-height: calc(100vh - 210px); background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px; }
+.wf-summary { padding: 2px 4px 8px; color: var(--muted); }
+.wf-row { display: grid; grid-template-columns: minmax(180px, 38%) 1fr 110px; align-items: center; gap: 8px; font-size: 12px; min-height: 22px; border-radius: 6px; }
+.wf-row:hover { background: var(--bg3); }
+.wf-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: 4px; }
+.wf-track { position: relative; height: 10px; background: color-mix(in srgb, var(--fg) 5%, transparent); border-radius: 5px; }
+.wf-bar { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--blue); min-width: 2px; }
+.kind-request .wf-bar { background: var(--accent); } .kind-delegate .wf-bar { background: #a78bfa; } .kind-tool .wf-bar { background: var(--muted); }
+.kind-checks .wf-bar { background: var(--green); } .st-error .wf-bar { background: var(--red); } .st-running .wf-bar { opacity: .6; animation: pulse 1.4s ease-in-out infinite; }
+.wf-meta { text-align: right; white-space: nowrap; }
+.wf-detail { position: sticky; bottom: 0; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--win-base) 90%, transparent); border: 1px solid var(--rim); }
+.wf-attrs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 12px; margin-top: 4px; } .wf-attrs code { font-size: 11px; opacity: .75; }
+@media (max-width: 760px) { .timeline { grid-template-columns: 1fr; } }
+
+/* Evals */
+.eval-progress { position: relative; height: 22px; border-radius: 8px; background: var(--bg2); overflow: hidden; margin-bottom: 10px; display: flex; align-items: center; }
+.eval-progress .bar { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.eval-progress span { position: relative; padding: 0 10px; }
+.eval-suite h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 14px 0 6px; }
+.eval-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.eval-table th, .eval-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.eval-cell.pass button { color: var(--green); } .eval-cell.fail button { color: var(--red); }
+.eval-cell.regressed { background: color-mix(in srgb, var(--amber) 10%, transparent); }
+.eval-cell button { display: inline-flex; align-items: center; gap: 4px; }
+.eval-spark { display: flex; gap: 2px; margin-top: 4px; } .eval-spark i { width: 6px; height: 10px; border-radius: 2px; background: var(--red); } .eval-spark i.p { background: var(--green); }
+.eval-detail { margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: var(--bg2); } .eval-detail .ok { color: var(--green); } .eval-detail .bad { color: var(--red); } .eval-detail button.link { color: var(--accent); margin-top: 4px; }
+.card .big { font-size: 22px; font-weight: 600; }

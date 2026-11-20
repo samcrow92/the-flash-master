@@ -72,6 +72,14 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE chats ADD COLUMN duo_mode TEXT;`,
   // v15: the last run of the project's checks on each agent's worktree (Merge is gated on a green run of the current commit)
   `CREATE TABLE check_runs(agent_id TEXT PRIMARY KEY, run TEXT NOT NULL, at INTEGER NOT NULL);`,
+  // v16: local traces (requests, turns, tool calls, delegations, checks; OpenTelemetry GenAI attribute names) and eval runs
+  `CREATE TABLE spans(id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, parent_id TEXT, agent_id TEXT, chat_id TEXT, kind TEXT NOT NULL, name TEXT NOT NULL,
+     start INTEGER NOT NULL, end INTEGER, status TEXT NOT NULL, attrs TEXT NOT NULL DEFAULT '{}');
+   CREATE INDEX spans_trace ON spans(trace_id, start);
+   CREATE INDEX spans_chat ON spans(chat_id, start);
+   CREATE TABLE eval_runs(id TEXT PRIMARY KEY, suite TEXT NOT NULL, case_id TEXT NOT NULL, target TEXT NOT NULL, batch TEXT NOT NULL, project_id TEXT,
+     passed INTEGER NOT NULL, score REAL NOT NULL, tokens INTEGER NOT NULL, ms INTEGER NOT NULL, detail TEXT NOT NULL, trace_id TEXT, at INTEGER NOT NULL);
+   CREATE INDEX eval_runs_case ON eval_runs(suite, case_id, target, at);`,
 ];
 
 type Row = Record<string, any>;
@@ -443,6 +451,21 @@ export class Db {
   setAgentWorktree(id: string, worktree: string | null, branch: string | null): AgentRun {
     this.run("UPDATE agents SET worktree=?, branch=? WHERE id=?", worktree, branch, id);
     return this.getAgent(id)!;
+  }
+  saveEvalRun(r: import("@shared/types").EvalCaseResult): void {
+    this.run("INSERT INTO eval_runs(id, suite, case_id, target, batch, project_id, passed, score, tokens, ms, detail, trace_id, at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      r.id, r.suite, r.caseId, r.target, r.batch, r.projectId, r.passed ? 1 : 0, r.score, r.tokens, r.ms, JSON.stringify({ assertions: r.assertions, reply: r.reply }), r.traceId, r.at);
+  }
+  /** Eval results of a project, newest batch first (at most `batches` batches). */
+  listEvalRuns(projectId: string, batches = 10): import("@shared/types").EvalCaseResult[] {
+    const keep = this.all("SELECT batch FROM eval_runs WHERE project_id=? GROUP BY batch ORDER BY MAX(at) DESC LIMIT ?", projectId, batches).map((r) => r.batch as string);
+    if (!keep.length) return [];
+    return this.all(`SELECT * FROM eval_runs WHERE project_id=? AND batch IN (${keep.map(() => "?").join(",")}) ORDER BY at DESC`, projectId, ...keep).map((r) => {
+      let d: { assertions?: []; reply?: string } = {};
+      try { d = JSON.parse(r.detail); } catch { /* keep empty */ }
+      return { id: r.id, suite: r.suite, caseId: r.case_id, target: r.target, batch: r.batch, projectId: r.project_id ?? null, passed: !!r.passed, score: Number(r.score),
+        tokens: Number(r.tokens), ms: Number(r.ms), traceId: r.trace_id ?? null, at: Number(r.at), assertions: d.assertions ?? [], reply: d.reply ?? "" };
+    });
   }
   /** The last check run on an agent's worktree (one per agent; a new run replaces it). */
   saveCheckRun(agentId: string, run: import("@shared/types").CheckRun): void {

@@ -5,7 +5,7 @@ import { api, useStore } from "../store";
 import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
 import { Archive, ArchiveRestore, Brain, ChevronRight, Copy, Pin, PinOff, RotateCcw,
-  BookOpen, Bot, ClipboardList, Folder, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
+  BookOpen, Bot, ClipboardList, Folder, FolderOpen, FolderPlus, LayoutDashboard, ChartGantt, FlaskConical, MessageSquarePlus,
   Download, GitBranch, MoreHorizontal, Pencil, Plus, Puzzle, Search, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
 import { SHORTCUTS, shortcutLabel } from "../commands";
@@ -138,6 +138,8 @@ export function Sidebar() {
         <NavBtn active={view.kind === "review"} onClick={() => st.setView({ kind: "review" })} icon={<GitBranch size={17} />} label="Review"
           extra={toReview > 0 && <span className="badge" title="Agent branches waiting for review">{toReview}</span>} />
         <NavBtn active={view.kind === "dashboard"} onClick={() => st.setView({ kind: "dashboard" })} icon={<LayoutDashboard size={17} />} label="Dashboard" />
+        <NavBtn active={view.kind === "timeline"} onClick={() => st.setView({ kind: "timeline" })} icon={<ChartGantt size={17} />} label="Timeline" />
+        <NavBtn active={view.kind === "evals"} onClick={() => st.setView({ kind: "evals" })} icon={<FlaskConical size={17} />} label="Evals" />
         <NavBtn active={view.kind === "tasks"} onClick={() => st.setView({ kind: "tasks" })} icon={<SquareKanban size={17} />} label="Tasks"
           extra={openTasks > 0 && <span className="count">{openTasks}</span>} />
         <NavBtn active={view.kind === "memory"} onClick={() => st.setView({ kind: "memory" })} icon={<Brain size={17} />} label="Memory" />

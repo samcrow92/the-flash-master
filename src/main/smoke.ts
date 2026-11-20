@@ -9,6 +9,8 @@
  *   FLASH_SMOKE_CHECKS=<dir>      only checks before merge and permission rules: a specialist's branch with failing checks on the
  *                                 Agents and Review pages, Settings → Permissions and → Checks, dark and light (FLASH_SMOKE_PROJECT =
  *                                 a git repo whose .flashmaster/checks.json is committed)
+ *   FLASH_SMOKE_TRACES=<dir>      only traces and evals: a request with a delegation on the Timeline, then an eval suite run on
+ *                                 two targets on the Evals page, dark and light (FLASH_SMOKE_PROJECT = a git repo)
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
@@ -216,6 +218,61 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       }
       const good = pass.chip && pass.pop && pass.rules;
       log(good ? "info" : "error", `smoke-checks: ${JSON.stringify(pass)}`);
+      app.exit(good ? 0 : 1);
+      return;
+    }
+    const tracesDir = process.env.FLASH_SMOKE_TRACES;
+    if (ok && tracesDir && hooks) {
+      mkdirSync(tracesDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      const { execFileSync } = await import("node:child_process");
+      const g = (...x: string[]) => execFileSync("git", ["-c", "user.name=Flash", "-c", "user.email=flash@example.com", "-c", "commit.gpgsign=false", ...x], { cwd: proj });
+      mkdirSync(join(proj, ".flashmaster", "evals"), { recursive: true });
+      writeFileSync(join(proj, ".flashmaster", "evals", "golden.json"), JSON.stringify({ name: "Brake ECU golden tasks", targets: ["", "mock/fast"], cases: [
+        { id: "can-summary", title: "Summarise the CAN log", prompt: "Summarise the CAN log", timeoutMinutes: 2, expect: { status: "done", contains: ["mock"], maxTokens: 2_000_000 } },
+        { id: "debounce-test", title: "Unit test for the debounce", prompt: "Add a unit test for the brake light debounce", timeoutMinutes: 2, expect: { status: "done", files: ["tests/test_debounce.c"] } }] }, null, 2));
+      g("add", "-A"); g("commit", "-qm", "Add golden eval suite");
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock" }, checks: { autoRun: false } })`);
+      const project = hooks.db.createProject("brake-ecu", proj);
+      const chat = hooks.db.createChat({ projectId: project.id, title: "General", kind: "project", agentRole: "flashmaster" });
+      await hooks.orch.sendUserMessage(chat.id, "Why does the brake light flicker at low speed?", null);
+      await sleep(4000);
+      const coord = hooks.db.listAgents().find((a) => a.role === "flashmaster");
+      if (coord) {
+        await hooks.orch.delegate(coord.id, { role: "analyst", goal: "Summarise the CAN log around the flicker" }).catch((e) => log("error", `smoke-traces: ${String(e)}`));
+        await hooks.orch.delegate(coord.id, { role: "tester", goal: "Reproduce the flicker in a unit test" }).catch((e) => log("error", `smoke-traces: ${String(e)}`));
+      }
+      await js(`window.flash.api.runEvals(${JSON.stringify(project.id)})`);
+      for (let i = 0; i < 120; i++) {
+        await sleep(1000);
+        if (!(await js<{ running: boolean }>(`window.flash.api.evalState()`)).running) break;
+      }
+      win.webContents.reload();
+      await sleep(2500);
+      const pass = { waterfall: false, evals: false };
+      for (const theme of ["dark", "light"] as const) {
+        if (theme === "light") {
+          await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
+          win.webContents.reload();
+          await sleep(2500);
+        }
+        await click("Timeline", ".sidebar button");
+        await sleep(1200);
+        await js(`[...document.querySelectorAll('.trace-item')].find(x=>x.textContent.includes('flicker'))?.click()`);
+        await sleep(1200);
+        await js(`(()=>{const r=[...document.querySelectorAll('.wf-row.kind-turn')][1];r?.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))})()`);
+        await sleep(400);
+        pass.waterfall = await js<boolean>(`document.querySelectorAll('.wf-row').length >= 4`);
+        await shot(join(tracesDir, `timeline-${theme}.png`));
+        await click("Evals", ".sidebar button");
+        await sleep(1500);
+        await js(`document.querySelector('.eval-cell.fail button')?.click()`);
+        await sleep(500);
+        pass.evals = await js<boolean>(`!!document.querySelector('.eval-cell.pass') && !!document.querySelector('.eval-detail')`);
+        await shot(join(tracesDir, `evals-${theme}.png`));
+      }
+      const good = pass.waterfall && pass.evals;
+      log(good ? "info" : "error", `smoke-traces: ${JSON.stringify(pass)}`);
       app.exit(good ? 0 : 1);
       return;
     }

@@ -1,5 +1,5 @@
 import type {
-  AgentChecks, CheckRun,
+  AgentChecks, CheckRun, Span, TraceSummary, EvalSuite, EvalProgress, EvalCaseResult,
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
   Project, RoleDef, SkillDef, Task, Submission, ServerTestResult, SubmitDraft, SubmitMeta, SubmitResult, SubmitSource, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult, CodeGraphStatus,
 } from "./types";
@@ -91,6 +91,16 @@ export interface FlashApi {
   mergeAgentWork(id: string, force?: boolean): Promise<{ ok: boolean; message: string }>;
   /** The project's checks for an agent's worktree: what is configured, the last run, and whether it covers the current commit. */
   agentChecks(id: string): Promise<AgentChecks>;
+  /** Evals: suites in the project's .flashmaster/evals, start / cancel a batch (progress comes as evals.updated events), results (newest batch first, regressions flagged). */
+  listEvalSuites(projectId: string): Promise<EvalSuite[]>;
+  runEvals(projectId: string, o?: { suite?: string; caseId?: string; targets?: string[] }): Promise<EvalProgress>;
+  cancelEvals(): Promise<void>;
+  evalState(): Promise<EvalProgress>;
+  evalResults(projectId: string): Promise<EvalCaseResult[]>;
+  /** Timeline: recent traces (one per request), optionally of one chat; a trace's spans in waterfall order; OTLP/JSON export. */
+  listTraces(chatId?: string | null): Promise<TraceSummary[]>;
+  getTrace(traceId: string): Promise<{ span: Span; depth: number }[]>;
+  exportTrace(traceId: string): Promise<string>;
   /** Run the project's checks in the agent's worktree now; null = no checks set up. */
   runAgentChecks(id: string): Promise<CheckRun | null>;
   /** Settings → Permissions: syntax errors in the rules and hooks text, and what the rules decide for a sample command. */
@@ -276,7 +286,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "listTraces", "getTrace", "exportTrace", "listEvalSuites", "runEvals", "cancelEvals", "evalState", "evalResults", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",
