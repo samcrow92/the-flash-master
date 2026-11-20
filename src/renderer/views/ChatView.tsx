@@ -25,7 +25,7 @@ import { SpecialistsPill } from "../components/SpecialistsPill";
 import { AgentsPill } from "../components/AgentsPill";
 import { ThreadsPanel } from "./ThreadsPanel";
 import { chatThreads, messageSide } from "../threadList";
-import { chatToOpen, sheetTab, switcherChats, type SheetTab } from "../layout";
+import { chatToOpen, sheetTab, switcherChats, threadFaces, type SheetTab } from "../layout";
 import { showSheet } from "../components/SheetTabs";
 import { chatKey } from "../agentChat";
 import { newChatIn, openProjectChat } from "../chatNav";
@@ -423,8 +423,7 @@ const plural = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`;
 /** The "N replies" pill under a message: who replied, how many, and a chevron that flips when the thread is open. */
 export function ThreadPill({ root, open, onClick }: { root: Message; open: boolean; onClick: () => void }) {
   const replies = useStore((s) => s.threads[root.id])?.filter((r) => r.id !== root.id);
-  const faces: Message[] = [];
-  for (const r of replies ?? []) if (!faces.some((f) => f.author === r.author && f.role === r.role)) faces.push(r);
+  const { faces, more } = threadFaces(replies ?? []);
   const last = replies?.at(-1);
   if (root.threadArchived) {
     return (
@@ -438,9 +437,10 @@ export function ThreadPill({ root, open, onClick }: { root: Message; open: boole
   return (
     <button className={`thread-pill ${open ? "open" : ""}`} onClick={onClick} aria-expanded={open} title={open ? "Fold the thread in the side sheet" : "Open the thread in the side sheet"}>
       <span className="tp-faces">
-        {faces.length ? faces.slice(0, 3).map((f) => (
-          <span key={f.id} className="tp-face">{f.author === "user" ? <UserAvatar size={18} /> : f.author === "system" ? <span className="role-badge sys"><Info size={10} /></span> : <RoleIcon role={f.role} size={18} framed />}</span>
+        {faces.length ? faces.map(({ m: f, working }) => (
+          <span key={f.id} className="tp-face">{f.author === "user" ? <UserAvatar size={18} /> : f.author === "system" ? <span className="role-badge sys"><Info size={11} /></span> : <RoleIcon role={f.role} size={18} framed state={working ? "working" : undefined} />}</span>
         )) : <MessageCircle size={13} />}
+        {more > 0 && <span className="tp-more" title={`${more} more`}>+{more}</span>}
       </span>
       <span className="tp-count">{plural(root.replyCount)}</span>
       {last && <span className="tp-last">· last {ago(last.createdAt)} ago</span>}

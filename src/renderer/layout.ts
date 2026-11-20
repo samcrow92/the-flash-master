@@ -1,4 +1,4 @@
-import type { Chat } from "@shared/types";
+import type { Chat, Message } from "@shared/types";
 
 /**
  * App layout rules kept pure so tests cover them without a DOM: which chat a project row opens, what the chat
@@ -34,4 +34,21 @@ export function sheetTab(s: {
   if (s.artifactsChat === s.chatId) return "artifacts";
   if (s.threadsOpen && (s.threadCount > 0 || s.shownEmptyFor === s.chatId)) return "threads";
   return null;
+}
+
+/**
+ * Who replied in a thread, for the faces on the "N replies" chip: one face per author (each agent role, you, and all
+ * system notes as one), newest activity last, at most `max` shown with the rest counted. A face is `working` while that
+ * author still has a reply streaming.
+ */
+export function threadFaces(replies: Message[], max = 3): { faces: { m: Message; working: boolean }[]; more: number } {
+  const key = (m: Message) => (m.author === "agent" ? `agent:${m.role ?? ""}` : m.author);
+  const seen = new Map<string, { m: Message; working: boolean }>();
+  for (const m of replies) {
+    const k = key(m);
+    const prev = seen.get(k);
+    seen.set(k, { m: prev?.m ?? m, working: (prev?.working ?? false) || m.status === "streaming" });
+  }
+  const all = [...seen.values()];
+  return { faces: all.slice(0, max), more: Math.max(0, all.length - max) };
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Chat } from "../src/shared/types";
-import { chatToOpen, sheetTab, switcherChats } from "../src/renderer/layout";
+import type { Chat, Message } from "../src/shared/types";
+import { chatToOpen, sheetTab, switcherChats, threadFaces } from "../src/renderer/layout";
 import { matchShortcut } from "../src/renderer/commands";
 
 const read = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
@@ -143,5 +143,24 @@ describe("collapsible sidebar", () => {
     expect(app).toContain("<TitleBar terminal sidebar />");
     expect(read("src/renderer/components/TitleBar.tsx")).toContain('className="sidebar-toggle"');
     expect(read("src/renderer/styles.css")).toContain(".app.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }");
+  });
+});
+
+describe("thread replies chip", () => {
+  const msg = (id: string, author: Message["author"], role: string | null = null, status: Message["status"] = "done") => ({ id, author, role, status }) as Message;
+
+  it("shows one face per author, all system notes as one, and counts the rest", () => {
+    const r = threadFaces([msg("1", "system"), msg("2", "agent", "reviewer"), msg("3", "system"), msg("4", "user"), msg("5", "agent", "architect"), msg("6", "agent", "reviewer", "streaming")]);
+    expect(r.faces.map((f) => f.m.id)).toEqual(["1", "2", "4"]);
+    expect(r.more).toBe(1);
+    expect(r.faces[1]?.working).toBe(true);
+  });
+
+  it("lays the faces side by side, never stacked on top of each other", () => {
+    const css = read("src/renderer/styles.css");
+    const last = (sel: string) => [...css.matchAll(new RegExp(`(^|\\n)${sel.replace(/[.+]/g, "\\$&")} \\{([^}]*)\\}`, "g"))].at(-1)?.[2] ?? "";
+    expect(last(".thread-pill .tp-face + .tp-face")).toMatch(/margin-left: 0/);
+    expect(last(".thread-pill .tp-face")).toMatch(/flex: none/);
+    expect(last(".thread-pill > .tp-faces")).toMatch(/gap: 3px/);
   });
 });
