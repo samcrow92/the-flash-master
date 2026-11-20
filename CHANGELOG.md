@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Fix: the Artifacts tab's buttons vanished after refreshing Git.** With many changed files, the list squeezed the Changes, Git, Saved and Code buttons away. The buttons now stay put and the list scrolls under them. Long repository paths are cut from the left with the full path in the tooltip, and file paths that start with a dot no longer show it at the end.
 - **Fix: the message bar's buttons spilled past the chat box while an agent ran.** Steer and Queue join the row while an agent works, so Superpowers, Autopilot, Steer and Queue then show only their icons (names in the tooltips). If the row still doesn't fit (a narrow window), the drive strip and Send move together onto a second line inside the box.
 - **Fix: a Duo chat showed both mode strips side by side.** With GitLab Duo selected, the Duo strip (AUTO, ECO, COMFORT, SPORT) now takes the drive modes' place. Picking Duo as the harness clears a drive mode the chat had, so a hidden mode can't keep steering the chat.
 - **One automotive look for the whole message bar.** Attach, @, /, Superpowers, Autopilot, reset context, Steer / Queue and Send now share the drive strip's slanted segments. Tools stay quiet until you hover them. Superpowers (gold) and Autopilot (blue) light up with the same glint as a drive mode when switched on. Send is the accent "start" key at the end of the row.

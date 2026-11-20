@@ -1961,3 +1961,11 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .composer-bar:has(.cb-busy) .ds-rev { display: none; }
 .composer-bar .grow { flex: 1 1 0; min-width: 0; }
 .cb-drive { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
+
+/* Artifacts tab: its Changes / Git / Saved / Code buttons never shrink away. A long list (a refreshed Git tab with many
+   changed files) scrolls inside the sheet instead of squeezing the buttons off the top. */
+.artifacts-panel > .art-tabs, .artifacts-panel > .sheet-head { flex: none; }
+.artifacts-panel > .art-list { flex: 1 1 auto; min-height: 0; }
+.art-repo { min-width: 0; gap: 6px; justify-self: stretch; display: flex; }
+.art-repo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.art-repo > button { flex: none; }

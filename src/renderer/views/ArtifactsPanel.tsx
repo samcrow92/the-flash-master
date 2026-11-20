@@ -89,19 +89,19 @@ export function ArtifactsPanel({ chatId }: { chatId: string }) {
           {data?.changes.map((c) => (
             <button key={c.id} className="art-item" onClick={() => openChange(c.id)}>
               {c.isNew ? <FilePlus2 size={16} className="ic new" /> : c.deleted ? <FileX2 size={16} className="ic del" /> : <FileCode size={16} className="ic mod" />}
-              <span className="art-main"><span className="art-name">{base(c.path)}</span><span className="muted small art-path">{c.path}</span></span>
+              <span className="art-main"><span className="art-name">{base(c.path)}</span><span className="muted small art-path" title={c.path}><bdi>{c.path}</bdi></span></span>
               <span className="art-meta"><DiffStat added={c.added} removed={c.removed} /><span className="muted small">{c.role ?? ""} · {ago(c.createdAt)}</span></span>
             </button>
           ))}
         </>}
         {tab === "git" && <>
-          <div className="row between small muted art-all"><span>{data?.project ?? "No project folder"}</span><button className="ghost icon-only" title="Refresh" onClick={() => api().gitChanges(chatId).then(setGit)}><RotateCcw size={13} /></button></div>
+          <div className="row between small muted art-all art-repo"><span title={data?.project ?? undefined}><bdi>{data?.project ?? "No project folder"}</bdi></span><button className="ghost icon-only" title="Refresh" onClick={() => api().gitChanges(chatId).then(setGit)}><RotateCcw size={13} /></button></div>
           {git && !git.ok && <div className="muted small art-empty">{git.detail}</div>}
           {git?.ok && git.files.length === 0 && <div className="muted small art-empty">Working tree clean — no uncommitted changes.</div>}
           {git?.files.map((f) => (
             <button key={f.path} className="art-item" onClick={() => openGit(f.path, f.status)}>
               {f.status === "new" || f.status === "added" ? <FilePlus2 size={16} className="ic new" /> : f.status === "deleted" ? <FileX2 size={16} className="ic del" /> : <FileCode size={16} className="ic mod" />}
-              <span className="art-main"><span className="art-name">{base(f.path)}</span><span className="muted small art-path">{f.path}</span></span>
+              <span className="art-main"><span className="art-name">{base(f.path)}</span><span className="muted small art-path" title={f.path}><bdi>{f.path}</bdi></span></span>
               <span className={`chip st-${f.status}`}>{f.status}</span>
             </button>
           ))}

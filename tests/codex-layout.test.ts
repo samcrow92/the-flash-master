@@ -66,6 +66,18 @@ describe("side sheet", () => {
   });
 });
 
+describe("artifacts tab", () => {
+  it("keeps its Changes / Git / Saved / Code buttons when a long Git list is refreshed", () => {
+    // Regression (2026-11-20): the list wasn't the part that shrank, so a refreshed Git tab squeezed the buttons away.
+    const css = read("src/renderer/styles.css");
+    expect(css).toContain(".artifacts-panel > .art-tabs, .artifacts-panel > .sheet-head { flex: none; }");
+    expect(css).toContain(".artifacts-panel > .art-list { flex: 1 1 auto; min-height: 0; }");
+    // Paths cut from the left keep their order (a leading dot stayed at the end under direction: rtl).
+    const tsx = read("src/renderer/views/ArtifactsPanel.tsx");
+    expect(tsx.split("<bdi>").length - 1).toBe(3);
+  });
+});
+
 describe("sidebar", () => {
   it("project rows expand to list their chats, remembered across launches; threads never show there", () => {
     const tsx = read("src/renderer/components/Sidebar.tsx");
