@@ -6,7 +6,7 @@ import { TABS as SETTINGS_TABS } from "../views/SettingsView";
 import { useMenu } from "./ContextMenu";
 import { toggleTerminal } from "./TerminalPanel";
 import {
-  BookOpen, Bot, Brain, ClipboardList, Network, RefreshCw, Sparkles, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
+  BookOpen, Bot, Brain, ClipboardList, Network, PanelLeft, RefreshCw, Sparkles, GitBranch, LayoutDashboard, MessageSquare, MessageSquarePlus, Puzzle, Search, Settings, SquareKanban, Square, SquareTerminal, SunMoon, TextCursorInput, Zap, RoleIcon,
 } from "./icons";
 
 export const usePalette = create<{ open: boolean; setOpen(v: boolean): void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
@@ -54,6 +54,7 @@ function runShortcut(id: ShortcutId): void {
       break;
     }
     case "stop": if (chatId) void stopChat(chatId); break;
+    case "sidebar": st.toggleSidebar(); break;
     case "search": usePalette.getState().setOpen(false); useStore.setState((s) => ({ searchOpen: !s.searchOpen })); break;
   }
 }
@@ -141,6 +142,7 @@ function PaletteBox({ onClose }: { onClose: () => void }) {
       { id: "a:new", group: "Action", label: "New chat", keywords: "create start", icon: <MessageSquarePlus size={16} />, run: () => runShortcut("newChat"), shortcut: "newChat" },
       ...(currentChat && runningInChat(currentChat).length ? [{ id: "a:stop", group: "Action", label: "Stop agents in this chat", keywords: "cancel halt", icon: <Square size={14} />, run: () => runShortcut("stop"), shortcut: "stop" as const }] : []),
       ...(currentChat ? [{ id: "a:focus", group: "Action", label: "Focus the message box", keywords: "composer type write", icon: <TextCursorInput size={16} />, run: focusComposer, shortcut: "focusComposer" as const }] : []),
+      { id: "a:sidebar", group: "Action", label: st.sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar", keywords: "collapse fold panel navigation projects", icon: <PanelLeft size={16} />, run: () => runShortcut("sidebar"), shortcut: "sidebar" },
       { id: "a:search", group: "Action", label: "Search all chats", keywords: "find messages history", icon: <Search size={16} />, run: () => runShortcut("search"), shortcut: "search" },
       { id: "a:terminal", group: "Action", label: "Show or hide the terminal", keywords: "shell console powershell command line", icon: <SquareTerminal size={16} />, run: () => toggleTerminal() },
       { id: "a:theme", group: "Action", label: "Switch light / dark theme", keywords: "appearance mode", icon: <SunMoon size={16} />, run: () => toggleTheme() },

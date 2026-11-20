@@ -118,6 +118,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
     }
   };
   const draftTokens = Math.ceil(text.length / 4);
+  const duo = !!settings?.duo?.modes && chatOnDuo(chat, settings);
 
   return (
     <div className={`composer-wrap ${compact ? "compact" : ""}`}>
@@ -169,9 +170,9 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
           <button className="cb-btn" title="Commands and workflows" onClick={() => trigger("/")}><Slash size={15} /></button>
           {!compact && <>
             <span className="cb-sep" />
-            <button className={`cb-toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}><Sparkles size={14} /> Superpowers</button>
+            <button className={`cb-toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}><Sparkles size={14} /> <span className="cb-label">Superpowers</span></button>
             <button className={`cb-toggle autopilot ${chat.autopilot ? "on" : ""}`} title="Autopilot: approve all tool calls automatically and let agents work without asking for feedback (blocked commands and read-only mode still apply)"
-              onClick={() => patchChat({ autopilot: !chat.autopilot })}><Plane size={14} className="autopilot-plane" /> Autopilot {chat.autopilot ? "on" : "off"}</button>
+              onClick={() => patchChat({ autopilot: !chat.autopilot })}><Plane size={14} className="autopilot-plane" /> <span className="cb-label">Autopilot {chat.autopilot ? "on" : "off"}</span></button>
           </>}
           {!compact && <button className={`cb-btn reset-ctx ${resetting ? "spin" : ""}`} disabled={busy}
             title={busy ? "Stop the running agent to reset the context" : "Reset context — agents in this chat start fresh (messages stay visible)"}
@@ -184,6 +185,8 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
           )}
           <span className="grow" />
           {text && <span className="muted small" title="Estimated tokens of this message">~{draftTokens} tok</span>}
+          {/* One drive selector beside Send: Duo's strip while the chat runs on Duo, else the drive modes (both while a drive mode is set, so it can be cleared). */}
+          {!compact && settings && (!duo || chat.mode) && <ModeBar chat={chat} onChange={(mode) => patchChat(modeClickPatch(chat, settings, { mode }))} />}
           {!compact && settings && <DuoStrip chat={chat} onChange={(duoMode) => patchChat(modeClickPatch(chat, settings, { duoMode }))} />}
           <button className="primary send" onClick={() => send()} disabled={!text.trim() && !atts.length}
             title={busy ? (whileBusy === "steer" ? "Steer the running agent (Enter)" : "Queue for when the agent finishes (Enter)") : "Send (Enter)"}
@@ -191,7 +194,6 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
             {busy ? (whileBusy === "steer" ? <CornerDownRight size={15} strokeWidth={2.2} /> : <Hourglass size={14} strokeWidth={2.2} />) : <ArrowUp size={16} strokeWidth={2.4} />}</button>
         </div>
       </div>
-      {!compact && settings && <ModeBar chat={chat} onChange={(mode) => patchChat(modeClickPatch(chat, settings, { mode }))} />}
     </div>
   );
 }

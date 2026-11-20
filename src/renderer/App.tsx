@@ -25,7 +25,7 @@ import { X, Zap } from "./components/icons";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export function App() {
-  const { ready, view, toasts, init, apply, toast } = useStore();
+  const { ready, view, toasts, init, apply, toast, sidebarCollapsed } = useStore();
   const [drag, dispatch] = useReducer(dragReducer, idle);
   const dragging = drag.active;
   useShortcuts();
@@ -64,9 +64,9 @@ export function App() {
 
   return (
     <div className="shell">
-    <TitleBar terminal />
+    <TitleBar terminal sidebar />
     <TerminalPanel />
-    <div className="app"
+    <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
       onDragOver={(e) => { if (hasFiles(e.dataTransfer)) e.preventDefault(); }}
       onDrop={async (e) => {
         const files = [...e.dataTransfer.files].filter((f) => f.name.toLowerCase().endsWith(".md"));
@@ -82,7 +82,7 @@ export function App() {
           <div className="drop-hint-sub">Esc to dismiss</div>
         </div>
       )}
-      <Sidebar />
+      {!sidebarCollapsed && <Sidebar />}
       <main className="main" key={view.kind === "chat" ? "chat" : view.kind}>
         <ErrorBoundary name="this view" resetKey={JSON.stringify(view)}>
         {view.kind === "chat" && <ChatView key={view.chatId} chatId={view.chatId} />}

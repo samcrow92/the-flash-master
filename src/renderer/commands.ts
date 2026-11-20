@@ -5,7 +5,7 @@ import { NO_PROJECT } from "./agentChat";
  * App-wide keyboard shortcuts and command palette ranking (pure, so tests can cover them without a DOM).
  * "Mod" is Cmd on macOS and Ctrl on Windows/Linux.
  */
-export type ShortcutId = "palette" | "newChat" | "settings" | "focusComposer" | "prevChat" | "nextChat" | "stop" | "search";
+export type ShortcutId = "palette" | "newChat" | "settings" | "focusComposer" | "prevChat" | "nextChat" | "stop" | "search" | "sidebar";
 
 export const SHORTCUTS: Record<ShortcutId, { keys: string; label: string }> = {
   palette: { keys: "Mod+K", label: "Command palette" },
@@ -16,6 +16,7 @@ export const SHORTCUTS: Record<ShortcutId, { keys: string; label: string }> = {
   nextChat: { keys: "Alt+↓", label: "Next chat" },
   stop: { keys: "Esc", label: "Stop agents in this chat" },
   search: { keys: "Mod+Shift+F", label: "Search all chats" },
+  sidebar: { keys: "Mod+B", label: "Show or hide the sidebar" },
 };
 
 export interface KeyLike { key?: string | null; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }
@@ -30,6 +31,7 @@ export function matchShortcut(e: KeyLike, mac: boolean): ShortcutId | null {
     if (key === "n") return "newChat";
     if (key === ",") return "settings";
     if (key === "l") return "focusComposer";
+    if (key === "b") return "sidebar";
   }
   if (mod && !e.altKey && e.shiftKey && key === "f") return "search";
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {

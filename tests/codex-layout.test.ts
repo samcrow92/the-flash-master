@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Chat } from "../src/shared/types";
 import { chatToOpen, sheetTab, switcherChats } from "../src/renderer/layout";
+import { matchShortcut } from "../src/renderer/commands";
 
 const read = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
 const chat = (id: string, over: Partial<Chat> = {}): Chat => ({
@@ -71,5 +72,41 @@ describe("sidebar", () => {
     expect(tsx).not.toMatch(/chat-link|chat-list/);
     expect(tsx).toContain('className="new-chat-btn"');
     expect(tsx).toContain("openProjectChat(p.id)");
+  });
+});
+
+describe("composer", () => {
+  it("keeps the drive modes and Duo's strip in the bar beside Send, nothing under the box", () => {
+    const tsx = read("src/renderer/components/Composer.tsx");
+    const bar = tsx.slice(tsx.indexOf('<div className="composer-bar">'), tsx.indexOf('className="primary send"'));
+    expect(bar).toContain("<ModeBar");
+    expect(bar).toContain("<DuoStrip");
+    expect(tsx.split("<ModeBar ").length - 1).toBe(1);
+    // A Duo chat shows one selector: Duo's strip, plus the drive modes only while one is set.
+    expect(bar).toContain("(!duo || chat.mode) && <ModeBar");
+    const css = read("src/renderer/styles.css");
+    expect(css).not.toContain(".composer-wrap > .mode-bar");
+    // Duo's strip keeps its full labels at the chat column's width (it is 780px wide).
+    expect(css).toMatch(/@container \(max-width: 560px\) \{ \.ds-rev/);
+  });
+});
+
+describe("collapsible sidebar", () => {
+  it("Ctrl+B (Cmd+B on macOS) shows or hides it", () => {
+    const k = (over: object) => ({ key: "b", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...over });
+    expect(matchShortcut(k({ ctrlKey: true }), false)).toBe("sidebar");
+    expect(matchShortcut(k({ metaKey: true }), true)).toBe("sidebar");
+    expect(matchShortcut(k({ ctrlKey: true, shiftKey: true }), false)).toBeNull();
+  });
+
+  it("is remembered across launches and leaves a toggle on screen while folded", () => {
+    const store = read("src/renderer/store.ts");
+    expect(store).toContain("sidebarCollapsed: readSidebarPref()");
+    expect(store).toMatch(/localStorage\?\.setItem\(SIDEBAR_PREF/);
+    const app = read("src/renderer/App.tsx");
+    expect(app).toContain("{!sidebarCollapsed && <Sidebar />}");
+    expect(app).toContain("<TitleBar terminal sidebar />");
+    expect(read("src/renderer/components/TitleBar.tsx")).toContain('className="sidebar-toggle"');
+    expect(read("src/renderer/styles.css")).toContain(".app.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }");
   });
 });

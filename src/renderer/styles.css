@@ -1176,11 +1176,7 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .mode-gear { width: 24px; height: 24px; padding: 0; border-radius: 50%; display: inline-grid; place-items: center; background: transparent; border: none; box-shadow: none; color: var(--muted); }
 .mode-gear:hover:not(:disabled) { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .composer-wrap.compact .send { width: 28px; height: 28px; }
-/* drive modes hang centred under the chat box, joined to it like a tab */
 .composer-wrap { gap: 0; }
-.composer-wrap > .mode-bar { justify-self: center; margin-top: -1px; position: relative; z-index: 1; padding: 3px 6px 4px;
-  border-radius: 0 0 14px 14px; border-top: none; background: var(--bg2); backdrop-filter: blur(10px);
-  box-shadow: var(--hi), 0 8px 18px -14px rgba(0, 0, 0, .55); }
 
 /* ---------- Agents overview: open an agent's chat from a glass card ---------- */
 .agent-chat-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; margin: 12px 0 14px; }
@@ -1546,7 +1542,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .cb-toggle { border-color: transparent; background: transparent; }
 .cb-toggle.on, .cb-toggle.autopilot.on { border-color: transparent; }
 .cb-btn:hover { border-color: transparent; background: var(--quiet); }
-.composer-wrap > .mode-bar { border-color: var(--line); box-shadow: none; }
 .mode-label { font-weight: 600; letter-spacing: .04em; }
 .mode-btn:not(.on) .mode-model { display: none; }
 .mode-btn.on { border-color: transparent !important; box-shadow: none; }
@@ -1801,7 +1796,7 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .composer2 { container-type: inline-size; }
 .ds-short { display: none; }
 /* a narrower chat box keeps the strip: no rev bar, and only the lit mode spells its name */
-@container (max-width: 900px) { .ds-rev { display: none; } .ds-seg:not(.on) .ds-full { display: none; } .ds-seg:not(.on) .ds-short { display: inline; } .ds-seg { padding: 0 8px; } }
+@container (max-width: 560px) { .ds-rev { display: none; } .ds-seg:not(.on) .ds-full { display: none; } .ds-seg:not(.on) .ds-short { display: inline; } .ds-seg { padding: 0 8px; } }
 @media (prefers-reduced-motion: reduce) { .ds-glint { animation: none; display: none; } }
 
 /* =====================================================================================================
@@ -1901,3 +1896,24 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .sheet-sub select { width: 100%; }
 @container sheet (max-width: 340px) { .sheet-tabs button svg { display: none; } .sheet-tabs button { padding: 0 8px; } }
 
+
+/* Composer: one row. Tools on the left; the drive selector (drive modes, or Duo's strip on a Duo chat) sits beside Send,
+   nothing hangs under the box. When the row gets tight the toggles drop their words first, then the modes theirs. */
+.composer-bar { flex-wrap: nowrap; min-width: 0; }
+.composer-bar .mode-bar { flex: none; padding: 2px; background: color-mix(in srgb, var(--fg) 5%, transparent); border: none; box-shadow: none; }
+.composer-bar .mode-btn { height: 24px; padding: 0 8px; }
+.composer-bar .mode-btn .mode-model { display: none; }
+.composer-bar .mode-gear { width: 22px; height: 22px; }
+.cb-toggle .cb-label { white-space: nowrap; }
+.composer-bar .send { flex: none; }
+@container (max-width: 860px) { .composer-bar .ds-rev { display: none; } }
+@container (max-width: 760px) { .cb-toggle .cb-label { display: none; } .cb-toggle { padding: 0 7px; } }
+@container (max-width: 520px) { .composer-bar .mode-btn:not(.on) .mode-label { font-size: 0; gap: 0; } .composer-bar .mode-btn:not(.on) { padding: 0 6px; } }
+
+/* Collapsible sidebar: Ctrl/Cmd+B or the button beside the app icon folds it away and the chat takes the width. */
+.titlebar-left { display: flex; align-items: flex-start; gap: 8px; }
+.sidebar-toggle { width: 28px; height: 28px; margin-top: 6px; padding: 0; display: grid; place-items: center; border: none; border-radius: 8px;
+  background: transparent; box-shadow: none; color: var(--muted); }
+.sidebar-toggle:hover { color: var(--fg); background: var(--quiet); }
+.sidebar-toggle[aria-pressed="false"] { color: var(--fg); }
+.app.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
