@@ -67,11 +67,17 @@ describe("side sheet", () => {
 });
 
 describe("sidebar", () => {
-  it("lists projects, not their chats, and keeps New chat on top", () => {
+  it("project rows expand to list their chats, remembered across launches; threads never show there", () => {
     const tsx = read("src/renderer/components/Sidebar.tsx");
-    expect(tsx).not.toMatch(/chat-link|chat-list/);
     expect(tsx).toContain('className="new-chat-btn"');
-    expect(tsx).toContain("openProjectChat(p.id)");
+    // Regression (2026-11-20): layout A dropped the chat lists, so a project row only jumped to a chat and never expanded.
+    expect(tsx).toMatch(/className="project-name"[^>]*aria-expanded=\{!!open\[p\.id\]\} onClick=\{\(\) => setOpen\(p\.id, !open\[p\.id\]\)\}/);
+    expect(tsx).toContain("{open[p.id] && chatList(p.id)}");
+    expect(tsx).toContain('className={`chat-link');
+    expect(tsx).toMatch(/localStorage\.setItem\(OPEN_PREF/);
+    expect(tsx).toContain("switcherChats(st.chats[key]");
+    expect(tsx).not.toMatch(/thread/i);
+    expect(read("src/renderer/styles.css")).toMatch(/\.chat-link \{ cursor: pointer;/);
   });
 });
 
@@ -86,6 +92,11 @@ describe("composer", () => {
     expect(bar).toContain("(!duo || chat.mode) && <ModeBar");
     const css = read("src/renderer/styles.css");
     expect(css).not.toContain(".composer-wrap > .mode-bar");
+    // Drive modes on any chat use the same slanted strip as Duo's (Mari, 2026-11-20).
+    const modeBar = tsx.slice(tsx.indexOf("function ModeBar("), tsx.indexOf("function DuoStrip("));
+    expect(modeBar).toContain('className={`duo-strip drive-strip');
+    expect(modeBar).toContain('className={`ds-seg ds-${m}');
+    expect(modeBar).not.toContain("mode-btn");
     // Duo's strip keeps its full labels at the chat column's width (it is 780px wide).
     expect(css).toMatch(/@container \(max-width: 560px\) \{ \.ds-rev/);
   });
