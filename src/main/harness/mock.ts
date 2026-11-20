@@ -35,8 +35,19 @@ export class MockSession implements HarnessSession {
         Requirements: ["No cold-start timing requirement (confirmed)"], "Design / Architecture": ["Shared PWM timer (confirmed)"],
         "Verification & Validation": ["No test below -10 °C (confirmed)"] } });
       const file = join(dir, "rca-report.html");
-      writeFileSync(file, `<!doctype html><html><head><meta charset="utf-8"><title>RCA (mock)</title></head>`
-        + `<body><h1>Root-cause analysis (mock)</h1><h2>Ishikawa</h2><figure>${svg}</figure></body></html>`);
+      // Styled, with a small inline script (the causes table is built by it), like real agent reports: shows that the in-app
+      // report viewer runs report scripts offline.
+      writeFileSync(file, `<!doctype html><html><head><meta charset="utf-8"><title>RCA (mock)</title><style>`
+        + `body{font:14px/1.5 system-ui,sans-serif;margin:0;color:#1d2433;background:#f6f7fb}header{background:linear-gradient(120deg,#2a3a8f,#5b3fd1);color:#fff;padding:22px 32px}`
+        + `header h1{margin:0;font-size:22px}header p{margin:4px 0 0;opacity:.8}main{padding:8px 32px 32px;max-width:1000px}h2{font-size:16px;margin:22px 0 8px}`
+        + `figure{margin:0;background:#fff;border:1px solid #e3e6ef;border-radius:12px;padding:12px;overflow:auto}figure svg{max-width:100%;height:auto}`
+        + `table{border-collapse:collapse;width:100%;background:#fff;border-radius:10px;overflow:hidden}td,th{padding:8px 12px;border-bottom:1px solid #eceef4;text-align:left}`
+        + `th{background:#eef0f8;font-weight:600}.ok{color:#1d8a4e;font-weight:600}</style></head>`
+        + `<body><header><h1>Root-cause analysis (mock)</h1><p>Brake light flicker at cold start · Ishikawa + INCOSE</p></header><main>`
+        + `<h2>Ishikawa</h2><figure>${svg}</figure><h2>Confirmed causes</h2><table id="causes"><tr><th>Category</th><th>Cause</th><th>Status</th></tr></table>`
+        + `<script>for(const [c,w] of [["Requirements","No cold-start timing requirement"],["Design / Architecture","Shared PWM timer"],["Verification & Validation","No test below -10 °C"]])`
+        + `document.getElementById("causes").insertAdjacentHTML("beforeend","<tr><td>"+c+"</td><td>"+w+"</td><td class=ok>confirmed</td></tr>")</script>`
+        + `</main></body></html>`);
       return file;
     } catch { return null; }
   }

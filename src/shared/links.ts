@@ -54,3 +54,12 @@ export function imagePathsIn(text: string, max = 8): string[] {
   }
   return out;
 }
+
+/** HTML pages (agent analysis reports) previewed inside the app (src/main/html-preview.ts). */
+export const HTML_EXT = /\.html?$/i;
+
+/** True for a local path / file:// URL that names an HTML file. */
+export function isLocalHtml(s: string): boolean {
+  const t = s.trim();
+  return isLocalPathLink(t) && HTML_EXT.test(t.replace(/[?#].*$/, ""));
+}

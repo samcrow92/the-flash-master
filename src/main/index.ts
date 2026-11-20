@@ -1,10 +1,10 @@
 import { fixPath } from "./shell-path";
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, safeStorage, session, shell, Notification, type WebContents } from "electron";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import type { FlashApi } from "@shared/api";
 import type { AppEvent, RoleDef, SkillDef, WindowState } from "@shared/types";
@@ -26,6 +26,7 @@ import { LiveLedger, copilotHome, parseSessionUsage, scanSessionLogs, summarizeL
 import { fetchQuota, findCopilotToken, type Exec, type Quota } from "./copilot-quota";
 import { Requirements, parseRmLink } from "./requirements";
 import { resolveLink } from "./links";
+import { MAX_REPORT_BYTES, REPORT_CSP, REPORT_SCHEME, ReportFolders, reportMime, reportNavigation, resolveHtml } from "./html-preview";
 import { MAX_INLINE_IMAGE_BYTES, resolveImage, setAgentImageDir } from "./images";
 import { EtmClient } from "./etm";
 import { RmWriter } from "./rm-write";
@@ -153,6 +154,39 @@ let win: BrowserWindow | null = null;
 const terminals = new Terminals((e) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("flash:event", e); });
 /** Threads and chats popped out into their own windows (keys `thread:<root id>`, `chat:<chat id>`); they get every app event like the main window. */
 const popouts = new Map<string, BrowserWindow>();
+
+// HTML reports previewed in chats are served from their folder on flash-report:// (src/main/html-preview.ts).
+const reportFolders = new ReportFolders();
+protocol.registerSchemesAsPrivileged([{ scheme: REPORT_SCHEME, privileges: { standard: true, secure: true, stream: true } }]);
+function serveReports(): void {
+  session.defaultSession.protocol.handle(REPORT_SCHEME, async (req) => {
+    const file = reportFolders.fileFor(req.url);
+    const headers = { "Content-Security-Policy": REPORT_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" };
+    try {
+      if (!file || !statSync(file).isFile()) return new Response("Not found", { status: 404, headers });
+      const r = await net.fetch(pathToFileURL(file).toString());
+      return new Response(r.body, { status: 200, headers: { ...headers, "Content-Type": reportMime(file) } });
+    } catch { return new Response("Not found", { status: 404, headers }); }
+  });
+}
+let lastReportLink = 0;
+const reportLinkOk = () => { const ok = Date.now() - lastReportLink > 1500; if (ok) lastReportLink = Date.now(); return ok; };
+/** New windows never open in the app: web links go to the browser (throttled when a report page asks). */
+function openInBrowser({ url, referrer }: { url: string; referrer: { url: string } }): { action: "deny" } {
+  if (/^https?:/.test(url) && (!referrer.url.startsWith(`${REPORT_SCHEME}:`) || reportLinkOk())) void shell.openExternal(url);
+  return { action: "deny" };
+}
+/** A report frame may move between pages of its own folder; a web link opens in the browser (at most one every 1.5 s,
+ *  so a page script can't spray tabs); anything else is blocked. The app's own page never navigates (will-navigate). */
+function guardReportFrames(wc: WebContents): void {
+  wc.on("will-frame-navigate", (e) => {
+    if (e.isMainFrame) return;
+    const what = reportNavigation(e.url);
+    if (what === "allow") return;
+    e.preventDefault();
+    if (what === "browser" && reportLinkOk()) void shell.openExternal(e.url);
+  });
+}
 const emit = (e: AppEvent) => {
   for (const w of [win, ...popouts.values()]) if (w && !w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send("flash:event", e);
   if (e.type === "notice" && e.level !== "info" && settings.get().general.notifications && !win?.isFocused() && Notification.isSupported()) {
@@ -790,6 +824,15 @@ const api: FlashApi = {
     const err = await shell.openPath(a.path);
     return err ? { ok: false, detail: err } : { ok: true, detail: "Opened." };
   },
+  previewHtml: async (target, chatId) => {
+    const c = chatId ? db.getChat(String(chatId)) : null;
+    const project = c?.projectId ? db.getProject(c.projectId)?.path : null;
+    const r = resolveHtml(String(target ?? ""), { platform: process.platform, bases: project ? [project] : [], home: homedir(), exists: existsSync });
+    if (!r.ok) return { ok: false, detail: `Can't preview this page: ${r.reason}` };
+    try { if (statSync(r.path).size > MAX_REPORT_BYTES) return { ok: false, detail: "This page is too large to preview; open it in the browser." }; }
+    catch (e) { return { ok: false, detail: String((e as Error)?.message ?? e) }; }
+    return { ok: true, url: reportFolders.urlFor(r.dir, r.file), path: r.path, name: r.file };
+  },
   openThreadWindow: async (chatId, rootId) => openThreadWindow(chatId, rootId),
   openChatWindow: async (chatId) => openChatWindow(chatId),
   searchMessages: async (query, limit) => db.searchMessages(String(query ?? ""), Math.min(Math.max(Number(limit) || 50, 1), 200)),
@@ -1190,7 +1233,8 @@ function createWindow(): void {
   win.webContents.on("did-start-navigation", (d) => { if (d.isMainFrame && !d.isSameDocument) terminals.closeAll(); });
   // Smoke mode (CI / release check / docs screenshots) — only active when FLASH_SMOKE_* env vars are set.
   if (process.env.FLASH_SMOKE_SHOT || process.env.FLASH_SMOKE_DEMO || process.env.FLASH_SMOKE_ASK || process.env.FLASH_SMOKE_GRAPH || process.env.FLASH_SMOKE_SERVER) win.webContents.once("did-finish-load", () => void runSmoke(win!, log, appIcon, { orch, db }));
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
+  win.webContents.setWindowOpenHandler(openInBrowser);
+  guardReportFrames(win.webContents);
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
   if (!settings.get().advanced.devTools) win.webContents.on("devtools-opened", () => { if (app.isPackaged) win?.webContents.closeDevTools(); });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -1234,7 +1278,8 @@ function openPopout(key: string, hash: string, size: { width: number; height: nu
   guardWebContents(w.webContents, `${key.split(":")[0]} window`, log, (reason) => void rendererGaveUp(w, reason));
   w.on("closed", () => { if (popouts.get(key) === w) popouts.delete(key); });
   w.once("ready-to-show", () => w.show());
-  w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) void shell.openExternal(url); return { action: "deny" }; });
+  w.webContents.setWindowOpenHandler(openInBrowser);
+  guardReportFrames(w.webContents);
   w.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:") && !url.startsWith(process.env.ELECTRON_RENDERER_URL ?? "\0")) e.preventDefault(); });
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
   else void w.loadFile(join(here, "../renderer/index.html"), { hash });
@@ -1326,6 +1371,7 @@ app.whenReady().then(async () => {
   jazzSession().setCertificateVerifyProc((req, cb) => cb(settings.get().jazz.trustServerCert && jazzHosts().has(req.hostname) ? 0 : -3));
   await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret), secrets.load(serverSecret)]);
   await applyProxy();
+  serveReports();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
   createWindow();

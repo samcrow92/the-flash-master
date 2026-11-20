@@ -52,6 +52,9 @@ export interface FlashApi {
   /** Open a link from a chat reply: web URLs in the browser, local files (reports, .html pages) with their default app.
    *  Relative paths resolve against the chat's project. Programs are shown in their folder, never run (src/main/links.ts). */
   openLink(target: string, chatId?: string | null): Promise<{ ok: boolean; detail: string }>;
+  /** A local .html report named in a chat, as a `flash-report://` URL the page shows in a sandboxed frame (offline,
+   *  no access to the app); its folder's images/scripts load too. Same path rules as openLink (src/main/html-preview.ts). */
+  previewHtml(target: string, chatId: string | null): Promise<{ ok: true; url: string; path: string; name: string } | { ok: false; detail: string }>;
   /** Pop a thread out into its own window (it stays live like the main one). */
   openThreadWindow(chatId: string, rootId: string): Promise<void>;
   /** A whole chat (an agent's dedicated chat) in its own window; focuses the window if that chat is already open in one. */
@@ -266,7 +269,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

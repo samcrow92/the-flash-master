@@ -1,4 +1,5 @@
 import { ImageViewer } from "../components/ImageViewer";
+import { HtmlViewer } from "../components/HtmlViewer";
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { ChatView } from "./ChatView";
@@ -29,6 +30,7 @@ export function ChatWindow({ chatId }: { chatId: string }) {
       {chat ? <ChatView chatId={chatId} popout /> : <div className="splash muted">This chat no longer exists.</div>}
       <ContextMenuHost />
       <ImageViewer />
+      <HtmlViewer />
       <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}</div>
     </div>
   );
