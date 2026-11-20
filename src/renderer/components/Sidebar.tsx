@@ -1,31 +1,31 @@
 import { ResizeHandle } from "./ResizeHandle";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Chat, Project } from "@shared/types";
+import { useRef, useState, type ReactNode } from "react";
+import type { Project } from "@shared/types";
 import { api, useStore } from "../store";
 import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
 import { Brain,
-  Archive, ArchiveRestore, BookOpen, Bot, ChevronRight, ClipboardList, Copy, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
-  Download, GitBranch, MoreHorizontal, Pencil, Pin, PinOff, Plus, Puzzle, RotateCcw, Search, Settings, SquareKanban, Trash2, Zap,
+  BookOpen, Bot, ClipboardList, Folder, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
+  Download, GitBranch, MoreHorizontal, Pencil, Plus, Puzzle, Search, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
 import { SHORTCUTS, shortcutLabel } from "../commands";
-import { NO_PROJECT } from "../agentChat";
+import { chatKey, NO_PROJECT } from "../agentChat";
+import { newChatIn, openProjectChat } from "../chatNav";
 
-const byPinned = (a: Chat, b: Chat) => Number(b.pinned) - Number(a.pinned) || a.createdAt - b.createdAt;
-
+/**
+ * Navigation and projects. Chats are not listed here: a project row reopens the chat you last had open in it, and you
+ * move between chats with the switcher under the chat's title or with search (Ctrl/Cmd+K).
+ */
 export function Sidebar() {
   const st = useStore();
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [showArchived, setShowArchived] = useState<Record<string, boolean>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const toReview = Object.values(st.agents).filter((a) => a.branch && a.worktree && a.status !== "running").length;
   const view = st.view;
   const isChat = (id: string) => view.kind === "chat" && view.chatId === id;
-  // Opening a chat from the palette or a shortcut reveals it here too.
-  const currentProject = st.currentProjectId;
-  useEffect(() => { if (currentProject) setOpen((o) => (o[currentProject] ? o : { ...o, [currentProject]: true })); }, [currentProject]);
-  const isBusy = (chatId: string) => Object.values(st.agents).some((a) => a.chatId === chatId && a.status === "running");
+  const inChat = view.kind === "chat" && !isChat(st.masterChatId ?? "");
+  // A project shows a pulse while an agent works in any of its chats.
+  const busyKeys = new Set(Object.values(st.agents).filter((a) => a.status === "running" && a.chatId).map((a) => chatKey(st.chatById[a.chatId!]?.projectId ?? null)));
 
   const addProject = async () => {
     const path = await api().pickFolder();
@@ -33,92 +33,34 @@ export function Sidebar() {
     const p = await api().createProject(path);
     await st.refreshProjects();
     await st.refreshChats(p.id);
-    setOpen((o) => ({ ...o, [p.id]: true }));
-    const first = useStore.getState().chats[p.id]?.[0];
-    if (first) await st.openChat(first.id);
+    await openProjectChat(p.id);
   };
+  const fail = (e: any) => st.toast("error", String(e?.message ?? e));
 
-  const newChat = async (projectId: string, role = "flashmaster") => {
-    const r = st.roles.find((x) => x.name === role);
-    const c = await api().createChat({ projectId, agentRole: role, title: role === "flashmaster" ? "New chat" : r?.title ?? role });
-    st.upsertChat(c);
-    setOpen((o) => ({ ...o, [projectId]: true }));
-    await st.openChat(c.id);
-  };
-
-  const patchChat = async (c: Chat, patch: Partial<Pick<Chat, "title" | "archived" | "pinned">>) => {
-    const n = await api().updateChat(c.id, patch);
-    st.upsertChat(n);
-    return n;
-  };
-  const resetContext = async (c: Chat) => {
-    try { await api().resetContext(c.id); st.toast("info", `Context reset for “${c.title}”`); } catch (e: any) { st.toast("warn", String(e?.message ?? e)); }
-  };
-  const deleteChat = async (c: Chat) => {
-    if (!confirm(`Delete “${c.title}” and all its messages? This cannot be undone.`)) return;
-    await api().deleteChat(c.id);
-    st.removeChat(c);
-    if (isChat(c.id) && st.masterChatId) await st.openChat(st.masterChatId);
-  };
-  const archiveChat = async (c: Chat) => {
-    await patchChat(c, { archived: !c.archived, pinned: c.archived ? c.pinned : false });
-    if (!c.archived && isChat(c.id) && st.masterChatId) await st.openChat(st.masterChatId);
-    st.toast("info", c.archived ? `Restored “${c.title}”` : `Archived “${c.title}”`);
-  };
-
-  const chatMenu = (c: Chat): MenuItem[] => [
-    { label: "Rename", icon: <Pencil size={15} />, onClick: () => setRenaming(c.id), hint: "F2" },
-    { label: c.pinned ? "Unpin" : "Pin to top", icon: c.pinned ? <PinOff size={15} /> : <Pin size={15} />, onClick: () => patchChat(c, { pinned: !c.pinned }), disabled: c.archived },
-    { label: "Reset context", icon: <RotateCcw size={15} />, onClick: () => resetContext(c), disabled: isBusy(c.id) },
-    { label: "Copy as Markdown", icon: <Copy size={15} />, onClick: async () => { await navigator.clipboard.writeText(await api().exportChat(c.id)); st.toast("info", "Chat copied as Markdown"); } },
+  const projectMenu = (p: Project): MenuItem[] => [
+    { label: "New chat", icon: <MessageSquarePlus size={15} />, onClick: () => void newChatIn(p.id).catch(fail) },
+    { label: "Rename project", icon: <Pencil size={15} />, hint: "F2", onClick: () => setRenaming(`project:${p.id}`) },
+    { label: "Open folder", icon: <FolderOpen size={15} />, onClick: () => api().openProjectFolder(p.id) },
     { separator: true, label: "" },
-    { label: c.archived ? "Restore from archive" : "Archive", icon: c.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />, onClick: () => archiveChat(c) },
-    { label: "Delete", icon: <Trash2 size={15} />, danger: true, onClick: () => deleteChat(c) },
+    { label: "Remove project", icon: <Trash2 size={15} />, danger: true, hint: "files stay",
+      onClick: async () => { if (confirm(`Remove “${p.name}” from TheFlashMaster? Its chats are deleted; the folder on disk is not touched.`)) { await api().removeProject(p.id); await st.refreshProjects(); } } },
   ];
-  const projectMenu = (p: Project): MenuItem[] => {
-    const archived = (st.chats[p.id] ?? []).filter((c) => c.archived).length;
-    return [
-      { label: "New chat", icon: <MessageSquarePlus size={15} />, onClick: () => newChat(p.id) },
-      { label: "Rename project", icon: <Pencil size={15} />, hint: "F2", onClick: () => setRenaming(`project:${p.id}`) },
-      { label: "Open folder", icon: <FolderOpen size={15} />, onClick: () => api().openProjectFolder(p.id) },
-      { label: showArchived[p.id] ? "Hide archived chats" : `Show archived chats${archived ? ` (${archived})` : ""}`, icon: <Archive size={15} />, disabled: !archived,
-        onClick: () => { setShowArchived((o) => ({ ...o, [p.id]: !o[p.id] })); setOpen((o) => ({ ...o, [p.id]: true })); } },
-      { separator: true, label: "" },
-      { label: "Remove project", icon: <Trash2 size={15} />, danger: true, hint: "files stay",
-        onClick: async () => { if (confirm(`Remove “${p.name}” from TheFlashMaster? Its chats are deleted; the folder on disk is not touched.`)) { await api().removeProject(p.id); await st.refreshProjects(); } } },
-    ];
-  };
-
-  // Plain render function (not a component defined in render): a component created here would get a new identity on
-  // every sidebar re-render (agent status, streaming…) and remount — resetting the rename field to the old title.
-  const chatRow = (c: Chat) => (
-    renaming === c.id ? (
-      <RenameInput key={c.id} initial={c.title} onCancel={() => setRenaming(null)}
-        onDone={async (t) => { setRenaming(null); if (t && t !== c.title) await patchChat(c, { title: t }); }} />
-    ) : (
-      <div key={c.id} className={`chat-link ${isChat(c.id) ? "active" : ""} ${c.archived ? "archived" : ""}`} role="button" tabIndex={0}
-        onClick={() => st.openChat(c.id)} onDoubleClick={() => setRenaming(c.id)} onContextMenu={(e) => openMenu(e, chatMenu(c))}
-        onKeyDown={(e) => { if (e.key === "F2") setRenaming(c.id); if (e.key === "Enter") void st.openChat(c.id); }}>
-        {c.pinned && <Pin size={12} className="chat-pin" />}
-        {c.archived && <Archive size={12} className="chat-pin" />}
-        <span className="chat-title">{c.title}</span>
-        {isBusy(c.id) && <span className="pulse" />}
-        <button className="row-more" title="More" onClick={(e) => openMenu(e, chatMenu(c), true)}><MoreHorizontal size={15} /></button>
-      </div>
-    )
-  );
 
   const openTasks = Object.values(st.tasks).filter((t) => t.status !== "done").length;
+  const mac = st.window?.platform === "darwin";
 
   return (
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><Zap size={17} strokeWidth={2.4} /></span> TheFlashMaster</div>
+      <button className="new-chat-btn" title="New chat with TheFlashMaster in the current project"
+        onClick={() => void newChatIn(st.currentProjectId).catch(fail)}>
+        <Plus size={16} /> <span>New chat</span><kbd className="nav-kbd">{shortcutLabel(SHORTCUTS.newChat.keys, mac)}</kbd>
+      </button>
 
       <nav className="nav">
         <NavBtn active={isChat(st.masterChatId ?? "")} working={Object.values(st.agents).some((a) => a.role === "flashmaster" && a.status === "running")}
           onClick={() => st.masterChatId && st.openChat(st.masterChatId)} icon={<Zap size={17} />} label="Master chat" />
         <NavBtn active={st.searchOpen} onClick={() => useStore.setState({ searchOpen: true })} icon={<Search size={17} />} label="Search chats"
-          extra={<kbd className="nav-kbd">{shortcutLabel(SHORTCUTS.search.keys, st.window?.platform === "darwin")}</kbd>} />
+          extra={<kbd className="nav-kbd">{shortcutLabel(SHORTCUTS.search.keys, mac)}</kbd>} />
         <NavBtn active={view.kind === "agents"} onClick={() => st.setView({ kind: "agents" })} icon={<Bot size={17} />} label="Agents"
           extra={running > 0 && <span className="badge">{running}</span>} />
         <NavBtn active={view.kind === "review"} onClick={() => st.setView({ kind: "review" })} icon={<GitBranch size={17} />} label="Review"
@@ -137,40 +79,25 @@ export function Sidebar() {
       </div>
       <div className="projects">
         {st.projects.length === 0 && <div className="empty-hint">Add a local folder to start.</div>}
-        {st.projects.map((p) => {
-          const chats = (st.chats[p.id] ?? []).filter((c) => !c.archived).sort(byPinned);
-          const archived = (st.chats[p.id] ?? []).filter((c) => c.archived);
-          return (
-            <div key={p.id} className="project">
-              <div className={`project-row ${st.currentProjectId === p.id ? "current" : ""}`} onContextMenu={(e) => openMenu(e, projectMenu(p))}>
-                {renaming === `project:${p.id}` ? (
-                  // window.prompt() isn't supported in Electron: rename inline, like chats.
-                  <RenameInput key={`project:${p.id}`} initial={p.name} onCancel={() => setRenaming(null)}
-                    onDone={async (n) => { setRenaming(null); if (n && n !== p.name) { await api().renameProject(p.id, n); await st.refreshProjects(); } }} />
-                ) : (
-                  <button className="project-name" title={p.path} onClick={() => setOpen((o) => ({ ...o, [p.id]: !o[p.id] }))}
-                    onDoubleClick={() => setRenaming(`project:${p.id}`)} onKeyDown={(e) => { if (e.key === "F2") setRenaming(`project:${p.id}`); }}>
-                    <ChevronRight size={14} className={`chev ${open[p.id] ? "open" : ""}`} /> <span className="project-label">{p.name}</span>
-                  </button>
-                )}
-                <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
-                <button className="icon-btn" title="New chat" onClick={() => newChat(p.id)}><Plus size={15} /></button>
-              </div>
-              {open[p.id] && <div className="chat-list">
-                {chats.map((c) => chatRow(c))}
-                {archived.length > 0 && (
-                  <button className="archived-toggle" onClick={() => setShowArchived((o) => ({ ...o, [p.id]: !o[p.id] }))}>
-                    <Archive size={12} /> {showArchived[p.id] ? "Hide" : "Show"} archived ({archived.length})
-                  </button>
-                )}
-                {showArchived[p.id] && archived.map((c) => chatRow(c))}
-              </div>}
-            </div>
-          );
-        })}
-        <NoProjectSection chats={st.chats[NO_PROJECT] ?? []} open={open[NO_PROJECT] ?? true} showArchived={!!showArchived[NO_PROJECT]}
-          onToggle={() => setOpen((o) => ({ ...o, [NO_PROJECT]: !(o[NO_PROJECT] ?? true) }))}
-          onToggleArchived={() => setShowArchived((o) => ({ ...o, [NO_PROJECT]: !o[NO_PROJECT] }))} row={chatRow} />
+        {st.projects.map((p) => (
+          <div key={p.id} className={`project-row ${inChat && st.currentProjectId === p.id ? "current" : ""}`} onContextMenu={(e) => openMenu(e, projectMenu(p))}>
+            {renaming === `project:${p.id}` ? (
+              // window.prompt() isn't supported in Electron: rename inline.
+              <RenameInput key={`project:${p.id}`} initial={p.name} onCancel={() => setRenaming(null)}
+                onDone={async (n) => { setRenaming(null); if (n && n !== p.name) { await api().renameProject(p.id, n); await st.refreshProjects(); } }} />
+            ) : (
+              <button className="project-name" title={`${p.path}\nOpens the chat you last had open here`} onClick={() => void openProjectChat(p.id).catch(fail)}
+                onDoubleClick={() => setRenaming(`project:${p.id}`)} onKeyDown={(e) => { if (e.key === "F2") setRenaming(`project:${p.id}`); }}>
+                <Folder size={15} className="project-icon" /> <span className="project-label">{p.name}</span>
+                {busyKeys.has(p.id) && <span className="pulse" title="An agent is working here" />}
+              </button>
+            )}
+            <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
+            <button className="icon-btn" title="New chat" onClick={() => void newChatIn(p.id).catch(fail)}><Plus size={15} /></button>
+          </div>
+        ))}
+        <NoProjectSection count={(st.chats[NO_PROJECT] ?? []).filter((c) => !c.archived).length} current={inChat && st.currentProjectId === null}
+          busy={busyKeys.has(NO_PROJECT)} onOpen={() => void openProjectChat(null).catch(fail)} />
       </div>
 
       {st.update && ["available", "downloading", "ready"].includes(st.update.status) && (
@@ -190,29 +117,15 @@ export function Sidebar() {
   );
 }
 
-/** Agents and chats whose project couldn't be determined (started from the master chat with no project selected). */
-function NoProjectSection({ chats: all, open, showArchived, onToggle, onToggleArchived, row }: {
-  chats: Chat[]; open: boolean; showArchived: boolean; onToggle: () => void; onToggleArchived: () => void; row: (c: Chat) => ReactNode;
-}) {
-  if (!all.length) return null;
-  const chats = all.filter((c) => !c.archived).sort(byPinned);
-  const archived = all.filter((c) => c.archived);
+/** Agents and chats whose project couldn't be determined (started from the master chat with no project selected): one row like a project. */
+function NoProjectSection({ count, current, busy, onOpen }: { count: number; current: boolean; busy: boolean; onOpen: () => void }) {
+  if (!count) return null;
   return (
-    <div className="project no-project">
-      <div className="project-row">
-        <button className="project-name" title="Chats and agents that don't belong to a project" onClick={onToggle}>
-          <ChevronRight size={14} className={`chev ${open ? "open" : ""}`} /> <span className="project-label">No project</span>
-        </button>
-      </div>
-      {open && <div className="chat-list">
-        {chats.map((c) => row(c))}
-        {archived.length > 0 && (
-          <button className="archived-toggle" onClick={onToggleArchived}>
-            <Archive size={12} /> {showArchived ? "Hide" : "Show"} archived ({archived.length})
-          </button>
-        )}
-        {showArchived && archived.map((c) => row(c))}
-      </div>}
+    <div className={`project-row no-project ${current ? "current" : ""}`}>
+      <button className="project-name" title="Chats and agents that don't belong to a project" onClick={onOpen}>
+        <Folder size={15} className="project-icon" /> <span className="project-label">No project</span>
+        {busy && <span className="pulse" title="An agent is working here" />}
+      </button>
     </div>
   );
 }

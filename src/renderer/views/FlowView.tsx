@@ -2,6 +2,7 @@ import { ResizeHandle } from "../components/ResizeHandle";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check, Circle, CircleAlert, CircleCheck, Compass as CompassIcon, CornerLeftUp, Expand, KeyRound, MessageSquare, Pause, RoleIcon, Wrench, X, type LucideIcon } from "../components/icons";
 import { Dots } from "../components/Dots";
+import { SheetTabs } from "../components/SheetTabs";
 import type { AgentEvent, AgentFlow, AgentRun, PlanStep } from "@shared/types";
 import { agentTitle, ago, api, fmtTokens, roleOf, useStore } from "../store";
 import { creditsText } from "@shared/usage-label";
@@ -129,25 +130,23 @@ function Timeline({ events }: { events: AgentEvent[] }) {
 }
 
 /** Side panel inside a chat: pick one of the chat's agents (incl. delegated specialists) and follow its flow. */
-export function FlowPanel({ chatId, agentId, onClose }: { chatId: string; agentId: string | null; onClose: () => void }) {
+export function FlowPanel({ chatId, agentId }: { chatId: string; agentId: string | null }) {
   const agents = Object.values(useStore((s) => s.agents)).filter((a) => a.chatId === chatId).sort((a, b) => b.startedAt - a.startedAt);
   const [sel, setSel] = useState<string | null>(agentId);
   useEffect(() => { if (agentId) setSel(agentId); }, [agentId]);
   const current = sel ?? agents.find((a) => a.status === "running")?.id ?? agents[0]?.id ?? null;
   return (
     <aside className="thread flow-panel">
-      <header className="thread-header">
-        <strong className="row gap-s"><CompassIcon size={15} className="h-icon" /> Progress</strong>
-        <div className="row gap-s">
-          {agents.length > 0 && (
-            <select value={current ?? ""} onChange={(e) => setSel(e.target.value)}>
-              {agents.map((a) => <option key={a.id} value={a.id}>{agentTitle(a)} · {a.status}</option>)}
-            </select>
-          )}
-          {current && <button className="ghost icon-only" title="Open full page" onClick={() => useStore.getState().setView({ kind: "flow", agentId: current })}><Expand size={15} /></button>}
-          <button className="ghost icon-only" title="Close" onClick={onClose}><X size={15} /></button>
+      <SheetTabs chatId={chatId} current="progress">
+        {current && <button className="it-collapse" title="Open full page" onClick={() => useStore.getState().setView({ kind: "flow", agentId: current })}><Expand size={15} /></button>}
+      </SheetTabs>
+      {agents.length > 0 && (
+        <div className="sheet-sub">
+          <select value={current ?? ""} onChange={(e) => setSel(e.target.value)} title="Agent to follow">
+            {agents.map((a) => <option key={a.id} value={a.id}>{agentTitle(a)} · {a.status}</option>)}
+          </select>
         </div>
-      </header>
+      )}
       <div className="flow-scroll">
         {current ? <FlowChart agentId={current} onSelect={setSel} compact /> : <div className="empty">No agent has worked in this chat yet.</div>}
       </div>

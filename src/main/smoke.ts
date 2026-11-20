@@ -256,23 +256,14 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(4500);
       await js(`[...document.querySelectorAll('.msg-agent .msg-actions button')].find(b=>b.title==='Reply in thread')?.click()`);
       await sleep(500);
-      await send("@reviewer double-check the signal scaling", ".inline-thread.open .composer2 textarea");
+      await send("@reviewer double-check the signal scaling", ".side-sheet .tpl-item.open .composer2 textarea");
       await sleep(5500);
       await js(`(async()=>{const st=window.flash.api;const chats=await st.listChats((await st.listProjects())[0].id);const msgs=await st.listMessages(chats[0].id,null);const a=msgs.find(m=>m.author==='agent');if(a){await st.toggleReaction(a.id,'👍');await st.toggleReaction(a.id,'🚀');}})()`);
       await sleep(600);
       await shot(join(demo, "2-chat-thread-reactions.png"));
-      // Threads open inline under their message: show the card from its header, then collapse it back to the pill
-      await js(`document.querySelector('.inline-thread.open')?.closest('.msg')?.scrollIntoView({block:'start'})`);
-      await sleep(300);
-      await shot(join(demo, "2-thread-inline-open.png"));
-      await js(`document.querySelector('.thread-pill.open')?.click()`);
-      await sleep(600);
-      await shot(join(demo, "2-thread-inline-collapsed.png"));
-      // The classic side panel, then the same thread popped out into its own window
-      await js(`document.querySelector('.thread-pill')?.click()`);
-      await sleep(700);
-      await js(`document.querySelector('.inline-thread.open button[title="Show in Threads panel"]')?.click()`);
-      await sleep(900);
+      // Threads open in the floating side sheet; the chat keeps only the "N replies" chip.
+      await js(`document.querySelector('.thread-pill')?.closest('.msg')?.scrollIntoView({block:'center'})`);
+      await sleep(400);
       await shot(join(demo, "2-threads-panel.png"));
       // Thread cleanup: the row menu (archive / delete), then the archived thread in its own section and as a chip in the chat
       await js(`document.querySelector('.threads-panel .tpl-item button[title="Thread actions"]')?.click()`);
@@ -288,14 +279,12 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(200);
       await click("Restore thread", ".ctx-item");
       await sleep(500);
-      await js(`document.querySelector('.threads-panel button[title="Collapse the Threads panel"]')?.click()`);
+      await js(`document.querySelector('.side-sheet button[aria-label="Close side sheet"]')?.click()`);
       await sleep(500);
-      await shot(join(demo, "2-threads-panel-rail.png"));
-      await js(`document.querySelector('.threads-panel .tpl-rail-btn')?.click()`);
-      await sleep(300);
+      await shot(join(demo, "2-sheet-closed.png"));
       await js(`document.querySelector('.thread-pill')?.click()`);
       await sleep(700);
-      await js(`document.querySelector('.inline-thread.open button[title="Open in new window"]')?.click()`);
+      await js(`document.querySelector('.side-sheet .tpl-item button[title="Open in new window"]')?.click()`);
       await sleep(3500);
       const tw = BrowserWindow.getAllWindows().find((w) => w !== win && w.webContents.getURL().includes("#thread/"));
       if (tw) { writeFileSync(join(demo, "2-thread-window.png"), (await tw.webContents.capturePage()).toPNG()); tw.close(); }
@@ -643,7 +632,7 @@ async function smokeChatWindow(win: BrowserWindow, js: <T = unknown>(code: strin
   for (let i = 0; i < 40 && !cw; i++) { cw = others().find((w) => !before.has(w)); if (!cw) await sleep(250); }
   if (!cw) return "no window";
   let rendered = false;
-  for (let i = 0; i < 60 && !rendered; i++) { await sleep(250); rendered = await cw.webContents.executeJavaScript("!!document.querySelector('.chat-popout .chat-header')").catch(() => false); }
+  for (let i = 0; i < 60 && !rendered; i++) { await sleep(250); rendered = await cw.webContents.executeJavaScript("!!document.querySelector('.chat-popout .chat-top')").catch(() => false); }
   if (!rendered) { const url = cw.webContents.getURL(); cw.close(); return `chat not rendered (${url.slice(url.indexOf("#")) || url || "no url"})`; }
   const second = await open();
   await sleep(400);

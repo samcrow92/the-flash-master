@@ -67,8 +67,6 @@ a { color: var(--blue); }
 .projects { overflow: auto; flex: 1 1 auto; min-height: 60px; }
 .project-row { display: flex; align-items: center; }
 .project-row.current .project-name { color: var(--accent); }
-.chat-link { padding-left: 24px; font-size: 13px; color: var(--muted); }
-.chat-link.active { color: var(--fg); }
 .chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
@@ -487,19 +485,7 @@ button.icon-only { display: inline-grid; place-content: center; padding: 4px 6px
 /* ===================== sidebar chats ===================== */
 .chev { transition: transform .18s ease; color: var(--muted); }
 .chev.open { transform: rotate(90deg); }
-.chat-list { animation: list-open .2s ease-out; }
 @keyframes list-open { from { opacity: 0; transform: translateY(-4px); } }
-.chat-link { cursor: pointer; position: relative; }
-.chat-link .chat-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-link .row-more { opacity: 0; background: none; border: none; padding: 0 2px; color: var(--muted); display: inline-grid; transition: opacity .12s; }
-.chat-link:hover .row-more, .chat-link:focus-visible .row-more, .chat-link.active .row-more { opacity: 1; }
-.chat-link .row-more:hover { color: var(--fg); }
-.chat-link.archived { opacity: .6; font-style: italic; }
-.chat-pin { color: var(--accent); flex: none; }
-.chat-link.archived .chat-pin { color: var(--muted); }
-.chat-rename { margin: 1px 0 1px 20px; width: calc(100% - 20px); font-size: 13px; padding: 4px 6px; }
-.archived-toggle { background: none; border: none; color: var(--muted); font-size: 11.5px; padding: 3px 8px 3px 26px; display: flex; gap: 5px; align-items: center; }
-.archived-toggle:hover { color: var(--fg); }
 .project-row .icon-btn { opacity: .55; }
 .project-row:hover .icon-btn { opacity: 1; }
 
@@ -871,9 +857,8 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .tool-run.stopped, .tool-run.st-failed.stopped { border-color: color-mix(in srgb, var(--muted) 25%, transparent); }
 .tool-run-stopped { color: var(--muted); }
 
-/* ===================== inline threads ===================== */
-/* Replies open under their message in the same chat: a frosted card that grows (grid 0fr → 1fr), with a spine
-   joining the reply avatars and replies that cascade in. Collapsing runs the same curve backwards. */
+/* ===================== thread chip ===================== */
+/* The "N replies" chip under a message; the thread itself opens in the side sheet's Threads tab. */
 :root { --it-ease: cubic-bezier(.22,.9,.24,1); }
 .thread-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 4px; border-radius: 999px; font-size: 12px; font-weight: 500;
   color: var(--blue); border: 1px solid color-mix(in srgb, var(--blue) 26%, var(--line)); background: color-mix(in srgb, var(--blue) 9%, transparent);
@@ -887,42 +872,15 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .tp-face .role-badge.sys { width: 18px; height: 18px; }
 .tp-last { color: var(--muted); font-weight: 400; }
 .tp-chev { transition: transform .34s var(--it-ease); opacity: .8; }
-.thread-pill.open .tp-chev { transform: rotate(180deg); }
+.thread-pill.open .tp-chev { transform: translateX(2px); }
 
-.inline-thread { display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px) scale(.985); transform-origin: top left; margin-top: 0;
-  transition: grid-template-rows .38s var(--it-ease), opacity .26s ease, transform .38s var(--it-ease), margin-top .38s var(--it-ease); }
-.inline-thread.open { grid-template-rows: 1fr; opacity: 1; transform: none; margin-top: 8px; }
-.it-clip { min-height: 0; overflow: hidden; padding: 0 2px 4px; }
-.it-card { position: relative; border-radius: 14px; overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--fg) 9%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg2) 82%, transparent), color-mix(in srgb, var(--bg2) 62%, transparent));
-  backdrop-filter: blur(20px) saturate(1.5);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent), 0 12px 32px -20px rgba(0,0,0,.55); }
-[data-theme="light"] .it-card { box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 12px 30px -20px rgba(20,30,60,.35); }
-.it-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 6px 14px; font-size: 12px; }
-.it-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--fg); }
-.it-title svg { color: var(--blue); }
-.it-sub { color: var(--muted); }
 .it-collapse { display: inline-grid; place-content: center; width: 26px; height: 26px; padding: 0; border-radius: 50%;
   background: transparent; border: 1px solid transparent; color: var(--muted); }
 .it-collapse:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.it-list { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 6px 6px; }
-/* The spine: a soft line through the centre of the reply avatars (6px list pad + 10px msg pad + 12px half-avatar). */
-.it-list:has(.it-item + .it-item)::before { content: ""; position: absolute; left: 27px; top: 20px; bottom: 26px; width: 2px; border-radius: 2px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 40%, transparent), color-mix(in srgb, var(--blue) 8%, transparent)); }
 .it-item { position: relative; }
-.inline-thread .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 10px; animation: none; }
-.inline-thread .avatar { width: 24px; height: 24px; font-size: 12px; position: relative; z-index: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg2) 90%, transparent); border-radius: 50%; }
-.inline-thread .msg-head { font-size: 12.5px; }
-.inline-thread .msg-footer { min-height: 0; }
-.inline-thread.open .it-item { animation: it-item-in .42s var(--it-ease) both; animation-delay: calc(80ms + var(--i, 0) * 40ms); }
 @keyframes it-item-in { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
 .it-empty { color: var(--muted); font-size: 12.5px; padding: 4px 10px 8px; }
 .it-loading { padding: 6px 12px 10px; }
-.it-card .composer-wrap { background: color-mix(in srgb, var(--bg) 35%, transparent); border-top: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); }
-/* Hovering inside a thread highlights the reply, not the parent message around it. */
-.msg:has(.inline-thread:hover) { background: transparent; }
-.msg:has(.inline-thread:hover) > .msg-body > .msg-footer .msg-actions { display: none; }
 
 /* Header tools on a thread: open in side panel, open in new window, collapse / close. */
 .it-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
@@ -938,6 +896,7 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .thread-side .avatar { width: 24px; height: 24px; font-size: 12px; }
 .thread-window { height: 100vh; display: grid; background: var(--bg); }
 .thread-standalone { border-left: none; animation: none; }
+.thread-window .sys-line { margin-left: 32px; }
 .chat-window { height: 100vh; display: grid; background: var(--bg); min-height: 0; }
 .chat-window > .chat-layout { min-height: 0; }
 
@@ -1386,12 +1345,11 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .msg.side-right > .msg-body > .msg-content:has(.edit-box) { width: 100%; max-width: 100%; }
 .msg.side-right > .msg-body > .msg-footer { justify-content: flex-end; }
 .msg.side-right > .msg-body > .msg-footer .emoji-picker { left: auto; right: 0; }
-.msg.side-right > .msg-body > .inline-thread { align-self: stretch; transform-origin: top right; }
 .msg.side-right .msg-atts { justify-content: flex-end; }
 /* Agent replies leave a gutter on the right so the two sides read apart (not in narrow thread columns). */
 .messages-inner > .vl-item > .msg.side-left:not(.msg-system) > .msg-body { padding-right: 44px; }
-.inline-thread .msg.side-right, .thread-side .msg.side-right, .threads-panel .msg.side-right { grid-template-columns: minmax(0, 1fr) 24px; }
-.inline-thread .msg.side-right > .msg-body > .msg-content, .thread-side .msg.side-right > .msg-body > .msg-content,
+.thread-side .msg.side-right, .threads-panel .msg.side-right { grid-template-columns: minmax(0, 1fr) 24px; }
+.thread-side .msg.side-right > .msg-body > .msg-content,
 .threads-panel .msg.side-right > .msg-body > .msg-content { max-width: 88%; }
 
 /* ===================== Threads panel ===================== */
@@ -1400,13 +1358,7 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .threads-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line);
   background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .tpl-full { position: relative; width: min(var(--threads-w, 340px), max(260px, 45vw)); animation: side-in .34s var(--it-ease); }
-.tpl-rail { width: 46px; align-items: center; padding-top: 10px; }
-.tpl-rail-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 34px; padding: 8px 0; border-radius: 12px;
-  background: transparent; border: 1px solid transparent; color: var(--muted); }
-.tpl-rail-btn:hover { color: var(--fg); background: var(--glass-strong); border-color: var(--rim); box-shadow: var(--hi); }
-.tpl-rail-icon { position: relative; display: inline-grid; color: var(--blue); }
 .tpl-dot { position: absolute; top: -2px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); animation: breathe 1.6s ease-in-out infinite; }
-.tpl-rail-count { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tpl-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); }
 .tpl-head strong { display: inline-flex; align-items: center; gap: 6px; }
 .tpl-head strong svg { color: var(--blue); }
@@ -1448,7 +1400,6 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 /* An archived thread in the chat: a small muted chip instead of the "N replies" pill. */
 .thread-pill.archived { color: var(--muted); background: color-mix(in srgb, var(--fg) 5%, transparent); padding-left: 8px; }
 .thread-pill.archived:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 9%, transparent); box-shadow: none; }
-.it-archived-note { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
 .tpl-replies { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 2px 4px; }
 .tpl-replies .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 8px; animation: none; }
 .tpl-replies .msg-body { min-width: 0; }
@@ -1457,7 +1408,6 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .tpl-replies .msg-footer { min-height: 0; }
 .tpl-replies .it-item { animation: it-item-in .42s var(--it-ease) both; animation-delay: calc(60ms + var(--i, 0) * 35ms); }
 .tpl-body .composer-wrap { background: color-mix(in srgb, var(--bg) 35%, transparent); border-top: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); border-radius: 0 0 14px 14px; }
-.tp-where { display: inline-grid; opacity: .8; }
 @media (prefers-reduced-motion: reduce) { .tpl-full, .tpl-body, .tpl-replies .it-item { animation: none; } }
 /* ---------- Review: an agent's branch with diffs, line comments, Merge/Discard ---------- */
 .review-page { gap: 12px; }
@@ -1717,7 +1667,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .sys-line { display: flex; align-items: flex-start; gap: 7px; margin: 2px 0 8px 46px; color: var(--muted); font-size: var(--fs-s); max-width: 920px; }
 .sys-line > svg { flex: none; margin-top: 3px; }
 .sys-line .md p { margin: 0; }
-.inline-thread .sys-line, .thread-window .sys-line { margin-left: 32px; }
 
 /* "Needs you" cards: an agent waits for the user. Glass, one accent edge per kind, quick answers as pills. */
 .ask-card { --ak: var(--blue); margin: 4px 0 2px; padding: 12px 14px 12px; max-width: 720px; border-radius: 14px;
@@ -1854,3 +1803,101 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 /* a narrower chat box keeps the strip: no rev bar, and only the lit mode spells its name */
 @container (max-width: 900px) { .ds-rev { display: none; } .ds-seg:not(.on) .ds-full { display: none; } .ds-seg:not(.on) .ds-short { display: inline; } .ds-seg { padding: 0 8px; } }
 @media (prefers-reduced-motion: reduce) { .ds-glint { animation: none; display: none; } }
+
+/* =====================================================================================================
+   Codex-style layout: a centred chat column, one floating side sheet (Threads / Progress / Artifacts) instead of
+   fixed panes, and a sidebar with navigation and projects only (chats are switched from the chat's title or search).
+   ===================================================================================================== */
+/* Sidebar: New chat on top, projects as single rows that reopen their last chat. */
+.new-chat-btn { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; margin: 2px 0 8px; border-radius: 11px; font-weight: 600; text-align: left;
+  background: var(--bg2); border: 1px solid var(--line); box-shadow: var(--hi); }
+.new-chat-btn svg { color: var(--accent); flex: none; }
+.new-chat-btn .nav-kbd { margin-left: auto; }
+.new-chat-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 9%, transparent); border-color: var(--line); }
+.projects { display: flex; flex-direction: column; gap: 1px; }
+.project-row .project-name { gap: 9px; min-width: 0; }
+.project-icon { color: var(--muted); flex: none; }
+.project-row.current .project-name, [data-theme="light"] .project-row.current .project-name { color: var(--fg); background: color-mix(in srgb, var(--fg) 9%, transparent); }
+.project-row.current .project-icon { color: var(--accent); }
+.project-name .pulse { margin-left: auto; flex: none; }
+.project-row .icon-btn { opacity: 0; transition: opacity .12s; }
+.project-row:hover .icon-btn, .project-row:focus-within .icon-btn { opacity: 1; }
+
+/* Chat top bar: project / chat title (both open the switcher), then the side sheet toggles. */
+.chat { container: chat / inline-size; }
+.chat-top { position: relative; z-index: 35; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 12px 4px 14px; }
+/* Specialists and Agents pills live in the top bar now; their lists still drop down as overlays. */
+.chat-top .pill-stack { position: static; flex: none; flex-direction: row; align-items: center; gap: 6px; pointer-events: auto; }
+.messages-area > .messages { padding-top: 6px; }
+.chat-crumb { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.crumb-project, .crumb-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 7px; border: none; border-radius: 8px; background: transparent; }
+.crumb-project { flex: 0 1 auto; max-width: 34%; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.crumb-title { font-size: var(--fs-l); font-weight: 600; }
+.crumb-project:hover:not(:disabled), .crumb-title:hover:not(:disabled) { background: var(--quiet); color: var(--fg); }
+.crumb-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumb-sep { color: var(--muted); opacity: .55; flex: none; }
+.crumb-chev { color: var(--muted); flex: none; }
+.chat-crumb .title-input { min-width: 0; flex: 0 1 320px; margin-left: 4px; }
+.chat-crumb .mode-pill { margin-left: 6px; flex: none; }
+.chat-top .chat-controls { flex: none; gap: 2px; flex-wrap: nowrap; }
+.sheet-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; color: var(--muted); font-size: var(--fs-s); }
+.sheet-btn:hover:not(:disabled) { color: var(--fg); }
+.sheet-btn.on { color: var(--fg); background: color-mix(in srgb, var(--fg) 9%, transparent); }
+.sheet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  color: var(--blue); background: color-mix(in srgb, var(--blue) 16%, transparent); }
+.stop-btn { height: 30px; display: inline-flex; align-items: center; gap: 6px; }
+@container chat (max-width: 900px) { .sheet-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } .sheet-btn { padding: 0 8px; } }
+
+/* One centred reading column for the messages, the composer and the pickers under it. */
+.chat { --col: 780px; }
+.messages { padding: 6px 20px 6px; }
+.messages-inner { width: 100%; max-width: var(--col); margin: 0 auto; }
+.chat > .composer-wrap, .chat > .chat-meta { width: 100%; max-width: calc(var(--col) + 40px); margin: 0 auto; }
+.chat > .composer-wrap { padding: 6px 20px 4px; }
+.chat > .composer-wrap .composer2 { border-radius: 22px; }
+
+/* Replies read as a document: no hover card, no right gutter. Your messages are a soft bubble on the right, no avatar. */
+.messages-inner > .vl-item > .msg { padding: 10px 4px; }
+.messages-inner > .vl-item > .msg:hover { background: transparent; }
+.messages-inner > .vl-item > .msg.side-left:not(.msg-system) > .msg-body { padding-right: 0; }
+.messages-inner > .vl-item > .msg.msg-user { grid-template-columns: minmax(0, 1fr); }
+.messages-inner > .vl-item > .msg.msg-user > .avatar, .messages-inner > .vl-item > .msg.msg-user .msg-head { display: none; }
+.messages-inner > .vl-item > .msg.msg-user > .msg-body { grid-column: 1; }
+.messages-inner > .vl-item > .msg.msg-user > .msg-body > .msg-content { max-width: min(85%, 620px); padding: 9px 15px; border-radius: 20px 20px 6px 20px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent); border: 1px solid var(--line); box-shadow: none; }
+
+/* Pickers for agent, harness and model: quiet text controls under the composer, usage on the right. */
+.chat-meta { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; padding: 0 20px 10px 26px; }
+.chat-meta .ctl select, .chat-meta .ctl input { height: 26px; padding: 0 6px; font-size: var(--fs-s); color: var(--muted); background: transparent; }
+.chat-meta .ctl select:hover, .chat-meta .ctl input:hover, .chat-meta .ctl select:focus, .chat-meta .ctl input:focus { color: var(--fg); background: var(--quiet); }
+.chat-meta .ctl select { max-width: 200px; field-sizing: content; }
+.chat-meta .ctl .model-input-wrap { width: 170px; height: 26px; }
+.chat-meta .ctl .model-input-wrap button { height: 26px; background: transparent; }
+.chat-meta .usage-meter { margin-left: auto; padding: 0; flex: 0 1 auto; min-width: 0; }
+
+/* The side sheet: a floating glass card over the chat's right edge. With room to spare, the chat column moves aside
+   instead of being covered; in a narrow window the sheet floats over it. */
+.chat-layout, .chat-layout.with-thread { position: relative; display: block; height: 100%; container: chatlayout / inline-size; grid-template-columns: none; }
+.chat-layout > .chat { height: 100%; transition: padding-right .32s var(--it-ease); }
+.chat-layout.sheet-threads { --sheet-w: min(var(--threads-w, 340px), max(260px, 45vw)); }
+.chat-layout.sheet-side { --sheet-w: min(var(--side-w, 380px), max(300px, 50vw)); }
+/* Floating over a narrow chat, the sheet starts under the top bar so its toggles stay reachable. */
+@container chatlayout (min-width: 1000px) { .sheet-open > .chat { padding-right: calc(var(--sheet-w) + 12px); } .chat-layout > .side-sheet { top: 8px; } }
+.side-sheet { position: absolute; z-index: 30; top: 56px; right: 8px; bottom: 8px; width: var(--sheet-w); display: flex; overflow: hidden; container: sheet / inline-size;
+  border-radius: 16px; background: var(--glass-strong); backdrop-filter: var(--blur); border: 1px solid var(--rim); box-shadow: var(--hi), var(--shadow);
+  animation: sheet-in .32s var(--it-ease); }
+@keyframes sheet-in { from { opacity: 0; transform: translateX(18px) scale(.985); } }
+@media (prefers-reduced-motion: reduce) { .side-sheet { animation: none; } .chat-layout > .chat { transition: none; } }
+.side-sheet > aside { position: relative; flex: 1; width: auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: none; background: transparent; animation: none; }
+.side-sheet > .tpl-full { width: auto; }
+.sheet-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 10px; flex: none; }
+.sheet-tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: color-mix(in srgb, var(--fg) 6%, transparent); min-width: 0; }
+.sheet-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: none; border-radius: 8px; background: transparent;
+  color: var(--muted); font-size: var(--fs-s); font-weight: 500; white-space: nowrap; }
+.sheet-tabs button:hover:not(:disabled) { color: var(--fg); background: transparent; }
+.sheet-tabs button.on { color: var(--fg); background: var(--knob); box-shadow: 0 1px 3px rgba(0, 0, 0, .2), var(--hi); }
+.sheet-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.sheet-sub { padding: 0 12px 8px; flex: none; }
+.sheet-sub select { width: 100%; }
+@container sheet (max-width: 340px) { .sheet-tabs button svg { display: none; } .sheet-tabs button { padding: 0 8px; } }
+
