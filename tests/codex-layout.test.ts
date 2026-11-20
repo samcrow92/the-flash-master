@@ -88,8 +88,9 @@ describe("composer", () => {
     expect(bar).toContain("<ModeBar");
     expect(bar).toContain("<DuoStrip");
     expect(tsx.split("<ModeBar ").length - 1).toBe(1);
-    // A Duo chat shows one selector: Duo's strip, plus the drive modes only while one is set.
-    expect(bar).toContain("(!duo || chat.mode) && <ModeBar");
+    // A Duo chat shows only Duo's strip, never both (Mari, 2026-11-20: "replace the default one with the duo one").
+    expect(bar).toContain("settings && !duo && <ModeBar");
+    expect(tsx).toContain("if (!compact && duo && chat.mode) void patchChat({ mode: null })");
     const css = read("src/renderer/styles.css");
     expect(css).not.toContain(".composer-wrap > .mode-bar");
     // Drive modes on any chat use the same slanted strip as Duo's (Mari, 2026-11-20).

@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Mouse
 import { useVirtualList } from "../components/virtual";
 import { ToolRuns } from "../components/ToolRuns";
 import type { Chat, HarnessId, Message } from "@shared/types";
+import { harnessPickPatch } from "@shared/settings";
 import { planEdit, planRetry } from "@shared/rewind";
 import { isNoticeLine } from "@shared/replyParts";
 import { HARNESS_IDS } from "@shared/types";
@@ -198,7 +199,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
           </label>
           <label className="ctl" title="Harness used for new agent sessions in this chat">
             <span>Harness</span>
-            <select value={chat.harness ?? ""} onChange={(e) => update({ harness: (e.target.value || null) as HarnessId | null })}>
+            <select value={chat.harness ?? ""} onChange={(e) => update(harnessPickPatch(chat, (e.target.value || null) as HarnessId | null))}>
               <option value="">auto</option>
               {HARNESS_IDS.filter((h) => h !== "mock" || st.settings?.advanced.showMockHarness).map((h) => h === "duo" && !chat.projectId
                 ? <option key={h} value={h} disabled title="GitLab Duo runs in project chats only">duo (project chats only)</option>
