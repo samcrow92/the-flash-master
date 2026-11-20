@@ -97,6 +97,11 @@ describe("composer", () => {
     expect(modeBar).toContain('className={`duo-strip drive-strip');
     expect(modeBar).toContain('className={`ds-seg ds-${m}');
     expect(modeBar).not.toContain("mode-btn");
+    // The rest of the row speaks the same language (Mari, 2026-11-20): every button is a slanted ds-seg, Send included.
+    const buttons = bar.match(/<button className=\{?["`][^"`]*["`]/g) ?? [];
+    expect(buttons.length).toBeGreaterThan(5);
+    for (const b of buttons) expect(b, b).toMatch(/ds-seg/);
+    expect(css).toMatch(/\.composer2 \.composer-bar \.send \{[^}]*transform: skewX\(-18deg\)/);
     // Duo's strip keeps its full labels at the chat column's width (it is 780px wide).
     expect(css).toMatch(/@container \(max-width: 560px\) \{ \.ds-rev/);
   });

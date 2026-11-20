@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **One automotive look for the whole message bar.** Attach, @, /, Superpowers, Autopilot, reset context, Steer / Queue and Send now share the drive strip's slanted segments. Tools stay quiet until you hover them. Superpowers (gold) and Autopilot (blue) light up with the same glint as a drive mode when switched on. Send is the accent "start" key at the end of the row.
 - **Fix: project chats in the sidebar no longer expanded.** Click a project to fold its chats open or shut again, with pinned chats on top and archived ones behind a toggle. Each chat row has its menu (rename, pin, reset context, copy, archive, delete). The app remembers which projects are open, and the project of the chat you open expands by itself. Thread replies still stay out of the sidebar and open in the chat's side sheet.
 - **Drive modes look like Duo's.** On every chat, LOCAL, ECO, COMFORT and SPORT now use the same slanted, car-style strip beside Send as Duo chats, with chevrons that grow with power and a glint on the mode you pick.
 - **Fix: the drive modes hung under the message box and Duo's modes showed only A, E, C, S.** Everything now sits in the one row under your message. The drive modes (LOCAL, ECO, COMFORT, SPORT) are beside Send. On a Duo chat, Duo's strip takes their place with its full AUTO, ECO, COMFORT and SPORT labels. When the window gets narrow, the Superpowers and Autopilot words go first, then the mode names, and the icons stay.
