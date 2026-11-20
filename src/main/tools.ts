@@ -119,6 +119,8 @@ export function buildTools(d: {
         agentId: s("only for a follow-up: the agentId an earlier delegate returned; the same instance continues with its context. Leave out to start a new specialist"),
         folder: s("run the specialist in this folder instead of the project folder (absolute, ~/…, or relative to the project). GitLab Duo (harness duo) only runs in GitLab repositories, so point it at one"),
         local: { type: "boolean", description: "true when the work must stay on a local model (the user or brief asks for local inference / no hosted model): it runs on Pi or OpenCode with your model, the role's, or the user's LOCAL profile, never on a hosted harness like Duo. Roles marked local always do" },
+        mode: { type: "string", enum: ["eco", "comfort", "sport"], description: "how hard the task is, to spend tokens where they matter: eco = simple lookups and edits, comfort = ordinary work, sport = hard problems (root cause, design, concurrency). Runs on the user's matching drive-mode model unless you name harness or model" },
+        attempts: { type: "number", description: "best of N (2-3) for a hard or risky code change: N specialists try it independently in their own copies; the app returns the winner (checks pass, then smallest change) and keeps the others for the user. Always waits" },
       }, ["role", "goal"]),
       handler: (a, c) => d.orch.delegate(c.agentId, a),
     },

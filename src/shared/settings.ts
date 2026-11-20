@@ -107,6 +107,12 @@ export interface Settings {
     noProjectFolder: string;
     /** Send pstack's unslop writing rules (skills/pstack/unslop.md) to every agent, for replies and for text written through tools. */
     unslop: boolean;
+    /** Wall-clock limit per delegated task (minutes, 0 = none): the specialist is told to wrap up, then stopped. */
+    maxTaskMinutes: number;
+    /** Most parallel attempts a best-of-N delegation may start (delegate `attempts`). */
+    maxAttempts: number;
+    /** Pick ECO / COMFORT / SPORT for a delegation by how hard its brief looks, when the coordinator names none. */
+    autoRoute: boolean;
   };
   /** Task board auto-cleanup; Review tasks and tasks with a working agent are always kept. */
   tasks: {
@@ -146,6 +152,8 @@ export interface Settings {
     economyModel: string;
     economyForDelegated: boolean; // run delegated specialists on the economy harness/model
     showTokenCounts: boolean;
+    /** Tokens one request may spend across the coordinator's whole tree (coordinator, specialists, helpers); 0 = unlimited. */
+    taskBudget: number;
   };
   permissions: {
     approval: ApprovalPolicy;
@@ -369,7 +377,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL, orchestratorRules: "", modes: DUO_MODE_DEFAULTS },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true, maxTaskMinutes: 120, maxAttempts: 3, autoRoute: false },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   server: { url: "", hasToken: false },
@@ -387,6 +395,7 @@ export const DEFAULT_SETTINGS: Settings = {
     economyModel: "",
     economyForDelegated: false,
     showTokenCounts: true,
+    taskBudget: 1_000_000,
   },
   permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force", rules: DEFAULT_RULES, hooks: "" },
   checks: { enabled: true, commands: "", autoRun: true, requireForMerge: true, maxFixRounds: 2, timeoutMinutes: 15 },
