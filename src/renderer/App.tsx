@@ -1,4 +1,5 @@
 import { ImageViewer } from "./components/ImageViewer";
+import { HtmlViewer } from "./components/HtmlViewer";
 import { useEffect, useReducer } from "react";
 import { dragReducer, hasFiles, idle } from "./fileDrag";
 import { reportImports } from "./components/AgentImport";
@@ -102,6 +103,7 @@ export function App() {
       <CommandPalette />
       <SearchDialog />
       <ImageViewer />
+      <HtmlViewer />
       <div className="toasts">
         {toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}
       </div>

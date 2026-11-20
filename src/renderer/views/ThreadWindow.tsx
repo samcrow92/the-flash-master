@@ -1,4 +1,5 @@
 import { ImageViewer } from "../components/ImageViewer";
+import { HtmlViewer } from "../components/HtmlViewer";
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { ThreadPanel } from "./ChatView";
@@ -35,6 +36,7 @@ export function ThreadWindow({ chatId, rootId }: { chatId: string; rootId: strin
       <ThreadPanel chatId={chatId} rootId={rootId} standalone />
       <ContextMenuHost />
       <ImageViewer />
+      <HtmlViewer />
       <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast toast-${t.level}`}>{t.text}</div>)}</div>
     </div>
   );

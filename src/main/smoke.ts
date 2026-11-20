@@ -5,6 +5,7 @@
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
  *   FLASH_SMOKE_IMAGES=<dir>      only images in chats: a pasted picture, an agent screenshot (inline + tool call), the viewer
+ *   FLASH_SMOKE_HTML=<dir>        only HTML reports in chats: the report card, the inline preview and the full viewer, dark and light
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
@@ -112,6 +113,54 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await shot(join(imgDir, "chat-images-light.png"));
       log(imgs >= 3 && viewer ? "info" : "error", `smoke-images: inline=${imgs} viewer=${viewer}`);
       app.exit(imgs >= 3 && viewer ? 0 : 1);
+      return;
+    }
+    const htmlDir = process.env.FLASH_SMOKE_HTML;
+    if (ok && htmlDir) {
+      mkdirSync(htmlDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock" } })`);
+      await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "brake-ecu")`);
+      win.webContents.reload();
+      await sleep(2000);
+      const openChat = async () => { await click("brake-ecu", ".project-name"); await sleep(300); await click("General", ".chat-link"); await sleep(900); };
+      await openChat();
+      await js(`(async()=>{const chatId=document.querySelector('[data-chat]').dataset.chat;await window.flash.api.sendMessage({chatId,content:'Analyse the brake light flicker at cold start and write an html report.'});})()`);
+      await sleep(7000);
+      // The report's own page, inside the sandboxed frame: did its diagram and its script-built table render?
+      const inFrame = async () => {
+        const f = win.webContents.mainFrame.framesInSubtree.find((x) => x.url.startsWith("flash-report://"));
+        return f ? (await f.executeJavaScript(`({ svg: !!document.querySelector('svg'), rows: document.querySelectorAll('#causes tr').length })`)) as { svg: boolean; rows: number } : null;
+      };
+      const pass = { card: false, inline: false, viewer: false };
+      for (const theme of ["dark", "light"] as const) {
+        if (theme === "light") {
+          await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
+          win.webContents.reload();
+          await sleep(2500);
+          await openChat();
+        }
+        await js(`document.querySelector('.html-card:not([hidden])')?.scrollIntoView({block:'center'})`);
+        await sleep(500);
+        pass.card = (await js<number>(`document.querySelectorAll('.html-card:not([hidden])').length`)) === 1; // one card per report, even when linked twice
+        await shot(join(htmlDir, `chat-html-card-${theme}.png`));
+        await js(`document.querySelector('.html-card [data-html-act="inline"]')?.click()`);
+        await sleep(1200);
+        await js(`document.querySelector('.html-card.open')?.scrollIntoView({block:'end'})`);
+        await sleep(400);
+        const inline = await inFrame();
+        pass.inline = !!inline && inline.svg && inline.rows >= 4;
+        await shot(join(htmlDir, `chat-html-inline-${theme}.png`));
+        await js(`document.querySelector('.html-card [data-html-act="full"]')?.click()`);
+        await sleep(1200);
+        pass.viewer = await js<boolean>(`!!document.querySelector('.html-viewer iframe[sandbox][src^="flash-report://"]')`);
+        await shot(join(htmlDir, `html-viewer-${theme}.png`));
+        await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+        await sleep(300);
+      }
+      const good = pass.card && pass.inline && pass.viewer;
+      log(good ? "info" : "error", `smoke-html: ${JSON.stringify(pass)}`);
+      app.exit(good ? 0 : 1);
       return;
     }
     const graphDir = process.env.FLASH_SMOKE_GRAPH;

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, type MouseEvent } from "react";
-import { BARE_LOCAL_PATH, DATA_IMAGE, WEB_LINK, isLocalImage, isLocalPathLink, trimTrailingPunctuation } from "@shared/links";
+import { BARE_LOCAL_PATH, DATA_IMAGE, WEB_LINK, isLocalHtml, isLocalImage, isLocalPathLink, trimTrailingPunctuation } from "@shared/links";
 import { cachedImage, chatOf, hydrateImages, openImage } from "../images";
+import { hydrateHtmlCards, onHtmlCardClick } from "../htmlPreview";
 import { Marked } from "marked";
 import { fishboneSvg } from "@shared/diagrams";
 
@@ -24,10 +25,23 @@ function imageHtml(src: string, alt: string, preview = false): string {
   return `<span class="md-img-wrap${have ? " loaded" : ""}"${preview ? ' data-preview="1"' : ""}><img class="md-img" data-img="${attr(src)}"`
     + `${have ? ` src="${attr(have)}"` : ""} alt="${attr(alt)}" title="${attr(src)} — click to enlarge" /></span>`;
 }
-/** A link; links to local image files also get an inline preview. */
+/** A report card under a link to a local .html file: preview it in the chat or full window (src/renderer/htmlPreview.ts).
+ *  Hidden until the main process confirms the file can be shown (hydrateHtmlCards). */
+function htmlCardHtml(href: string): string {
+  const name = href.replace(/[?#].*$/, "").split(/[\\/]/).pop() ?? href;
+  return `<span class="html-card" data-html="${attr(href)}" hidden><span class="html-card-head">${PAGE_SVG}`
+    + `<span class="html-card-text"><span class="html-card-name">${esc(name)}</span><span class="html-card-sub">HTML report</span></span>`
+    + `<button type="button" class="html-card-btn main" data-html-act="inline" title="Show the report here in the chat">Preview</button>`
+    + `<button type="button" class="html-card-btn" data-html-act="full" title="Review it in a full-window viewer">Full view</button>`
+    + `<button type="button" class="html-card-btn icon" data-html-act="browser" title="Open in your browser" aria-label="Open in your browser">${EXTERNAL_SVG}</button>`
+    + `</span></span>`;
+}
+/** A link; links to local image files also get an inline preview, links to local HTML pages a report card. */
 function linkWithPreview(href: string, inner: string): string | null {
   const a = linkHtml(href, inner);
-  return a && isLocalImage(href) ? `${a}${imageHtml(href, href.split(/[\\/]/).pop() ?? "", true)}` : a;
+  if (a && isLocalImage(href)) return `${a}${imageHtml(href, href.split(/[\\/]/).pop() ?? "", true)}`;
+  if (a && isLocalHtml(href)) return `${a}${htmlCardHtml(href)}`;
+  return a;
 }
 
 const md = new Marked({
@@ -65,13 +79,15 @@ const md = new Marked({
     // `C:\out\report.html` or `https://…` in backticks opens on click; other inline code is click-to-copy.
     codespan: ({ text: raw }) => {
       return (/^\S+$/.test(raw) && (WEB_LINK.test(raw) || (isLocalPathLink(raw) && /[\\/]/.test(raw)))
-        ? linkHtml(raw, `<code class="inline-code">${esc(raw)}</code>`) : null) ?? `<code class="inline-code" title="Click to copy">${esc(raw)}</code>`;
+        ? linkHtml(raw, `<code class="inline-code">${esc(raw)}</code>`)?.concat(isLocalHtml(raw) ? htmlCardHtml(raw) : "") : null) ?? `<code class="inline-code" title="Click to copy">${esc(raw)}</code>`;
     },
   },
 });
 
 const COPY_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
 const FILE_SVG = `<svg class="file-link-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>`;
+const PAGE_SVG = `<svg class="html-card-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/><path d="m9.5 13-2 2 2 2"/><path d="m14.5 13 2 2-2 2"/></svg>`;
+const EXTERNAL_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
 const CHECK_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
 
 /** Links open through the main process; the chat (for relative paths) is the nearest [data-chat] or the open chat. */
@@ -94,6 +110,7 @@ function onLinkClick(e: MouseEvent<HTMLDivElement>, a: HTMLAnchorElement): void 
 /** Link clicks, copy buttons on code blocks and click-to-copy on inline code (event delegation: the HTML is static). */
 function onCopyClick(e: MouseEvent<HTMLDivElement>): void {
   const target = e.target as HTMLElement;
+  if (onHtmlCardClick(target)) { e.preventDefault(); return; }
   if (target instanceof HTMLImageElement && target.classList.contains("md-img") && target.src) {
     e.preventDefault();
     const path = target.dataset.img;
@@ -120,6 +137,9 @@ const prettify = (s: string) => s.replace(/<result>/gi, "\n\n**Result**\n\n").re
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const html = useMemo(() => md.parse(prettify(text), { async: false }) as string, [text]);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (ref.current && html.includes("data-img=")) hydrateImages(ref.current); }, [html]);
+  useEffect(() => {
+    if (ref.current && html.includes("data-img=")) hydrateImages(ref.current);
+    if (ref.current && html.includes("data-html=")) hydrateHtmlCards(ref.current);
+  }, [html]);
   return <div ref={ref} className="md" onClick={onCopyClick} dangerouslySetInnerHTML={{ __html: html }} />;
 });
