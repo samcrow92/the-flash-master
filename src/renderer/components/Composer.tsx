@@ -198,26 +198,50 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
   );
 }
 
+/**
+ * Drive modes beside Send, as the same slanted strip as Duo's (LOCAL, ECO, COMFORT, SPORT): each switches the chat's
+ * model profile (Settings → Modes). Click the lit mode again to go back to the chat's own model; arrow keys step along.
+ */
 function ModeBar({ chat, onChange }: { chat: Chat; onChange: (m: DriveMode | null) => void }) {
   const st = useStore();
   const modes = st.settings?.modes;
+  const strip = useRef<HTMLDivElement>(null);
   if (!modes) return null;
+  const cur = chat.mode ?? null;
+  const usable = DRIVE_MODES.filter((m) => !!modes[m].model || m !== "local");
+  const idx = cur ? DRIVE_MODES.indexOf(cur) : -1;
+  const lit = idx < 0 ? 0 : [2, 3, 5, 7][idx]!;
   return (
-    <div className="mode-bar" title="Drive modes switch the model profile for this chat (configure them in Settings → Modes). Click the active mode again to go back to the chat's own model.">
-      {DRIVE_MODES.map((m) => {
-        const p = modes[m];
-        const configured = !!p.model || m !== "local";
-        const meta = MODE_META[m];
-        return (
-          <button key={m} className={`mode-btn mode-${m} ${chat.mode === m ? "on" : ""}`} disabled={!configured}
-            title={configured ? `${meta.hint}: ${p.harness || "chat harness"} · ${p.model || "default model"}${p.thinking ? ` · ${p.thinking} thinking` : ""}` : "Configure LOCAL in Settings → Modes"}
-            onClick={() => onChange(chat.mode === m ? null : m)}>
-            <span className="mode-label">{meta.icon} {meta.label}</span>
-            <span className="mode-model">{configured ? p.model || "default" : "not set"}</span>
-          </button>
-        );
-      })}
-      <button className="mode-gear" title="Configure modes" onClick={() => st.setView({ kind: "settings", tab: "modes" })}><Settings size={13} /></button>
+    <div ref={strip} className={`duo-strip drive-strip ds-${cur ?? "off"}`} role="radiogroup" aria-label="Drive mode"
+      title="Drive modes switch the model profile for this chat (configure them in Settings → Modes). Click the lit mode again to go back to the chat's own model."
+      onKeyDown={(e) => {
+        const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1 : 0;
+        if (!step || !usable.length) return;
+        e.preventDefault();
+        const at = cur ? usable.indexOf(cur) : step > 0 ? -1 : usable.length;
+        const next = usable[Math.max(0, Math.min(usable.length - 1, at + step))]!;
+        if (next !== cur) onChange(next);
+        strip.current?.querySelectorAll<HTMLButtonElement>(".ds-seg")[DRIVE_MODES.indexOf(next)]?.focus();
+      }}>
+      <div className="ds-segs">
+        {DRIVE_MODES.map((m, i) => {
+          const p = modes[m];
+          const configured = !!p.model || m !== "local";
+          const meta = MODE_META[m];
+          const on = cur === m;
+          return (
+            <button key={m} className={`ds-seg ds-${m} ${on ? "on" : ""}`} role="radio" aria-checked={on} disabled={!configured}
+              tabIndex={on || (!cur && m === usable[0]) ? 0 : -1}
+              title={configured ? `${meta.label}: ${meta.hint} · ${p.harness || "chat harness"} · ${p.model || "default model"}${p.thinking ? ` · ${p.thinking} thinking` : ""}${on ? " (click again for the chat's own model)" : ""}` : "Configure LOCAL in Settings → Modes"}
+              onClick={() => onChange(on ? null : m)}>
+              {on && <i key={m} className="ds-glint" />}
+              <span>{i > 0 && <span className="ds-chev">{Array.from({ length: i }, (_, k) => <i key={k} />)}</span>}<span className="ds-full">{meta.label}</span><span className="ds-short">{meta.label[0]}</span></span>
+            </button>
+          );
+        })}
+      </div>
+      <span className="ds-rev" aria-hidden>{Array.from({ length: 7 }, (_, k) => <i key={k} className={k < lit ? "lit" : ""} style={{ height: 5 + k }} />)}</span>
+      <button className="ds-gear" title="Configure modes" onClick={() => st.setView({ kind: "settings", tab: "modes" })}><Settings size={12} /></button>
     </div>
   );
 }

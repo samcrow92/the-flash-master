@@ -1,30 +1,52 @@
 import { ResizeHandle } from "./ResizeHandle";
-import { useRef, useState, type ReactNode } from "react";
-import type { Project } from "@shared/types";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { Chat, Project } from "@shared/types";
 import { api, useStore } from "../store";
 import { UserAvatar } from "./UserAvatar";
 import { openMenu, type MenuItem } from "./ContextMenu";
-import { Brain,
+import { Archive, ArchiveRestore, Brain, ChevronRight, Copy, Pin, PinOff, RotateCcw,
   BookOpen, Bot, ClipboardList, Folder, FolderOpen, FolderPlus, LayoutDashboard, MessageSquarePlus,
   Download, GitBranch, MoreHorizontal, Pencil, Plus, Puzzle, Search, Settings, SquareKanban, Trash2, Zap,
 } from "./icons";
 import { SHORTCUTS, shortcutLabel } from "../commands";
 import { chatKey, NO_PROJECT } from "../agentChat";
-import { newChatIn, openProjectChat } from "../chatNav";
+import { newChatIn } from "../chatNav";
+import { switcherChats } from "../layout";
+
+const OPEN_PREF = "sidebarOpenProjects";
+/** Which project rows are expanded (key: chatKey(projectId)), kept across launches. */
+function readOpen(): Record<string, boolean> {
+  try {
+    const v: unknown = JSON.parse(globalThis.localStorage?.getItem(OPEN_PREF) ?? "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, boolean> : {};
+  } catch { return {}; }
+}
 
 /**
- * Navigation and projects. Chats are not listed here: a project row reopens the chat you last had open in it, and you
- * move between chats with the switcher under the chat's title or with search (Ctrl/Cmd+K).
+ * Navigation and projects. A project row expands to list its chats (pinned first, then newest; archived behind a
+ * toggle). Replies are not listed here: they open in the chat's side sheet.
  */
 export function Sidebar() {
   const st = useStore();
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [open, setOpenState] = useState<Record<string, boolean>>(readOpen);
+  const [showArchived, setShowArchived] = useState<Record<string, boolean>>({});
+  const setOpen = (key: string, value: boolean) => setOpenState((o) => {
+    if (!!o[key] === value) return o;
+    const next = { ...o, [key]: value };
+    try { localStorage.setItem(OPEN_PREF, JSON.stringify(next)); } catch { /* storage unavailable */ }
+    return next;
+  });
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const toReview = Object.values(st.agents).filter((a) => a.branch && a.worktree && a.status !== "running").length;
   const view = st.view;
   const isChat = (id: string) => view.kind === "chat" && view.chatId === id;
   const inChat = view.kind === "chat" && !isChat(st.masterChatId ?? "");
   // A project shows a pulse while an agent works in any of its chats.
+  const isBusy = (chatId: string) => Object.values(st.agents).some((a) => a.chatId === chatId && a.status === "running");
+  // Opening a chat from the switcher, search or a shortcut reveals it here too.
+  const currentKey = inChat ? chatKey(st.currentProjectId) : null;
+  useEffect(() => { if (currentKey) setOpen(currentKey, true); }, [currentKey]);
   const busyKeys = new Set(Object.values(st.agents).filter((a) => a.status === "running" && a.chatId).map((a) => chatKey(st.chatById[a.chatId!]?.projectId ?? null)));
 
   const addProject = async () => {
@@ -33,12 +55,62 @@ export function Sidebar() {
     const p = await api().createProject(path);
     await st.refreshProjects();
     await st.refreshChats(p.id);
-    await openProjectChat(p.id);
+    setOpen(p.id, true);
+    await newChatIn(p.id);
   };
   const fail = (e: any) => st.toast("error", String(e?.message ?? e));
+  const newChat = (projectId: string | null) => { setOpen(chatKey(projectId), true); void newChatIn(projectId).catch(fail); };
+
+  const patchChat = async (c: Chat, patch: Partial<Pick<Chat, "title" | "archived" | "pinned">>) => { st.upsertChat(await api().updateChat(c.id, patch)); };
+  const leaveChat = async (c: Chat) => { if (isChat(c.id) && st.masterChatId) await st.openChat(st.masterChatId); };
+  const chatMenu = (c: Chat): MenuItem[] => [
+    { label: "Rename", icon: <Pencil size={15} />, hint: "F2", onClick: () => setRenaming(c.id) },
+    { label: c.pinned ? "Unpin" : "Pin to top", icon: c.pinned ? <PinOff size={15} /> : <Pin size={15} />, disabled: c.archived, onClick: () => void patchChat(c, { pinned: !c.pinned }) },
+    { label: "Reset context", icon: <RotateCcw size={15} />, disabled: isBusy(c.id),
+      onClick: async () => { try { await api().resetContext(c.id); st.toast("info", `Context reset for “${c.title}”`); } catch (e: any) { st.toast("warn", String(e?.message ?? e)); } } },
+    { label: "Copy as Markdown", icon: <Copy size={15} />, onClick: async () => { await navigator.clipboard.writeText(await api().exportChat(c.id)); st.toast("info", "Chat copied as Markdown"); } },
+    { separator: true, label: "" },
+    { label: c.archived ? "Restore from archive" : "Archive", icon: c.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />,
+      onClick: async () => { await patchChat(c, { archived: !c.archived, pinned: c.archived ? c.pinned : false }); if (!c.archived) await leaveChat(c); } },
+    { label: "Delete", icon: <Trash2 size={15} />, danger: true,
+      onClick: async () => { if (!confirm(`Delete “${c.title}” and all its messages? This cannot be undone.`)) return; await api().deleteChat(c.id); st.removeChat(c); await leaveChat(c); } },
+  ];
+
+  // Plain render function, not a component defined in render: a component made here would remount on every sidebar
+  // re-render (agent status, streaming…) and reset the rename field.
+  const chatRow = (c: Chat) => renaming === c.id ? (
+    <RenameInput key={c.id} initial={c.title} onCancel={() => setRenaming(null)}
+      onDone={async (t) => { setRenaming(null); if (t && t !== c.title) await patchChat(c, { title: t }); }} />
+  ) : (
+    <div key={c.id} className={`chat-link ${isChat(c.id) ? "active" : ""} ${c.archived ? "archived" : ""}`} role="button" tabIndex={0}
+      onClick={() => void st.openChat(c.id)} onDoubleClick={() => setRenaming(c.id)} onContextMenu={(e) => openMenu(e, chatMenu(c))}
+      onKeyDown={(e) => { if (e.key === "F2") setRenaming(c.id); if (e.key === "Enter") void st.openChat(c.id); }}>
+      {c.pinned && <Pin size={12} className="chat-pin" />}
+      {c.archived && <Archive size={12} className="chat-pin" />}
+      <span className="chat-title">{c.title}</span>
+      {isBusy(c.id) && <span className="pulse" />}
+      <button className="row-more" title="More" aria-label={`More for ${c.title}`} onClick={(e) => { e.stopPropagation(); openMenu(e, chatMenu(c), true); }}><MoreHorizontal size={15} /></button>
+    </div>
+  );
+  /** A project's chats under its row, newest first with pinned on top, and the archived ones behind a toggle. */
+  const chatList = (key: string) => {
+    const { active, archived } = switcherChats(st.chats[key] ?? []);
+    return (
+      <div className="chat-list">
+        {active.map(chatRow)}
+        {!active.length && <button className="archived-toggle" onClick={() => newChat(key === NO_PROJECT ? null : key)}><Plus size={12} /> New chat</button>}
+        {archived.length > 0 && (
+          <button className="archived-toggle" onClick={() => setShowArchived((o) => ({ ...o, [key]: !o[key] }))}>
+            <Archive size={12} /> {showArchived[key] ? "Hide" : "Show"} archived ({archived.length})
+          </button>
+        )}
+        {showArchived[key] && archived.map(chatRow)}
+      </div>
+    );
+  };
 
   const projectMenu = (p: Project): MenuItem[] => [
-    { label: "New chat", icon: <MessageSquarePlus size={15} />, onClick: () => void newChatIn(p.id).catch(fail) },
+    { label: "New chat", icon: <MessageSquarePlus size={15} />, onClick: () => newChat(p.id) },
     { label: "Rename project", icon: <Pencil size={15} />, hint: "F2", onClick: () => setRenaming(`project:${p.id}`) },
     { label: "Open folder", icon: <FolderOpen size={15} />, onClick: () => api().openProjectFolder(p.id) },
     { separator: true, label: "" },
@@ -80,24 +152,28 @@ export function Sidebar() {
       <div className="projects">
         {st.projects.length === 0 && <div className="empty-hint">Add a local folder to start.</div>}
         {st.projects.map((p) => (
-          <div key={p.id} className={`project-row ${inChat && st.currentProjectId === p.id ? "current" : ""}`} onContextMenu={(e) => openMenu(e, projectMenu(p))}>
-            {renaming === `project:${p.id}` ? (
-              // window.prompt() isn't supported in Electron: rename inline.
-              <RenameInput key={`project:${p.id}`} initial={p.name} onCancel={() => setRenaming(null)}
-                onDone={async (n) => { setRenaming(null); if (n && n !== p.name) { await api().renameProject(p.id, n); await st.refreshProjects(); } }} />
-            ) : (
-              <button className="project-name" title={`${p.path}\nOpens the chat you last had open here`} onClick={() => void openProjectChat(p.id).catch(fail)}
-                onDoubleClick={() => setRenaming(`project:${p.id}`)} onKeyDown={(e) => { if (e.key === "F2") setRenaming(`project:${p.id}`); }}>
-                <Folder size={15} className="project-icon" /> <span className="project-label">{p.name}</span>
-                {busyKeys.has(p.id) && <span className="pulse" title="An agent is working here" />}
-              </button>
-            )}
-            <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
-            <button className="icon-btn" title="New chat" onClick={() => void newChatIn(p.id).catch(fail)}><Plus size={15} /></button>
+          <div key={p.id} className="project">
+            <div className={`project-row ${currentKey === p.id ? "current" : ""}`} onContextMenu={(e) => openMenu(e, projectMenu(p))}>
+              {renaming === `project:${p.id}` ? (
+                // window.prompt() isn't supported in Electron: rename inline.
+                <RenameInput key={`project:${p.id}`} initial={p.name} onCancel={() => setRenaming(null)}
+                  onDone={async (n) => { setRenaming(null); if (n && n !== p.name) { await api().renameProject(p.id, n); await st.refreshProjects(); } }} />
+              ) : (
+                <button className="project-name" title={p.path} aria-expanded={!!open[p.id]} onClick={() => setOpen(p.id, !open[p.id])}
+                  onDoubleClick={() => setRenaming(`project:${p.id}`)} onKeyDown={(e) => { if (e.key === "F2") setRenaming(`project:${p.id}`); }}>
+                  <ChevronRight size={13} className={`chev ${open[p.id] ? "open" : ""}`} />
+                  <Folder size={15} className="project-icon" /> <span className="project-label">{p.name}</span>
+                  {!open[p.id] && busyKeys.has(p.id) && <span className="pulse" title="An agent is working here" />}
+                </button>
+              )}
+              <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
+              <button className="icon-btn" title="New chat" onClick={() => newChat(p.id)}><Plus size={15} /></button>
+            </div>
+            {open[p.id] && chatList(p.id)}
           </div>
         ))}
-        <NoProjectSection count={(st.chats[NO_PROJECT] ?? []).filter((c) => !c.archived).length} current={inChat && st.currentProjectId === null}
-          busy={busyKeys.has(NO_PROJECT)} onOpen={() => void openProjectChat(null).catch(fail)} />
+        <NoProjectSection count={(st.chats[NO_PROJECT] ?? []).length} open={!!open[NO_PROJECT]} current={currentKey === NO_PROJECT}
+          busy={busyKeys.has(NO_PROJECT)} onToggle={() => setOpen(NO_PROJECT, !open[NO_PROJECT])}>{chatList(NO_PROJECT)}</NoProjectSection>
       </div>
 
       {st.update && ["available", "downloading", "ready"].includes(st.update.status) && (
@@ -117,15 +193,21 @@ export function Sidebar() {
   );
 }
 
-/** Agents and chats whose project couldn't be determined (started from the master chat with no project selected): one row like a project. */
-function NoProjectSection({ count, current, busy, onOpen }: { count: number; current: boolean; busy: boolean; onOpen: () => void }) {
+/** Agents and chats whose project couldn't be determined (started from the master chat with no project selected): a row like a project. */
+function NoProjectSection({ count, open, current, busy, onToggle, children }: {
+  count: number; open: boolean; current: boolean; busy: boolean; onToggle: () => void; children: ReactNode;
+}) {
   if (!count) return null;
   return (
-    <div className={`project-row no-project ${current ? "current" : ""}`}>
-      <button className="project-name" title="Chats and agents that don't belong to a project" onClick={onOpen}>
-        <Folder size={15} className="project-icon" /> <span className="project-label">No project</span>
-        {busy && <span className="pulse" title="An agent is working here" />}
-      </button>
+    <div className="project no-project">
+      <div className={`project-row ${current ? "current" : ""}`}>
+        <button className="project-name" title="Chats and agents that don't belong to a project" aria-expanded={open} onClick={onToggle}>
+          <ChevronRight size={13} className={`chev ${open ? "open" : ""}`} />
+          <Folder size={15} className="project-icon" /> <span className="project-label">No project</span>
+          {!open && busy && <span className="pulse" title="An agent is working here" />}
+        </button>
+      </div>
+      {open && children}
     </div>
   );
 }
