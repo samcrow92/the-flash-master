@@ -165,22 +165,33 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
           }} />
         <div className="composer-bar">
-          <button className="cb-btn" title="Attach files or images (you can also paste or drop them)" onClick={async () => setAtts([...atts, ...(await api().pickAttachments(chat.id))])}><Paperclip size={16} /></button>
-          <button className="cb-btn" title="Route to a specialist" onClick={() => trigger("@")}><AtSign size={16} /></button>
-          <button className="cb-btn" title="Commands and workflows" onClick={() => trigger("/")}><Slash size={15} /></button>
-          {!compact && <>
-            <span className="cb-sep" />
-            <button className={`cb-toggle ${chat.superpowers ? "on" : ""}`} title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}><Sparkles size={14} /> <span className="cb-label">Superpowers</span></button>
-            <button className={`cb-toggle autopilot ${chat.autopilot ? "on" : ""}`} title="Autopilot: approve all tool calls automatically and let agents work without asking for feedback (blocked commands and read-only mode still apply)"
-              onClick={() => patchChat({ autopilot: !chat.autopilot })}><Plane size={14} className="autopilot-plane" /> <span className="cb-label">Autopilot {chat.autopilot ? "on" : "off"}</span></button>
-          </>}
-          {!compact && <button className={`cb-btn reset-ctx ${resetting ? "spin" : ""}`} disabled={busy}
-            title={busy ? "Stop the running agent to reset the context" : "Reset context — agents in this chat start fresh (messages stay visible)"}
-            onClick={resetContext}><RotateCcw size={15} /></button>}
+          {/* Every control in this row shares the drive strip's slanted, automotive look (ds-seg). */}
+          <div className="ds-segs cb-group">
+            <button className="ds-seg cb-btn" title="Attach files or images (you can also paste or drop them)" aria-label="Attach files"
+              onClick={async () => setAtts([...atts, ...(await api().pickAttachments(chat.id))])}><span><Paperclip size={14} /></span></button>
+            <button className="ds-seg cb-btn" title="Route to a specialist" aria-label="Route to a specialist" onClick={() => trigger("@")}><span><AtSign size={14} /></span></button>
+            <button className="ds-seg cb-btn" title="Commands and workflows" aria-label="Commands and workflows" onClick={() => trigger("/")}><span><Slash size={13} /></span></button>
+          </div>
+          {!compact && (
+            <div className="ds-segs cb-group">
+              <button className={`ds-seg cb-toggle superpowers ${chat.superpowers ? "on" : ""}`} aria-pressed={chat.superpowers}
+                title="Superpowers workflow (brainstorm → plan → TDD → review → verify), on demand" onClick={() => patchChat({ superpowers: !chat.superpowers })}>
+                {chat.superpowers && <i className="ds-glint" />}<span><Sparkles size={13} /> <span className="cb-label">Superpowers</span></span></button>
+              <button className={`ds-seg cb-toggle autopilot ${chat.autopilot ? "on" : ""}`} aria-pressed={chat.autopilot}
+                title="Autopilot: approve all tool calls automatically and let agents work without asking for feedback (blocked commands and read-only mode still apply)"
+                onClick={() => patchChat({ autopilot: !chat.autopilot })}>
+                {chat.autopilot && <i className="ds-glint" />}<span><Plane size={13} className="autopilot-plane" /> <span className="cb-label">Autopilot</span></span></button>
+              <button className={`ds-seg cb-btn reset-ctx ${resetting ? "spin" : ""}`} disabled={busy} aria-label="Reset context"
+                title={busy ? "Stop the running agent to reset the context" : "Reset context — agents in this chat start fresh (messages stay visible)"}
+                onClick={resetContext}><span><RotateCcw size={13} /></span></button>
+            </div>
+          )}
           {busy && (
-            <div className="seg small-seg" title="What sending does while the agent is still working">
-              <button className={whileBusy === "steer" ? "on" : ""} onClick={() => setWhileBusy("steer")}><CornerDownRight size={13} /> Steer</button>
-              <button className={whileBusy === "queue" ? "on" : ""} onClick={() => setWhileBusy("queue")}><Hourglass size={13} /> Queue</button>
+            <div className="ds-segs cb-group" role="radiogroup" title="What sending does while the agent is still working">
+              <button className={`ds-seg cb-toggle ${whileBusy === "steer" ? "on" : ""}`} role="radio" aria-checked={whileBusy === "steer"} onClick={() => setWhileBusy("steer")}>
+                <span><CornerDownRight size={12} /> <span className="cb-label">Steer</span></span></button>
+              <button className={`ds-seg cb-toggle ${whileBusy === "queue" ? "on" : ""}`} role="radio" aria-checked={whileBusy === "queue"} onClick={() => setWhileBusy("queue")}>
+                <span><Hourglass size={12} /> <span className="cb-label">Queue</span></span></button>
             </div>
           )}
           <span className="grow" />
@@ -191,7 +202,7 @@ function ComposerBox({ chat, parentId, placeholder, busy, compact }: ComposerPro
           <button className="primary send" onClick={() => send()} disabled={!text.trim() && !atts.length}
             title={busy ? (whileBusy === "steer" ? "Steer the running agent (Enter)" : "Queue for when the agent finishes (Enter)") : "Send (Enter)"}
             aria-label={busy ? (whileBusy === "steer" ? "Steer" : "Queue") : "Send"}>
-            {busy ? (whileBusy === "steer" ? <CornerDownRight size={15} strokeWidth={2.2} /> : <Hourglass size={14} strokeWidth={2.2} />) : <ArrowUp size={16} strokeWidth={2.4} />}</button>
+            <span>{busy ? (whileBusy === "steer" ? <CornerDownRight size={15} strokeWidth={2.2} /> : <Hourglass size={14} strokeWidth={2.2} />) : <ArrowUp size={16} strokeWidth={2.4} />}</span></button>
         </div>
       </div>
     </div>

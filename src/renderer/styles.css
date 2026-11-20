@@ -1932,3 +1932,23 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .chat-list .chat-rename { margin: 1px 0 1px 34px; width: calc(100% - 34px); font-size: 13px; padding: 4px 6px; }
 .archived-toggle { background: none; border: none; box-shadow: none; color: var(--muted); font-size: 11.5px; padding: 3px 8px 3px 38px; display: flex; gap: 5px; align-items: center; }
 .archived-toggle:hover { color: var(--fg); }
+
+/* Composer row, one automotive language: every control is a slanted segment like the drive strip. Tools are quiet
+   until hovered; a switched-on toggle lights up in its colour with the same glint; Send is the accent "start" key. */
+.composer-bar { gap: 6px; }
+.cb-group .ds-seg { height: 26px; padding: 0 10px; }
+.cb-group .ds-seg > span { color: var(--muted); }
+.cb-group .ds-seg:hover:not(:disabled):not(.on) > span { color: var(--fg); }
+.cb-group .ds-seg:disabled { opacity: .45; }
+.cb-toggle .cb-label { text-transform: uppercase; }
+.cb-toggle.superpowers { --sc: var(--accent); } .cb-toggle.autopilot { --sc: var(--blue); }
+.cb-group .ds-seg.cb-toggle.on, .cb-group .ds-seg.cb-toggle.on:hover:not(:disabled) { border: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sc) 78%, #000), var(--sc)); box-shadow: 0 0 14px -4px var(--sc); }
+.cb-group .ds-seg.cb-toggle.on > span, .cb-group .ds-seg.cb-toggle.on svg { color: #fff; filter: none; }
+.composer2 .composer-bar .send { width: 40px; height: 26px; padding: 0; border: none; border-radius: 3px 9px 9px 3px; transform: skewX(-18deg);
+  display: inline-grid; place-items: center; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, #000), var(--accent));
+  box-shadow: 0 0 14px -4px var(--accent), inset 0 1px 0 rgba(255, 255, 255, .35); color: #fff; transition: filter .15s, box-shadow .2s, opacity .2s; }
+.composer2 .composer-bar .send > span { display: inline-grid; place-items: center; transform: skewX(18deg); }
+.composer2 .composer-bar .send:hover:not(:disabled) { transform: skewX(-18deg); filter: brightness(1.1); box-shadow: 0 0 18px -3px var(--accent), inset 0 1px 0 rgba(255, 255, 255, .35); }
+.composer2 .composer-bar .send:disabled { opacity: .4; box-shadow: none; }
+.composer-bar > .muted.small { white-space: nowrap; flex: none; }
