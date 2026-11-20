@@ -6,6 +6,9 @@
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
  *   FLASH_SMOKE_IMAGES=<dir>      only images in chats: a pasted picture, an agent screenshot (inline + tool call), the viewer
  *   FLASH_SMOKE_HTML=<dir>        only HTML reports in chats: the report card, the inline preview and the full viewer, dark and light
+ *   FLASH_SMOKE_CHECKS=<dir>      only checks before merge and permission rules: a specialist's branch with failing checks on the
+ *                                 Agents and Review pages, Settings → Permissions and → Checks, dark and light (FLASH_SMOKE_PROJECT =
+ *                                 a git repo whose .flashmaster/checks.json is committed)
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
@@ -160,6 +163,59 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       }
       const good = pass.card && pass.inline && pass.viewer;
       log(good ? "info" : "error", `smoke-html: ${JSON.stringify(pass)}`);
+      app.exit(good ? 0 : 1);
+      return;
+    }
+    const checksDir = process.env.FLASH_SMOKE_CHECKS;
+    if (ok && checksDir && hooks) {
+      mkdirSync(checksDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock" }, checks: { autoRun: false } })`);
+      const project = hooks.db.createProject("brake-ecu", proj);
+      const chat = hooks.db.createChat({ projectId: project.id, title: "General", kind: "project", agentRole: "flashmaster" });
+      await hooks.orch.sendUserMessage(chat.id, "Fix the brake light debounce and add a unit test.", null);
+      await sleep(4000);
+      const coord = hooks.db.listAgents().find((a) => a.role === "flashmaster");
+      const r = coord ? await hooks.orch.delegate(coord.id, { role: "tester", goal: "Add a unit test for the brake light debounce" }) : null;
+      const a = r ? hooks.db.getAgent(r.agentId) : null;
+      if (a?.worktree) {
+        const { execFileSync } = await import("node:child_process");
+        writeFileSync(join(a.worktree, "test_debounce.c"), "void test_brake_light_debounce(void) { /* expects 20 ms */ }\n");
+        const g = (...x: string[]) => execFileSync("git", ["-c", "user.name=Flash", "-c", "user.email=flash@example.com", "-c", "commit.gpgsign=false", ...x], { cwd: a.worktree! });
+        g("add", "-A"); g("commit", "-qm", "Add debounce unit test");
+        await hooks.orch.runAgentChecks(a.id).catch((e) => log("error", `smoke-checks: ${String(e)}`));
+      }
+      win.webContents.reload();
+      await sleep(2500);
+      const pass = { chip: false, pop: false, rules: false };
+      for (const theme of ["dark", "light"] as const) {
+        if (theme === "light") {
+          await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
+          win.webContents.reload();
+          await sleep(2500);
+        }
+        await click("Agents", ".sidebar button");
+        await sleep(1200);
+        pass.chip = await js<boolean>(`!!document.querySelector('.checks-chip.failed')`);
+        await shot(join(checksDir, `agents-checks-${theme}.png`));
+        await click("Review", ".work-actions button");
+        await sleep(1500);
+        await js(`document.querySelector('.checks-chip.failed')?.click()`);
+        await sleep(500);
+        pass.pop = await js<boolean>(`!!document.querySelector('.checks-pop pre')`);
+        await shot(join(checksDir, `review-checks-${theme}.png`));
+        await click("Settings", ".sidebar button");
+        await sleep(600);
+        await click("Permissions", ".tabs button");
+        await sleep(800);
+        pass.rules = await js<boolean>(`!!document.querySelector('.perm-verdict.deny')`);
+        await shot(join(checksDir, `settings-permissions-${theme}.png`));
+        await click("Checks", ".tabs button");
+        await sleep(500);
+        await shot(join(checksDir, `settings-checks-${theme}.png`));
+      }
+      const good = pass.chip && pass.pop && pass.rules;
+      log(good ? "info" : "error", `smoke-checks: ${JSON.stringify(pass)}`);
       app.exit(good ? 0 : 1);
       return;
     }

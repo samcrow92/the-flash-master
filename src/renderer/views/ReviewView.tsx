@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChecksStatus, mergeWithChecks } from "../components/ChecksStatus";
 import type { AgentWorkChanges } from "@shared/api";
 import type { ReviewComment } from "@shared/review";
 import type { AgentRun } from "@shared/types";
@@ -108,7 +109,7 @@ function AgentReview({ agent }: { agent: AgentRun }) {
   });
   const merge = () => run(async () => {
     if (count && !confirm(`You have ${count} unsent comment(s). Merge anyway?`)) return;
-    const r = await api().mergeAgentWork(agent.id);
+    const r = await mergeWithChecks(agent.id, agent.branch ?? "this branch");
     report(r);
     await refresh();
   });
@@ -156,6 +157,7 @@ function AgentReview({ agent }: { agent: AgentRun }) {
           <button disabled={busy || (!count && !note.trim())} onClick={() => void sendFixes()} title="Send your comments to the agent; it fixes them in its own copy">
             <Send size={13} /> Ask to fix{count ? ` (${count})` : ""}
           </button>
+          <ChecksStatus agentId={agent.id} />
           <button className="primary" disabled={busy || working} onClick={() => void merge()} title={working ? "Wait until the agent finishes" : `Merge ${changes.branch} into your current branch`}><GitMerge size={14} /> Merge</button>
           <button className="danger" disabled={busy || working} onClick={() => void discard()} title={working ? "Wait until the agent finishes" : "Remove the agent's copy and its branch"}><Trash2 size={13} /> Discard</button>
         </div>

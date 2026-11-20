@@ -7,7 +7,7 @@
  */
 import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
-import type { AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
+import type { AgentChecks, AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
 import { jazzToolsOn, type DuoModeProfile, type Settings } from "@shared/settings";
@@ -25,6 +25,9 @@ import { canIsolate, createWorktree, defaultGit, projectWorktreeDir, mergeWorktr
 import { buildFixRequest, type ReviewComment } from "@shared/review";
 import { prepareInstructions } from "./harness/instructions";
 import { checkReports, reportFixPrompt } from "./report-check";
+import { checksFixPrompt, checksForParent, checksLine, loadChecks, runChecks, type CheckRun, type CheckRunner, type ChecksConfig } from "./checks";
+import { HookRunnerHost, parseHooks } from "./hooks";
+import { parseRules } from "./harness/rules";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
 import { slugRole, type AgentSpec } from "./roles";
@@ -48,6 +51,10 @@ export interface CloseResult {
 export interface OrchestratorDeps {
   /** Git runner for agent worktrees (tests inject a fake). */
   git?: Git;
+  /** Runs check commands (tests inject a fake). */
+  checkRunner?: CheckRunner;
+  /** Runs the user's hooks (tests inject one with a fake runner); default: Settings → Permissions → Hooks. */
+  hooks?: HookRunnerHost;
   /** Folder agents work in when their chat has no project (Settings → Agents; C:\\Data\\.wt by default on Windows). Unset: the home folder. */
   noProjectDir?: () => string;
   /** Extra environment per harness (e.g. GH_TOKEN for Copilot when signed in with a token). */
@@ -785,6 +792,13 @@ export class Orchestrator {
   // ------------------------------------------------------------------ worktrees
 
   private get git(): Git { return this.d.git ?? defaultGit; }
+  private ownHooks: HookRunnerHost | null = null;
+  /** The user's hooks; the text is parsed on every use, so edits in Settings apply to the next tool call. */
+  private get hooks(): HookRunnerHost {
+    if (this.d.hooks) return this.d.hooks;
+    return this.ownHooks ??= new HookRunnerHost(() => parseHooks(this.d.settings().permissions.hooks ?? "").hooks, undefined,
+      (line) => this.d.log?.("warn", line));
+  }
 
   /** Where agents without a project work (created on first use); null when the app gives none (tests) or it can't be created. */
   private noProjectDir(): string | null {
@@ -880,9 +894,105 @@ export class Orchestrator {
     return { ...(await worktreeState(w.repo, w.dir, w.branch, this.git)), branch: w.branch, dir: w.dir };
   }
 
-  /** Merge an agent's branch into the project's current branch (user action). */
-  async mergeWork(agentId: string): Promise<WorkResult> {
+  // ------------------------------------------------------------------ checks before merge
+
+  private checksRunning = new Set<string>();
+
+  /** The checks for an agent's project (.flashmaster/checks.json in the project, else Settings → Checks). */
+  private checksConfig(repo: string | null): ChecksConfig {
+    const s = this.d.settings();
+    if (!s.checks?.enabled) return { checks: [], source: "none" };
+    return loadChecks(repo, s.checks.commands ?? "");
+  }
+
+  /** The branch's current commit and whether the worktree has uncommitted changes. */
+  private async worktreeHead(dir: string): Promise<{ head: string | null; dirty: boolean }> {
+    const [h, st] = await Promise.all([this.git(dir, ["rev-parse", "HEAD"]), this.git(dir, ["status", "--porcelain"])]);
+    return { head: h.code === 0 ? h.out.trim() || null : null, dirty: st.code === 0 && st.out.trim().length > 0 };
+  }
+
+  /** What the Merge button shows: configured checks, the last run and whether it covers the current commit. */
+  async agentChecks(agentId: string): Promise<AgentChecks> {
+    const w = this.agentWork(agentId, true);
+    const cfg = this.checksConfig(w.repo);
+    const last = this.d.db.getCheckRun(agentId);
+    const now = last ? await this.worktreeHead(w.dir) : null;
+    return { configured: cfg.checks.map((c) => ({ name: c.name, command: c.command })), source: cfg.source, ...(cfg.error ? { error: cfg.error } : {}), last,
+      current: !!last && !!now && last.ok && !last.dirty && !now.dirty && last.head === now.head, running: this.checksRunning.has(agentId),
+      requireForMerge: !!this.d.settings().checks?.requireForMerge };
+  }
+
+  /** Run the project's checks in an agent's worktree now (Run checks button, Merge, or when the agent finishes). Null = none set up. */
+  async runAgentChecks(agentId: string, fromTurn = false): Promise<CheckRun | null> {
+    const w = this.agentWork(agentId, fromTurn);
+    const cfg = this.checksConfig(w.repo);
+    if (cfg.error) throw new Error(cfg.error);
+    if (!cfg.checks.length) return null;
+    if (this.checksRunning.has(agentId)) throw new Error("the checks are already running for this agent");
+    this.checksRunning.add(agentId);
+    this.d.emit({ type: "checks.updated", agentId });
+    try {
+      const { head, dirty } = await this.worktreeHead(w.dir);
+      const run = await runChecks(w.dir, cfg.checks, { runner: this.d.checkRunner, defaultTimeoutMinutes: this.d.settings().checks?.timeoutMinutes || 15, head, dirty,
+        env: networkEnv(this.d.settings()),
+        onProgress: (c, i) => {
+          this.flow(agentId, { kind: "status", label: `checks ${i + 1}/${cfg.checks.length}: ${c.name}`, status: "checking" });
+          this.emitAgent(this.d.db.updateAgent(agentId, { lastActivity: `🧪 Checks ${i + 1}/${cfg.checks.length}: ${c.name}` }));
+        } });
+      this.d.db.saveCheckRun(agentId, run);
+      this.emitAgent(this.d.db.updateAgent(agentId, { lastActivity: checksLine(run) }));
+      this.flow(agentId, { kind: "status", label: checksLine(run), status: run.ok ? "checks passed" : "checks failed" });
+      if (this.hooks.has("checks_done")) {
+        const a = this.d.db.getAgent(agentId);
+        void this.hooks.fire({ event: "checks_done", agentId, agent: a?.name ?? a?.role, role: a?.role, cwd: w.dir, ok: run.ok, result: checksLine(run) }).catch(() => {});
+      }
+      return run;
+    } finally {
+      this.checksRunning.delete(agentId);
+      this.d.emit({ type: "checks.updated", agentId });
+    }
+  }
+
+  /** After a code-writing specialist's turn: run the checks when its branch holds new work. Null = nothing to check. */
+  private async autoChecks(live: Live): Promise<CheckRun | null> {
+    const s = this.d.settings();
+    if (!s.checks?.enabled || !s.checks.autoRun || !live.worktree || !live.branch) return null;
+    const a = this.d.db.getAgent(live.agentId);
+    if (!a?.worktree) return null;
+    try {
+      const w = this.agentWork(live.agentId, true);
+      if (!this.checksConfig(w.repo).checks.length) return null;
+      const st = await worktreeState(w.repo, w.dir, w.branch, this.git);
+      if (!st.unmerged && !st.dirty.length) return null;
+      this.setStatus(live, "running", "🧪 Running the project's checks");
+      const run = await this.runAgentChecks(live.agentId, true);
+      if (run) this.emitAgent(this.d.db.updateAgent(live.agentId, { status: "idle" }));
+      return run;
+    } catch (e) {
+      this.flow(live.agentId, { kind: "error", label: `checks: ${String((e as Error)?.message ?? e).slice(0, 150)}` });
+      return null;
+    }
+  }
+
+  /**
+   * Merge an agent's branch into the project's current branch (user action). With checks set up and "Merge only when
+   * checks pass" on, the branch's current commit must have a green run; a missing or stale run is started first.
+   * `force` = the user chose "Merge anyway".
+   */
+  async mergeWork(agentId: string, force = false): Promise<WorkResult> {
     const w = this.agentWork(agentId);
+    if (!force && this.d.settings().checks?.requireForMerge) {
+      const st = await this.agentChecks(agentId);
+      if (st.error) return { ok: false, message: `Checks are set up wrongly: ${st.error}. Fix it, or merge anyway.` };
+      if (st.configured.length && !st.current) {
+        const run = await this.runAgentChecks(agentId);
+        if (run && !run.ok) {
+          const msg = `Not merged: ${checksLine(run)}. Send it back to the agent, or merge anyway.`;
+          this.flow(agentId, { kind: "status", label: msg.slice(0, 160), status: "merge refused" });
+          return { ok: false, message: msg };
+        }
+      }
+    }
     const r = await mergeWorktree(w.repo, w.dir, w.branch, this.git);
     this.flow(agentId, { kind: "status", label: r.message.slice(0, 160), status: r.ok ? "merged" : "merge refused" });
     return r;
@@ -1432,6 +1542,8 @@ export class Orchestrator {
     textRound?: number;
     /** Follow-ups sent because the turn missed a required deliverable (HTML report, diagrams); capped. */
     reportRound?: number;
+    /** How many times this task was sent back because its checks failed. */
+    checkRound?: number;
     /** The same request again after the harness was switched (the failed reply stays out of the history). */
     retry?: boolean;
     /** Harness / model for a new session (retry with another model); an existing session keeps its own. */
@@ -1452,6 +1564,7 @@ export class Orchestrator {
     live.idleSince = null;
     const turnStart = Date.now();
     let reportFix: string | null = null;
+    let checkFix: string | null = null;
     if (!t.textRound) { live.askedThisTurn = false; live.pendingQuestion = null; }
     const borrowed = !!t.borrowSlot;
     if (!borrowed) {
@@ -1711,9 +1824,23 @@ export class Orchestrator {
       } else if (check?.problems.length) {
         this.system(t.chat.id, t.threadRoot, `⚠️ **${agentLabel(live, t.role.title)}** still misses: ${check.problems.join(" ")}`, "warn");
       }
+      // Checks before merge: the project's own commands run in the specialist's worktree. A failure goes back to it (up to
+      // maxFixRounds) before its result reaches the coordinator; the result then says how the checks went.
+      let checksNote = "";
+      if (status === "done" && !redirected && said === "done" && !live.queue.length && !reportFix && live.parentAgentId && live.worktree && !live.stopped) {
+        const run = await this.autoChecks(live);
+        const maxRounds = Math.max(0, s.checks?.maxFixRounds ?? 2);
+        if (run && !run.ok && (t.checkRound ?? 0) < maxRounds && !live.stopped) {
+          checkFix = checksFixPrompt(run, (t.checkRound ?? 0) + 1, maxRounds);
+          this.system(t.chat.id, t.threadRoot, `↩ **${agentLabel(live, t.role.title)}**: ${checksLine(run)}, so it was sent back to fix them.`);
+        } else if (run) {
+          checksNote = `\n${checksForParent(run, !run.ok)}`;
+          if (!run.ok) this.system(t.chat.id, t.threadRoot, `⚠️ **${agentLabel(live, t.role.title)}**: ${checksLine(run)} after ${maxRounds} fix round(s).`, "warn");
+        }
+      }
       const asked = said === "needs_decision" || said === "blocked" || !!live.askedThisTurn;
       outcome = {
-        result: compact + (live.pendingQuestion ? `\n${live.pendingQuestion}` : "") + (asked && live.parentAgentId ? `\n${UNTANGLE_NOTE(agentLabel(live, t.role.title), live.agentId)}` : "")
+        result: compact + checksNote + (live.pendingQuestion ? `\n${live.pendingQuestion}` : "") + (asked && live.parentAgentId ? `\n${UNTANGLE_NOTE(agentLabel(live, t.role.title), live.agentId)}` : "")
           + (said === "blocked" && live.parentAgentId ? this.localityHint(live, text) : ""),
         failed: status === "error" ? (gaveUp ?? res.error ?? "error") : null,
         silent: status === "done" && !redirected && !asked && isSilentReply(text, live.depth > 0 ? 20 : 1),
@@ -1750,6 +1877,10 @@ export class Orchestrator {
       if (!borrowed) this.releaseSlot();
       if (live.parentAgentId) this.teamSlotFreed(live.parentAgentId);
     }
+    if (this.hooks.has("turn_end")) {
+      void this.hooks.fire({ event: "turn_end", agentId: live.agentId, agent: agentLabel(live, t.role.title), role: t.role.name, cwd: this.agentWorkDir(live.agentId),
+        status: live.stopped ? "stopped" : "done", result: text.slice(-4000) }).catch(() => {});
+    }
     // What continues this task: a re-plan in text mode, text-mode calls (TOOL / DELEGATE lines) or a steering redirect.
     // Only the task's last turn reports back: reporting the first part (a reply of TOOL lines) used to hand the delegating
     // agent an empty result and drop the specialist's real report.
@@ -1771,6 +1902,11 @@ export class Orchestrator {
       const input = reportFix;
       next = () => void this.turn({ ...t, retry: false, input, attachments: [], skills: [], brief: null, taskId: t.taskId, liveKey: live.key, msgIds: undefined,
         deliver: false, borrowSlot: t.borrowSlot, textRound: 0, reportRound: (t.reportRound ?? 0) + 1 });
+    }
+    if (!next && checkFix && !live.stopped && !live.paused) {
+      const input = checkFix;
+      next = () => void this.turn({ ...t, retry: false, input, attachments: [], skills: [], brief: null, taskId: t.taskId, liveKey: live.key, msgIds: undefined,
+        deliver: false, borrowSlot: t.borrowSlot, textRound: 0, checkRound: (t.checkRound ?? 0) + 1 });
     }
     if (!next && live.redirect && !live.stopped) {
       const r = live.redirect;
@@ -2020,7 +2156,13 @@ export class Orchestrator {
         approval: s.permissions.approval, readOnly: s.permissions.readOnly, projectRoot: projectPath,
         extraRoots: this.d.attachmentRoots?.() ?? [],
         blocked: s.permissions.blockedCommands.split("\n").filter((l) => l.trim()),
+        rules: parseRules(s.permissions.rules ?? "").rules, role: live.role.name,
       },
+      preTool: this.hooks.has("pre_tool") ? async (r) => {
+        const h = await this.hooks.preTool({ ...r, agentId: live.agentId, agent: agentLabel(live, live.role.title), role: live.role.name, cwd: this.agentWorkDir(live.agentId) });
+        if (h) this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`.slice(0, 160), status: `hook: ${h.decision}` });
+        return h;
+      } : undefined,
       onEvent: (e) => {
         if (e.type === "heartbeat") { live.heartbeatAt = Date.now(); return; }
         if (e.type === "activity") { this.noteActivity(live, e.text); return; }
@@ -2040,6 +2182,11 @@ export class Orchestrator {
           if (this.recordTool(live, e)) {
             this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
             this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
+            if ((e.status === "completed" || e.status === "failed") && this.hooks.has("post_tool")) {
+              void this.hooks.fire({ event: "post_tool", agentId: live.agentId, agent: agentLabel(live, live.role.title), role: live.role.name,
+                cwd: this.agentWorkDir(live.agentId), kind: e.kind, title: e.title, command: e.kind === "execute" ? (e.input ?? e.title) : null,
+                status: e.status, output: (e.output ?? "").slice(0, 4000) }).catch(() => {});
+            }
           }
         } else if (e.type === "plan") this.setPlan(live.agentId, e.entries);
         else if (e.type === "diff") this.recordChange(live, projectPath, e.path, e.oldText, e.newText);
@@ -2054,12 +2201,13 @@ export class Orchestrator {
   private askPermission(live: Live, r: PermissionRequest): Promise<boolean> {
     // Autopilot (default) or "Auto-approve everything": never stop to ask. Blocked commands and read-only mode are
     // enforced before this point by the policy, so they still apply.
-    if (this.d.db.getChat(live.chatId)?.autopilot || this.d.settings().permissions.approval === "auto-all") {
+    // A permission rule or hook that says "ask" asks even on Autopilot: that is what the user wrote it for.
+    if (!r.forcedBy && (this.d.db.getChat(live.chatId)?.autopilot || this.d.settings().permissions.approval === "auto-all")) {
       this.flow(live.agentId, { kind: "approval", label: `${r.kind}: ${r.title}`, status: "auto-approved (autopilot)" });
       return Promise.resolve(true);
     }
     const msg = this.d.db.addMessage({ chatId: live.chatId, parentId: live.threadRoot ?? live.currentMessageId, author: "system",
-      role: live.role.name, content: `🔐 **${agentLabel(live, live.role.title)}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\nReact ✅ to allow or ❌ to deny.` });
+      role: live.role.name, content: `🔐 **${agentLabel(live, live.role.title)}** wants to run a **${r.kind}** action:\n\n\`${r.title}\`\n\n\`\`\`\n${r.detail}\n\`\`\`\n${r.forcedBy ? `Asking because of \`${r.forcedBy.slice(0, 200)}\`.\n` : ""}React ✅ to allow or ❌ to deny.` });
     this.d.emit({ type: "message.created", message: msg });
     this.setStatus(live, "running", "Waiting for your approval");
     live.awaitingApproval = true;

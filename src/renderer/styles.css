@@ -2006,3 +2006,21 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .thread-pill .tp-more { flex: none; font-size: 10.5px; font-weight: 600; color: var(--muted); padding-left: 1px; font-variant-numeric: tabular-nums; }
 .thread-pill > .tp-count, .thread-pill > .tp-chev { flex: none; }
 .thread-pill > .tp-last { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Checks before merge: status chip, Run checks, failing output */
+.checks-status { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.checks-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg2); color: var(--muted); white-space: nowrap; }
+.checks-chip.passed { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.checks-chip.failed, .checks-chip.error { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.checks-chip.stale, .checks-chip.running { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.checks-chip:disabled { cursor: default; opacity: 1; }
+.checks-pop { position: fixed; z-index: 60; width: min(560px, 80vw); max-height: 50vh; overflow: auto; padding: 8px 10px;
+  background: color-mix(in srgb, var(--win-base) 88%, transparent); backdrop-filter: var(--blur); border: 1px solid var(--rim); border-radius: 12px; box-shadow: var(--shadow); }
+.checks-pop-backdrop { position: fixed; inset: 0; z-index: 59; }
+.checks-pop summary { cursor: pointer; font-size: 12px; padding: 3px 0; } .checks-pop summary.ok { color: var(--green); } .checks-pop summary.bad { color: var(--red); }
+.checks-pop summary code { font-size: 11px; opacity: .75; margin: 0 4px; }
+.checks-pop pre { font-size: 11px; max-height: 240px; overflow: auto; background: var(--code); padding: 6px 8px; border-radius: 8px; white-space: pre-wrap; }
+.perm-tester { display: flex; flex-direction: column; gap: 6px; width: 100%; } .perm-tester .row { display: flex; gap: 6px; } .perm-tester input { flex: 1; } .perm-tester .perm-role { flex: 0 0 90px; }
+.perm-verdict { font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--bg2); }
+.perm-verdict.deny { color: var(--red); } .perm-verdict.ask { color: var(--amber); } .perm-verdict.allow { color: var(--green); } .perm-verdict.none { color: var(--muted); }
+.warn-text { color: var(--amber); }

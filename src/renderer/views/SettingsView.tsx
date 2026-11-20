@@ -14,7 +14,7 @@ import { unitName } from "@shared/usage-label";
 import { configUri, isGcWebLink } from "@shared/rm-config";
 
 export const TABS = [
-  ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["usage", "Usage"], ["permissions", "Permissions"],
+  ["general", "General"], ["harnesses", "Harnesses"], ["modes", "Modes & chat"], ["agents", "Agents"], ["tokens", "Token efficiency"], ["usage", "Usage"], ["permissions", "Permissions"], ["checks", "Checks"],
   ["mcp", "MCP servers"], ["marketplace", "Marketplace"], ["server", "Flash server"], ["integrations", "Integrations"], ["network", "Network"], ["data", "Data"], ["advanced", "Advanced"], ["about", "About"],
 ] as const;
 
@@ -48,6 +48,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
           {tab === "tokens" && <Tokens {...f} />}
           {tab === "usage" && <UsageSettings {...f} />}
           {tab === "permissions" && <Permissions {...f} />}
+          {tab === "checks" && <Checks {...f} />}
           {tab === "mcp" && <Mcp {...f} />}
           {tab === "marketplace" && <MarketplaceSettings {...f} />}
           {tab === "server" && <ServerSettings f={f} />}
@@ -370,7 +371,41 @@ function Permissions(f: F) {
       <Choice f={f} path="permissions.approval" options={[["ask", "Ask for every action"], ["auto-read", "Auto-approve reads, ask for changes"], ["auto-all", "Auto-approve everything (default)"]]} />
     </Row>
     <Row label="Read-only mode" hint="Agents cannot edit, delete, move files or run commands."><Bool f={f} path="permissions.readOnly" /></Row>
-    <Row label="Blocked commands" hint="One per line. Any tool call containing one of these is denied."><Area f={f} path="permissions.blockedCommands" /></Row>
+    <Row label="Permission rules" hint="One per line: [role:] allow|ask|deny [kind] pattern. Commands are split at && | ; and matched word by word, so sudo, cmd /c and extra spaces don't get around them. deny beats ask beats allow; an ask rule asks even on Autopilot. Path rules: deny edit **/*.pem."><Area f={f} path="permissions.rules" rows={9} /></Row>
+    <PermissionTester f={f} />
+    <Row label="Hooks" hint="Your own scripts around agent work, one per line: <event> [match] => <command>. Events: pre_tool (exit 2 or {&quot;decision&quot;:&quot;deny&quot;} refuses the call), post_tool, turn_end, checks_done. The event arrives as JSON on stdin and in FLASH_* variables."><Area f={f} path="permissions.hooks" rows={4} /></Row>
+    <Row label="Blocked commands (legacy)" hint="One per line. Any tool call containing this text is denied. Prefer deny rules above."><Area f={f} path="permissions.blockedCommands" /></Row>
+  </>;
+}
+
+/** Try a command against the rules as written (and see syntax errors in the rules and hooks) before an agent runs into them. */
+function PermissionTester({ f }: { f: F }) {
+  const [cmd, setCmd] = useState("git push --force origin main");
+  const [role, setRole] = useState("");
+  const [r, setR] = useState<Awaited<ReturnType<ReturnType<typeof api>["testPermissions"]>> | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => { void api().testPermissions(f.s.permissions.rules ?? "", f.s.permissions.hooks ?? "", { command: cmd, role }).then(setR).catch(() => setR(null)); }, 200);
+    return () => clearTimeout(t);
+  }, [cmd, role, f.s.permissions.rules, f.s.permissions.hooks]);
+  const label = !r ? "" : r.decision === null ? `No rule matches: ${f.s.permissions.approval === "auto-all" ? "allowed (auto-approve)" : "follows Tool approval"}` : `${r.decision.toUpperCase()} — ${r.rule}`;
+  return <Row label="Try a command" hint="What the rules above decide for this command (and role, optional).">
+    <div className="perm-tester">
+      <div className="row gap"><input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="a command line" /><input className="perm-role" value={role} onChange={(e) => setRole(e.target.value)} placeholder="role" /></div>
+      {r && <div className={`perm-verdict ${r.decision ?? "none"}`}>{label}</div>}
+      {r && [...r.ruleErrors.map((e) => `Rules ${e}`), ...r.hookErrors.map((e) => `Hooks ${e}`)].map((e) => <div key={e} className="small warn-text">{e}</div>)}
+    </div>
+  </Row>;
+}
+
+function Checks(f: F) {
+  return <>
+    <p className="small muted">The app runs your project's own build, test, lint or static-analysis commands in an agent's worktree when it finishes. A failure goes straight back to that agent with the output, and Merge waits for a green run of the branch's current commit. A project can share its checks with the team in <code>.flashmaster/checks.json</code>: <code>{"{ \"checks\": [{ \"name\": \"Unit tests\", \"command\": \"npm test\" }] }"}</code>; that file wins over the defaults below.</p>
+    <Row label="Checks before merge"><Bool f={f} path="checks.enabled" /></Row>
+    <Row label="Default check commands" hint="Used when the project has no .flashmaster/checks.json. One per line, optionally Name: command (e.g. Unit tests: npm test, MISRA: cppcheck --addon=misra src)."><Area f={f} path="checks.commands" rows={4} /></Row>
+    <Row label="Run checks when a specialist finishes" hint="Only for code-writing specialists whose branch holds new work."><Bool f={f} path="checks.autoRun" /></Row>
+    <Row label="Merge only when checks pass" hint="Merge runs the checks first when the last run doesn't cover the branch's current commit. You can still choose Merge anyway."><Bool f={f} path="checks.requireForMerge" /></Row>
+    <Row label="Fix rounds" hint="How many times a failing specialist is sent back before its result goes to the coordinator."><Num f={f} path="checks.maxFixRounds" /></Row>
+    <Row label="Timeout per check (minutes)"><Num f={f} path="checks.timeoutMinutes" min={1} /></Row>
   </>;
 }
 

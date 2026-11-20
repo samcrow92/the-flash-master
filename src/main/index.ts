@@ -1,4 +1,6 @@
 import { fixPath } from "./shell-path";
+import { evaluateRules, parseRules } from "./harness/rules";
+import { parseHooks } from "./hooks";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, safeStorage, session, shell, Notification, type WebContents } from "electron";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -857,7 +859,14 @@ const api: FlashApi = {
   resumeInterrupted: async (id) => orch.resumeInterrupted(id),
   resumeAllInterrupted: async () => orch.resumeAllInterrupted(),
   agentWorkState: async (id) => orch.workState(id),
-  mergeAgentWork: async (id) => orch.mergeWork(id),
+  mergeAgentWork: async (id, force) => orch.mergeWork(id, !!force),
+  agentChecks: async (id) => orch.agentChecks(id),
+  runAgentChecks: async (id) => orch.runAgentChecks(id),
+  testPermissions: async (rules, hooks, sample) => {
+    const r = parseRules(rules);
+    const d = sample.command.trim() ? evaluateRules(r.rules, { kind: "execute", command: sample.command, role: sample.role || undefined }) : null;
+    return { ruleErrors: r.errors, hookErrors: parseHooks(hooks).errors, decision: d?.decision ?? null, rule: d?.rule ?? null };
+  },
   discardAgentWork: async (id, force) => orch.discardWork(id, !!force),
   agentWorkChanges: async (id) => orch.workChanges(id),
   agentWorkFileDiff: async (id, path) => orch.workFileDiff(id, String(path)),

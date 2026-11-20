@@ -70,6 +70,8 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE agents ADD COLUMN launch_args TEXT;`,
   // v14: the chat's GitLab Duo mode (eco / comfort / sport: model + thinking for its Duo agents)
   `ALTER TABLE chats ADD COLUMN duo_mode TEXT;`,
+  // v15: the last run of the project's checks on each agent's worktree (Merge is gated on a green run of the current commit)
+  `CREATE TABLE check_runs(agent_id TEXT PRIMARY KEY, run TEXT NOT NULL, at INTEGER NOT NULL);`,
 ];
 
 type Row = Record<string, any>;
@@ -441,6 +443,14 @@ export class Db {
   setAgentWorktree(id: string, worktree: string | null, branch: string | null): AgentRun {
     this.run("UPDATE agents SET worktree=?, branch=? WHERE id=?", worktree, branch, id);
     return this.getAgent(id)!;
+  }
+  /** The last check run on an agent's worktree (one per agent; a new run replaces it). */
+  saveCheckRun(agentId: string, run: import("@shared/types").CheckRun): void {
+    this.run("INSERT INTO check_runs(agent_id, run, at) VALUES(?,?,?) ON CONFLICT(agent_id) DO UPDATE SET run=excluded.run, at=excluded.at", agentId, JSON.stringify(run), run.at);
+  }
+  getCheckRun(agentId: string): import("@shared/types").CheckRun | null {
+    const r = this.raw.prepare("SELECT run FROM check_runs WHERE agent_id=?").get(agentId) as { run: string } | undefined;
+    try { return r ? JSON.parse(r.run) : null; } catch { return null; }
   }
   /** Adds Copilot credits an agent used (from the change in Copilot's /usage total since its last turn). */
   addAgentCredits(id: string, credits: number): AgentRun | null {

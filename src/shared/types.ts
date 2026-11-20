@@ -506,6 +506,40 @@ export interface MemoryHit extends Memory {
   relevance: number;
 }
 
+/** One check command's result in an agent's worktree (Settings → Checks / .flashmaster/checks.json). */
+export interface CheckResult {
+  name: string;
+  command: string;
+  ok: boolean;
+  code: number | null;
+  timedOut: boolean;
+  durationMs: number;
+  /** The end of the output (where failures usually are), clipped. */
+  output: string;
+}
+
+/** A run of all checks on one commit of an agent's branch. */
+export interface CheckRun {
+  ok: boolean;
+  /** The commit the checks ran on (null = not a git checkout); `dirty` = uncommitted changes were included. */
+  head: string | null;
+  dirty: boolean;
+  at: number;
+  results: CheckResult[];
+}
+
+/** What the Merge button needs: the configured checks, the last run, and whether it covers the branch's current commit. */
+export interface AgentChecks {
+  configured: { name: string; command: string }[];
+  source: "project" | "settings" | "none";
+  error?: string;
+  last: CheckRun | null;
+  /** The last run passed on the branch's current commit with no uncommitted changes since. */
+  current: boolean;
+  running: boolean;
+  requireForMerge: boolean;
+}
+
 export type AppEvent =
   | { type: "message.created"; message: Message }
   | { type: "message.delta"; messageId: string; chatId: string; delta: string }
@@ -520,6 +554,7 @@ export type AppEvent =
   | { type: "mcp.status"; servers: McpServerStatus[] }
   | { type: "roles.changed"; roles: RoleDef[] }
   | { type: "flow.updated"; agentId: string }
+  | { type: "checks.updated"; agentId: string }
   | { type: "models.updated"; models: HarnessModels }
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "artifacts.changed"; chatId: string }
