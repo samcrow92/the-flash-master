@@ -1,5 +1,6 @@
 import type { HarnessId, HarnessStatus, ModelInfo } from "@shared/types";
 import type { ApprovalPolicy } from "@shared/settings";
+import type { PermRule } from "./rules";
 
 export interface McpServerSpec {
   name: string;
@@ -14,6 +15,8 @@ export interface PermissionRequest {
   title: string;
   kind: ToolKind;
   detail: string;
+  /** Why it asks: a permission rule or a pre_tool hook that wants the user's word, even on Autopilot. */
+  forcedBy?: string;
 }
 
 export type HarnessEvent =
@@ -52,8 +55,15 @@ export interface SessionOptions {
   mcpServers: McpServerSpec[];
   env: Record<string, string>;
   resumeSessionId: string | null;
-  policy: { approval: ApprovalPolicy; readOnly: boolean; blocked: string[]; projectRoot: string | null; extraRoots?: string[] };
+  policy: { approval: ApprovalPolicy; readOnly: boolean; blocked: string[]; projectRoot: string | null; extraRoots?: string[];
+    /** Argv-level permission rules (Settings → Permissions → Rules) and the role they're checked for. */
+    rules?: PermRule[]; role?: string };
   onEvent: (e: HarnessEvent) => void;
+  /**
+   * The user's pre_tool hooks (Settings → Permissions → Hooks): may allow, ask or deny a call the policy didn't deny.
+   * null = no hook has an opinion.
+   */
+  preTool?: (r: { kind: ToolKind; title: string; command: string | null; paths: string[] }) => Promise<{ decision: "allow" | "ask" | "deny"; reason: string | null; hook: string } | null>;
   /** Ask the user (returns true = allow). Only called when policy says "ask". */
   askPermission: (r: PermissionRequest) => Promise<boolean>;
   /**

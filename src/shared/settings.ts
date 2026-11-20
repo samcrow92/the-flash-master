@@ -1,6 +1,20 @@
 import type { Chat, DriveMode, DuoMode, HarnessId } from "./types";
 import { DUO_MODES } from "./types";
 
+/** The rules shipped as defaults: refuse destructive commands outright; everything else follows the approval setting. */
+export const DEFAULT_RULES: string = [
+  "# One rule per line: [role:] allow|ask|deny [kind] pattern. deny beats ask beats allow.",
+  "deny rm -rf / *",
+  "deny rm -rf ~ *",
+  "deny format c: *",
+  "deny git push *--force*",
+  "deny git push -f *",
+  "deny git push * -f *",
+  "deny git clean -fdx *",
+  "deny edit **/.git/**",
+  "# Examples: ask git push *   ·   tester: allow npm test *   ·   deny edit **/*.pem",
+].join("\n");
+
 export type ThinkingLevel = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export interface ModeProfile {
   harness: HarnessId | ""; // "" = the chat's harness / default harness
@@ -136,7 +150,24 @@ export interface Settings {
   permissions: {
     approval: ApprovalPolicy;
     readOnly: boolean;
-    blockedCommands: string; // newline separated substrings
+    blockedCommands: string; // newline separated substrings (legacy; rules are argv-level)
+    /** Argv-level rules, one per line: `[role:] allow|ask|deny [kind] pattern` (see src/main/harness/rules.ts). */
+    rules: string;
+    /** Your own scripts around agent work, one per line: `<event> [match] => <command>` (see src/main/hooks.ts). */
+    hooks: string;
+  };
+  /** Checks before merge: the project's own commands, run by the app in an agent's worktree (see src/main/checks.ts). */
+  checks: {
+    enabled: boolean;
+    /** Used when the project has no .flashmaster/checks.json. One per line, optionally `Name: command`. */
+    commands: string;
+    /** Run the checks when a code-writing specialist finishes, and send failures back to it. */
+    autoRun: boolean;
+    /** Merge only a branch whose current commit passed its checks (the user can override). */
+    requireForMerge: boolean;
+    /** How many times a failing agent is sent back before the result goes to the coordinator. */
+    maxFixRounds: number;
+    timeoutMinutes: number;
   };
   mcp: {
     autoInstall: boolean;
@@ -357,7 +388,8 @@ export const DEFAULT_SETTINGS: Settings = {
     economyForDelegated: false,
     showTokenCounts: true,
   },
-  permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force" },
+  permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force", rules: DEFAULT_RULES, hooks: "" },
+  checks: { enabled: true, commands: "", autoRun: true, requireForMerge: true, maxFixRounds: 2, timeoutMinutes: 15 },
   mcp: { autoInstall: true, pythonPath: "", pipIndexUrl: "", disabled: [], npmRegistry: "", catalog: {}, external: [] },
   jazz: {
     enabled: false,

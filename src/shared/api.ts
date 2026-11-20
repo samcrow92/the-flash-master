@@ -1,4 +1,5 @@
 import type {
+  AgentChecks, CheckRun,
   AgentFlow, Attachment, HarnessModels, InstalledPlugin, MarketplaceListing, AgentImportResult, AgentRun, AppEvent, Artifact, Chat, ChatArtifacts, UpdateState, FileChange, HarnessId, HarnessStatus, JazzWorkItem, JazzComment, RmProject, RmModule, RmModuleData, RmHit, CopilotUsage, JazzSearch, McpServerStatus, Message, SearchHit,
   Project, RoleDef, SkillDef, Task, Submission, ServerTestResult, SubmitDraft, SubmitMeta, SubmitResult, SubmitSource, TaskStatus, UsageSummary, WindowState, Memory, MemoryKind, MemoryScope, KnowledgeStatus, KnowledgeSyncResult, CodeGraphStatus,
 } from "./types";
@@ -86,8 +87,14 @@ export interface FlashApi {
   resumeAllInterrupted(): Promise<number>;
   /** A code-writing specialist's own worktree: uncommitted changes and commits not yet merged. */
   agentWorkState(id: string): Promise<{ exists: boolean; dirty: string[]; unmerged: number; branch: string; dir: string }>;
-  /** Merge the agent's branch into the project's current branch. */
-  mergeAgentWork(id: string): Promise<{ ok: boolean; message: string }>;
+  /** Merge the agent's branch into the project's current branch. Gated on green checks unless force ("Merge anyway"). */
+  mergeAgentWork(id: string, force?: boolean): Promise<{ ok: boolean; message: string }>;
+  /** The project's checks for an agent's worktree: what is configured, the last run, and whether it covers the current commit. */
+  agentChecks(id: string): Promise<AgentChecks>;
+  /** Run the project's checks in the agent's worktree now; null = no checks set up. */
+  runAgentChecks(id: string): Promise<CheckRun | null>;
+  /** Settings → Permissions: syntax errors in the rules and hooks text, and what the rules decide for a sample command. */
+  testPermissions(rules: string, hooks: string, sample: { command: string; role?: string }): Promise<{ ruleErrors: string[]; hookErrors: string[]; decision: "allow" | "ask" | "deny" | null; rule: string | null }>;
   /** Remove the agent's worktree and branch; refused while it holds unmerged work unless force. */
   discardAgentWork(id: string, force?: boolean): Promise<{ ok: boolean; message: string }>;
   /** Review page: every file the agent changed in its copy since its branch started (committed, uncommitted, new). */
@@ -269,7 +276,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
+  "updateChat", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

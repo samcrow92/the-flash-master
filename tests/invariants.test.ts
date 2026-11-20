@@ -455,3 +455,23 @@ describe("DOORS Next writes", () => {
     expect(read("src/main/requirements.ts")).not.toMatch(/\.request\(/);
   });
 });
+
+describe("safety rules hold on Autopilot", () => {
+  // The shipped permission rules refuse destructive commands whatever the approval setting, and however the command is
+  // wrapped; an agent can't merge around a red check without the user's own "Merge anyway".
+  it("denies destructive commands by default under every approval mode", async () => {
+    const { parseRules } = await import("../src/main/harness/rules");
+    const { decideCall } = await import("../src/main/harness/policy");
+    const rules = parseRules(DEFAULT_SETTINGS.permissions.rules).rules;
+    expect(parseRules(DEFAULT_SETTINGS.permissions.rules).errors).toEqual([]);
+    for (const approval of ["auto-all", "auto-read", "ask"] as const) {
+      for (const command of ["rm -rf /", "sudo rm -rf / --no-preserve-root", "git push --force", "cmd /c git push -f origin main", "git clean -fdx"]) {
+        expect(decideCall({ approval, readOnly: false, blocked: [], projectRoot: "/p", rules }, "execute", "Run", { command }).decision, `${approval}: ${command}`).toBe("deny");
+      }
+    }
+  });
+  it("gates Merge on checks by default and keeps the override in the user's hands", () => {
+    expect(DEFAULT_SETTINGS.checks).toMatchObject({ enabled: true, autoRun: true, requireForMerge: true });
+    expect(read("src/main/tools.ts")).not.toMatch(/mergeWork\(/);
+  });
+});

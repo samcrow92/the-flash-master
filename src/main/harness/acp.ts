@@ -8,7 +8,8 @@ import { dirname } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import type { HarnessId, HarnessStatus, ModelInfo } from "@shared/types";
 import { detectExecutable, killTree, spawnTool, splitArgs } from "./process";
-import { decidePermission, insideRoot } from "./policy";
+import { decideCall, insideRoot } from "./policy";
+import { callDetails } from "./rules";
 import type { HarnessAdapter, HarnessSession, ProbeOptions, PromptAttachment, SessionOptions, ToolKind, TurnResult } from "./types";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -328,8 +329,19 @@ export class AcpSession implements HarnessSession {
         const kind = asKind(tc.kind);
         const detail = JSON.stringify(tc.rawInput ?? tc.locations ?? {}).slice(0, 500);
         const title = String(tc.title ?? "tool call");
-        let decision = decidePermission(this.o.policy, kind, `${title} ${detail}`);
-        if (decision === "ask") decision = (await this.o.askPermission({ title, kind, detail })) ? "allow" : "deny";
+        const call = callDetails(tc.rawInput, tc.locations);
+        const verdict = decideCall(this.o.policy, kind, `${title} ${detail}`, call);
+        let decision = verdict.decision;
+        let forcedBy = verdict.decision === "ask" ? verdict.rule : undefined;
+        // The user's pre_tool hooks see every call the policy didn't refuse; deny beats ask beats allow.
+        if (decision !== "deny" && this.o.preTool) {
+          const h = await this.o.preTool({ kind, title, command: call.command, paths: call.paths }).catch(() => null);
+          if (h?.decision === "deny") { decision = "deny"; this.o.onEvent({ type: "activity", text: `Hook denied ${title}${h.reason ? `: ${h.reason}` : ""}` }); }
+          else if (h?.decision === "ask") { decision = "ask"; forcedBy = `hook: ${h.hook}${h.reason ? ` (${h.reason})` : ""}`; }
+          else if (h?.decision === "allow" && decision === "ask" && !forcedBy) decision = "allow";
+        }
+        if (decision === "deny" && verdict.rule) this.o.onEvent({ type: "activity", text: `Denied by ${verdict.rule}: ${title}` });
+        if (decision === "ask") decision = (await this.o.askPermission({ title, kind, detail, ...(forcedBy ? { forcedBy } : {}) })) ? "allow" : "deny";
         const options: Json[] = p.options ?? [];
         const pick = options.find((o) => o.kind === (decision === "allow" ? "allow_once" : "reject_once"))
           ?? options.find((o) => String(o.kind).startsWith(decision === "allow" ? "allow" : "reject"));

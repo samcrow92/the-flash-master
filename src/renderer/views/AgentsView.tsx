@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChecksStatus, mergeWithChecks } from "../components/ChecksStatus";
 import { Bot as BotIcon, Compass, CornerDownRight, MessageCircle, Pause, Play, RoleIcon, Square } from "../components/icons";
 import { agentTitle, api, ago, fmtTokens, roleOf, useStore } from "../store";
 
@@ -110,7 +111,7 @@ function WorkActions({ id, branch }: { id: string; branch: string }) {
   const [busy, setBusy] = useState(false);
   const report = (r: { ok: boolean; message: string }) => st.toast(r.ok ? "info" : "warn", r.message);
   const run = async (fn: () => Promise<void>) => { setBusy(true); try { await fn(); } catch (e: any) { st.toast("error", String(e?.message ?? e)); } finally { setBusy(false); } };
-  const merge = () => run(async () => report(await api().mergeAgentWork(id)));
+  const merge = () => run(async () => report(await mergeWithChecks(id, branch)));
   const discard = () => run(async () => {
     const w = await api().agentWorkState(id);
     const lose = [w.unmerged ? `${w.unmerged} unmerged commit(s)` : "", w.dirty.length ? `${w.dirty.length} uncommitted change(s)` : ""].filter(Boolean).join(" and ");
@@ -120,6 +121,7 @@ function WorkActions({ id, branch }: { id: string; branch: string }) {
   return (
     <span className="work-actions" title={`Works in its own copy of the project on branch ${branch}`}>
       <code className="small">{branch}</code>
+      <ChecksStatus agentId={id} compact />
       <button disabled={busy} onClick={() => st.setView({ kind: "review", agentId: id })} title="See every changed file with diffs, comment on lines, then merge or discard">Review</button>
       <button disabled={busy} onClick={() => void merge()} title={`Merge ${branch} into your current branch`}>Merge</button>
       <button disabled={busy} className="ghost danger" onClick={() => void discard()} title="Remove the copy and its branch">Discard</button>
