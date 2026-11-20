@@ -1952,3 +1952,12 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .composer2 .composer-bar .send:hover:not(:disabled) { transform: skewX(-18deg); filter: brightness(1.1); box-shadow: 0 0 18px -3px var(--accent), inset 0 1px 0 rgba(255, 255, 255, .35); }
 .composer2 .composer-bar .send:disabled { opacity: .4; box-shadow: none; }
 .composer-bar > .muted.small { white-space: nowrap; flex: none; }
+
+/* The row always stays inside the chat box: while an agent runs (Steer / Queue join the row) the toggles keep only their
+   icons, and if it still doesn't fit the drive strip and Send wrap onto a second line instead of spilling out. */
+.composer-bar { flex-wrap: wrap; row-gap: 6px; }
+.composer-bar > * { min-width: 0; }
+.composer-bar:has(.cb-busy) .cb-toggle .cb-label { display: none; }
+.composer-bar:has(.cb-busy) .ds-rev { display: none; }
+.composer-bar .grow { flex: 1 1 0; min-width: 0; }
+.cb-drive { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }

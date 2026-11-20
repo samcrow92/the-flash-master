@@ -88,8 +88,9 @@ describe("composer", () => {
     expect(bar).toContain("<ModeBar");
     expect(bar).toContain("<DuoStrip");
     expect(tsx.split("<ModeBar ").length - 1).toBe(1);
-    // A Duo chat shows one selector: Duo's strip, plus the drive modes only while one is set.
-    expect(bar).toContain("(!duo || chat.mode) && <ModeBar");
+    // A Duo chat shows only Duo's strip, never both (Mari, 2026-11-20: "replace the default one with the duo one").
+    expect(bar).toContain("settings && !duo && <ModeBar");
+    expect(tsx).toContain("if (!compact && duo && chat.mode) void patchChat({ mode: null })");
     const css = read("src/renderer/styles.css");
     expect(css).not.toContain(".composer-wrap > .mode-bar");
     // Drive modes on any chat use the same slanted strip as Duo's (Mari, 2026-11-20).
@@ -102,6 +103,12 @@ describe("composer", () => {
     expect(buttons.length).toBeGreaterThan(5);
     for (const b of buttons) expect(b, b).toMatch(/ds-seg/);
     expect(css).toMatch(/\.composer2 \.composer-bar \.send \{[^}]*transform: skewX\(-18deg\)/);
+    // Regression (2026-11-20): with Steer / Queue in the row the buttons spilled out of the chat box. The row may wrap,
+    // the strip and Send wrap together, and the toggles drop their words while an agent runs.
+    expect(css).toContain(".composer-bar { flex-wrap: wrap; row-gap: 6px; }");
+    expect(css).toMatch(/\.cb-drive \{[^}]*flex: none;/);
+    expect(css).toContain(".composer-bar:has(.cb-busy) .cb-toggle .cb-label { display: none; }");
+    expect(tsx).toContain('<div className="cb-drive">');
     // Duo's strip keeps its full labels at the chat column's width (it is 780px wide).
     expect(css).toMatch(/@container \(max-width: 560px\) \{ \.ds-rev/);
   });

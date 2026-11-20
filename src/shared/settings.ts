@@ -294,6 +294,14 @@ export function modeClickPatch(chat: Pick<Chat, "mode" | "duoMode">, settings: P
   return click.duoMode && offDuo(chat.mode) ? { duoMode: click.duoMode, mode: null } : { duoMode: click.duoMode };
 }
 
+/**
+ * The chat patch for picking a harness. Picking GitLab Duo drops the chat's drive mode: on Duo the Duo strip is the only
+ * mode selector, and a leftover drive mode with its own harness would quietly move the coordinator off Duo.
+ */
+export function harnessPickPatch(chat: Pick<Chat, "mode">, harness: HarnessId | null): Partial<Pick<Chat, "harness" | "mode">> {
+  return harness === "duo" && chat.mode ? { harness, mode: null } : { harness };
+}
+
 /** The Duo drive-mode dial's positions, left to right: AUTO (Duo's usual model), then ECO, COMFORT, SPORT. */
 export const DUO_DIAL: (DuoMode | null)[] = [null, ...DUO_MODES];
 

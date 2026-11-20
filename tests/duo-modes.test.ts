@@ -14,7 +14,7 @@ import { HarnessRegistry } from "../src/main/harness/registry";
 import { Db } from "../src/main/db";
 import { Orchestrator } from "../src/main/orchestrator";
 import { loadRoles, loadSkills } from "../src/main/roles";
-import { chatOnDuo, DEFAULT_SETTINGS, duoDialTurn, modeClickPatch, DUO_COORDINATOR_MODEL, duoModelId, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
+import { chatOnDuo, harnessPickPatch, DEFAULT_SETTINGS, duoDialTurn, modeClickPatch, DUO_COORDINATOR_MODEL, duoModelId, mergeSettings, type DeepPartial, type Settings } from "../src/shared/settings";
 import type { SessionOptions } from "../src/main/harness/types";
 
 const FAKE_DUO = join(__dirname, "fixtures", "fake-duo.mjs");
@@ -86,6 +86,12 @@ describe("GitLab Duo modes", () => {
     for (const mode of [null, "local", "eco", "comfort", "sport"] as const) {
       expect(chatOnDuo({ projectId: "p", harness: null, mode } as any, on), `drive mode ${mode}`).toBe(true);
     }
+  });
+
+  it("picking Duo as the harness drops a drive mode, so the Duo strip is the only mode selector", () => {
+    expect(harnessPickPatch({ mode: "sport" }, "duo")).toEqual({ harness: "duo", mode: null });
+    expect(harnessPickPatch({ mode: null }, "duo")).toEqual({ harness: "duo" });
+    expect(harnessPickPatch({ mode: "sport" }, "copilot")).toEqual({ harness: "copilot" });
   });
 
   it("can't both steer the coordinator: a Duo mode drops a drive mode that leaves Duo, and the other way round", () => {
