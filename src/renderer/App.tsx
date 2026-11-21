@@ -9,6 +9,8 @@ import { ChatView } from "./views/ChatView";
 import { AgentsView } from "./views/AgentsView";
 import { ReviewView } from "./views/ReviewView";
 import { DashboardView } from "./views/DashboardView";
+import { TimelineView } from "./views/TimelineView";
+import { EvalsView } from "./views/EvalsView";
 import { TasksView } from "./views/TasksView";
 import { MemoryView } from "./views/MemoryView";
 import { JazzView } from "./views/JazzView";
@@ -90,6 +92,8 @@ export function App() {
         {view.kind === "agents" && <AgentsView />}
         {view.kind === "review" && <ReviewView agentId={view.agentId} />}
         {view.kind === "dashboard" && <DashboardView />}
+        {view.kind === "timeline" && <TimelineView key={view.traceId ?? ""} traceId={view.traceId} />}
+        {view.kind === "evals" && <EvalsView />}
         {view.kind === "tasks" && <TasksView />}
         {view.kind === "memory" && <MemoryView />}
         {view.kind === "jazz" && <JazzView />}

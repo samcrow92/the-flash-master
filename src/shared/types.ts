@@ -540,6 +540,67 @@ export interface AgentChecks {
   requireForMerge: boolean;
 }
 
+export type SpanKind = "request" | "turn" | "tool" | "delegate" | "checks" | "eval";
+export type SpanStatus = "running" | "ok" | "error" | "stopped";
+/** One span of a local trace (src/main/traces.ts); attribute names follow the OpenTelemetry GenAI conventions. */
+export interface Span {
+  id: string;
+  traceId: string;
+  parentId: string | null;
+  agentId: string | null;
+  chatId: string | null;
+  kind: SpanKind;
+  name: string;
+  start: number;
+  end: number | null;
+  status: SpanStatus;
+  attrs: Record<string, string | number | boolean>;
+}
+export interface TraceSummary {
+  traceId: string;
+  chatId: string | null;
+  name: string;
+  start: number;
+  end: number;
+  spans: number;
+  tokens: number;
+  agents: number;
+  errors: number;
+  running: boolean;
+}
+
+/** What an eval case expects (see src/main/evals.ts). */
+export interface EvalExpect {
+  status?: string;
+  checks?: boolean;
+  files?: string[];
+  contains?: string[];
+  regex?: string;
+  maxTokens?: number;
+  maxMinutes?: number;
+}
+export interface EvalCase { id: string; title: string; prompt: string; timeoutMinutes?: number; expect: EvalExpect }
+export interface EvalSuite { file: string; name: string; targets: string[]; cases: EvalCase[]; error?: string }
+export interface EvalCaseResult {
+  id: string;
+  suite: string;
+  caseId: string;
+  target: string;
+  batch: string;
+  projectId: string | null;
+  passed: boolean;
+  score: number;
+  tokens: number;
+  ms: number;
+  traceId: string | null;
+  at: number;
+  assertions: { name: string; ok: boolean; detail: string }[];
+  reply: string;
+  /** Set by the Evals page query: why this run counts as a regression against the previous batch. */
+  regression?: string;
+}
+export interface EvalProgress { running: boolean; batch: string | null; done: number; total: number; current: string | null }
+
 export type AppEvent =
   | { type: "message.created"; message: Message }
   | { type: "message.delta"; messageId: string; chatId: string; delta: string }
@@ -555,6 +616,8 @@ export type AppEvent =
   | { type: "roles.changed"; roles: RoleDef[] }
   | { type: "flow.updated"; agentId: string }
   | { type: "checks.updated"; agentId: string }
+  | { type: "trace.updated"; traceId: string }
+  | { type: "evals.updated"; progress: EvalProgress }
   | { type: "models.updated"; models: HarnessModels }
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "artifacts.changed"; chatId: string }

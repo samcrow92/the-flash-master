@@ -28,6 +28,7 @@ import { checkReports, reportFixPrompt } from "./report-check";
 import { checksFixPrompt, checksForParent, checksLine, loadChecks, runChecks, type CheckRun, type CheckRunner, type ChecksConfig } from "./checks";
 import { HookRunnerHost, parseHooks } from "./hooks";
 import { parseRules } from "./harness/rules";
+import { newTraceId, type TraceStore } from "./traces";
 import { attemptsReport, rankAttempts, routeByDifficulty, ROUTE_MODES, type Attempt, type RouteMode } from "./routing";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
@@ -54,6 +55,8 @@ export interface OrchestratorDeps {
   git?: Git;
   /** Runs check commands (tests inject a fake). */
   checkRunner?: CheckRunner;
+  /** Local traces (Timeline page, OTLP export); unset = no tracing. */
+  traces?: TraceStore;
   /** Runs the user's hooks (tests inject one with a fake runner); default: Settings → Permissions → Hooks. */
   hooks?: HookRunnerHost;
   /** Folder agents work in when their chat has no project (Settings → Agents; C:\\Data\\.wt by default on Windows). Unset: the home folder. */
@@ -189,6 +192,12 @@ interface Live {
   requestStart?: { at: number; base: number };
   /** The task-budget warning was shown for the current request. */
   budgetWarned?: boolean;
+  /** Tracing: the trace of the request it works for, and its open spans (request, delegated task, current turn, tool calls). */
+  traceId?: string;
+  requestSpan?: string;
+  delegateSpan?: string;
+  turnSpan?: string;
+  toolSpans?: Map<string, string>;
   /** Recovery attempts for the current delegated task (reminder, restart…), capped by agents.recoveryAttempts. */
   recoveries?: number;
   /** The agent raised a "needs you" card in this turn (ask_user): it's waiting for the user, not silent. */
@@ -569,6 +578,13 @@ export class Orchestrator {
       live.resultTaken = false;
       live.recoveries = 0;
       live.task = { goal: a.goal, brief, taskId };
+      if (this.d.traces) {
+        live.traceId = parent.traceId ?? live.traceId ?? newTraceId();
+        parent.traceId ??= live.traceId;
+        live.delegateSpan = this.d.traces.start({ traceId: live.traceId, parentId: parent.turnSpan ?? parent.requestSpan ?? null, agentId: live.agentId, chatId: chat.id, kind: "delegate",
+          name: `${agentLabel(live, role.title)}: ${a.goal.replace(/\s+/g, " ").slice(0, 100)}`, attrs: { "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": agentLabel(live, role.title),
+            "flash.role": role.name, "gen_ai.provider.name": live.harness, ...(live.model ? { "gen_ai.request.model": live.model } : {}), ...(live.branch ? { "flash.branch": live.branch } : {}) } });
+      }
       live.taskStartedAt = Date.now();
       live.timeLimitedAt = undefined;
       done = a.wait === false ? null : new Promise<string>((resolve) => { waiter = resolve; live.waiters.push(resolve); });
@@ -1071,6 +1087,9 @@ export class Orchestrator {
     this.d.emit({ type: "checks.updated", agentId });
     try {
       const { head, dirty } = await this.worktreeHead(w.dir);
+      const lc = this.byAgent.get(agentId);
+      const span = lc?.traceId ? this.d.traces?.start({ traceId: lc.traceId, parentId: lc.delegateSpan ?? null, agentId, chatId: lc.chatId, kind: "checks",
+        name: `checks: ${cfg.checks.map((c) => c.name).join(", ").slice(0, 100)}`, attrs: { "flash.checks.count": cfg.checks.length } }) : undefined;
       const run = await runChecks(w.dir, cfg.checks, { runner: this.d.checkRunner, defaultTimeoutMinutes: this.d.settings().checks?.timeoutMinutes || 15, head, dirty,
         env: networkEnv(this.d.settings()),
         onProgress: (c, i) => {
@@ -1078,6 +1097,7 @@ export class Orchestrator {
           this.emitAgent(this.d.db.updateAgent(agentId, { lastActivity: `🧪 Checks ${i + 1}/${cfg.checks.length}: ${c.name}` }));
         } });
       this.d.db.saveCheckRun(agentId, run);
+      this.d.traces?.end(span, { status: run.ok ? "ok" : "error", attrs: { "flash.checks.failed": run.results.filter((r) => !r.ok).length } });
       this.emitAgent(this.d.db.updateAgent(agentId, { lastActivity: checksLine(run) }));
       this.flow(agentId, { kind: "status", label: checksLine(run), status: run.ok ? "checks passed" : "checks failed" });
       if (this.hooks.has("checks_done")) {
@@ -1505,6 +1525,21 @@ export class Orchestrator {
     return n;
   }
 
+  /** Nothing in this chat is working or about to: no busy or queued agent and no results waiting to wake a coordinator. */
+  chatSettled(chatId: string): boolean {
+    for (const l of this.live.values()) {
+      if (l.chatId !== chatId) continue;
+      if (l.busy || l.queue.length || l.redirect || this.reports.has(l.agentId) || (l.textWaiting ?? 0) > 0) return false;
+    }
+    return true;
+  }
+
+  /** The chat's coordinator (depth 0): its agent id and the trace of its current request. */
+  chatCoordinator(chatId: string): { agentId: string; traceId: string | null } | null {
+    for (const l of this.live.values()) if (l.chatId === chatId && l.depth === 0 && !l.parentAgentId) return { agentId: l.agentId, traceId: l.traceId ?? null };
+    return null;
+  }
+
   async stopChat(chatId: string): Promise<void> {
     for (const l of [...this.live.values()]) if (l.chatId === chatId) await this.stop(l.agentId);
   }
@@ -1702,6 +1737,11 @@ export class Orchestrator {
       const me = this.d.db.getAgent(live.agentId);
       live.requestStart = { at: Date.now(), base: me ? me.tokensIn + me.tokensOut : 0 };
       live.budgetWarned = false;
+      if (this.d.traces) {
+        live.traceId = newTraceId();
+        live.requestSpan = this.d.traces.start({ traceId: live.traceId, agentId: live.agentId, chatId: t.chat.id, kind: "request", name: t.input.replace(/\s+/g, " ").slice(0, 120) || "request",
+          attrs: { "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": t.role.title, "flash.role": t.role.name } });
+      }
     }
 
     live.busy = true;
@@ -1723,6 +1763,14 @@ export class Orchestrator {
     let reply = newReply();
     live.currentMessageId = reply.id;
     live.lastReplyId = reply.id;
+    if (this.d.traces) {
+      live.traceId ??= this.byAgent.get(live.parentAgentId ?? "")?.traceId ?? newTraceId();
+      live.toolSpans = new Map();
+      live.turnSpan = this.d.traces.start({ traceId: live.traceId, parentId: live.delegateSpan ?? live.requestSpan ?? null, agentId: live.agentId, chatId: t.chat.id, kind: "turn",
+        name: `${agentLabel(live, t.role.title)} turn`, attrs: { "gen_ai.operation.name": "chat", "gen_ai.agent.name": agentLabel(live, t.role.title), "flash.role": t.role.name,
+          "gen_ai.provider.name": live.harness, ...(t.checkRound ? { "flash.check_round": t.checkRound } : {}), ...(t.reportRound ? { "flash.report_round": t.reportRound } : {}) } });
+      this.d.emit({ type: "trace.updated", traceId: live.traceId });
+    }
     live.tools = new Map();
     live.textBreak = false;
     live.thought = null;
@@ -1921,6 +1969,8 @@ export class Orchestrator {
         ? { ...res.usage, estimated: false }
         : { tokensIn: estimateTokens(promptText), tokensOut: estimateTokens(text), estimated: true };
       this.d.db.recordUsage({ agentId: live.agentId, projectId: t.chat.projectId, harness: live.harness, role: t.role.name, ...usage });
+      this.d.traces?.annotate(live.turnSpan, { "gen_ai.usage.input_tokens": usage.tokensIn, "gen_ai.usage.output_tokens": usage.tokensOut, "flash.tokens_estimated": usage.estimated,
+        ...(live.model ? { "gen_ai.request.model": live.model } : {}) });
       live.sessionTokens += usage.tokensIn + usage.tokensOut;
       const redirected = !!live.redirect && !live.stopped;
       const gaveUp = live.stallGiveUp ?? null;
@@ -2020,6 +2070,15 @@ export class Orchestrator {
       live.currentMessageId = null;
       if (!borrowed) this.releaseSlot();
       if (live.parentAgentId) this.teamSlotFreed(live.parentAgentId);
+      if (this.d.traces && live.turnSpan) {
+        for (const id of live.toolSpans?.values() ?? []) this.d.traces.end(id, { status: "stopped" });
+        this.d.traces.end(live.turnSpan, { status: finalStatus === "error" ? "error" : live.stopped ? "stopped" : "ok", attrs: { "flash.status": finalStatus } });
+        this.d.traces.end(live.requestSpan, { touch: true });
+        const parentLive = live.parentAgentId ? this.byAgent.get(this.teamRoot(live.agentId)) : null;
+        if (parentLive?.requestSpan) this.d.traces.end(parentLive.requestSpan, { touch: true });
+        live.turnSpan = undefined;
+        if (live.traceId) this.d.emit({ type: "trace.updated", traceId: live.traceId });
+      }
     }
     if (this.hooks.has("turn_end")) {
       void this.hooks.fire({ event: "turn_end", agentId: live.agentId, agent: agentLabel(live, t.role.title), role: t.role.name, cwd: this.agentWorkDir(live.agentId),
@@ -2326,6 +2385,16 @@ export class Orchestrator {
           if (this.recordTool(live, e)) {
             this.setStatus(live, "running", `${e.status === "completed" ? "✓" : "▸"} ${e.title}`);
             this.flow(live.agentId, { kind: "tool", label: e.title, status: e.status });
+            if (this.d.traces && live.traceId && live.turnSpan) {
+              const k = e.id ?? e.title;
+              let sp = live.toolSpans?.get(k);
+              if (!sp) {
+                sp = this.d.traces.start({ traceId: live.traceId, parentId: live.turnSpan, agentId: live.agentId, chatId: live.chatId, kind: "tool", name: e.title,
+                  attrs: { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": e.title.slice(0, 120), "flash.tool.kind": e.kind } });
+                live.toolSpans?.set(k, sp);
+              }
+              if (e.status === "completed" || e.status === "failed") { this.d.traces.end(sp, { status: e.status === "failed" ? "error" : "ok" }); live.toolSpans?.delete(k); }
+            }
             if ((e.status === "completed" || e.status === "failed") && this.hooks.has("post_tool")) {
               void this.hooks.fire({ event: "post_tool", agentId: live.agentId, agent: agentLabel(live, live.role.title), role: live.role.name,
                 cwd: this.agentWorkDir(live.agentId), kind: e.kind, title: e.title, command: e.kind === "execute" ? (e.input ?? e.title) : null,
@@ -2747,6 +2816,10 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
    * a new message, so the coordinator continues instead of sitting idle. Results that finish close together go in one message.
    */
   private finishDelegated(l: Live, result: string): void {
+    if (l.delegateSpan) {
+      this.d.traces?.end(l.delegateSpan, { status: /^error:|^failed/.test(result) ? "error" : result === "stopped" ? "stopped" : "ok", attrs: { "flash.result": result.slice(0, 300) } });
+      l.delegateSpan = undefined;
+    }
     const parent = l.parentAgentId ? this.byAgent.get(l.parentAgentId) : undefined;
     const listening = l.waiters.length > 0 && !!parent && (parent.busy || (parent.textWaiting ?? 0) > 0);
     this.finishWaiters(l, result);

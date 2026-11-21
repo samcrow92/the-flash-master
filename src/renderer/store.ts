@@ -17,6 +17,8 @@ export type View =
   | { kind: "jazz" }
   | { kind: "settings"; tab?: string }
   | { kind: "flow"; agentId: string }
+  | { kind: "timeline"; traceId?: string }
+  | { kind: "evals" }
   | { kind: "marketplace" }
   | { kind: "docs"; page?: string };
 
