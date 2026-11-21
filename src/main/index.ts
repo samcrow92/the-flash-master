@@ -1,4 +1,7 @@
 import { fixPath } from "./shell-path";
+import { execFileSync } from "node:child_process";
+import { memoryHealth } from "./memory-health";
+import { ollamaEmbedder } from "./embeddings";
 import { EvalRunner, loadSuites, regressions } from "./evals";
 import { TraceStore, toOtlp, waterfall } from "./traces";
 import { evaluateRules, parseRules } from "./harness/rules";
@@ -42,7 +45,7 @@ import { Updater, parseFeed } from "./updater";
 import { currentProxyEnv, setProxyEnv } from "./win-env";
 import { parseProxy, fallbacks, isProxySetupError, describe, explainProxyError, type ProxyCfg, type ParsedProxy } from "./proxy";
 import type { CopilotUsage } from "@shared/types";
-import { loadRoles, loadSkills, parseRole, roleMarkdown, slugRole, validateRole, type AgentSpec } from "./roles";
+import { loadAgentSkills, loadRoles, loadSkills, parseRole, roleMarkdown, slugRole, validateRole, type AgentSpec } from "./roles";
 import type { AgentImportResult, Attachment, HarnessId, HarnessModels } from "@shared/types";
 import { randomUUID } from "node:crypto";
 import { HARNESS_IDS } from "@shared/types";
@@ -121,6 +124,24 @@ const syncAllKnowledge = () => {
     try { knowledge.sync(p.id); } catch (e) { log("warn", `knowledge sync ${p.name}: ${String(e)}`); }
   }
 };
+/** The project's current commit (git HEAD), cached for a short while: memories saved in a project carry it as provenance. */
+const headCache = new Map<string, { at: number; sha: string | null }>();
+function projectHead(projectId: string | null): string | null {
+  const p = projectId ? db.getProject(projectId) : null;
+  if (!p) return null;
+  const c = headCache.get(p.path);
+  if (c && Date.now() - c.at < 30_000) return c.sha;
+  let sha: string | null = null;
+  try { sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: p.path, encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null; } catch { /* not a repo */ }
+  headCache.set(p.path, { at: Date.now(), sha });
+  return sha;
+}
+const applyEmbeddings = () => {
+  const e = settings.get().memory.embeddings;
+  memory.setEmbedder(e?.provider === "ollama" && e.model.trim() ? ollamaEmbedder(e.url || "http://127.0.0.1:11434", e.model.trim()) : null);
+};
+applyEmbeddings();
+settings.onChange(() => applyEmbeddings());
 const sweepMemory = () => { try { if (memory.sweep()) emit({ type: "memory.changed" }); } catch (e) { log("warn", `memory sweep: ${String(e)}`); } };
 
 let roles: RoleDef[] = [];
@@ -131,7 +152,9 @@ const reloadRoles = () => {
   roles = loadRoles(join(resources, "agents"), userRolesDir);
   for (const r of tempRoles.values()) if (!roles.some((x) => x.name === r.name)) roles.push(r);
   const builtinSkills = [...loadSkills(join(resources, "skills", "superpowers")), ...loadSkills(join(resources, "skills", "pstack"))];
-  const userSkills = loadSkills(userSkillsDir);
+  // Agent Skills (SKILL.md folders): the app's skills folder, then ~/.claude/skills and ~/.agents/skills (shared with other agent tools).
+  const userSkills = [...loadSkills(userSkillsDir), ...loadAgentSkills(userSkillsDir, "user"), ...loadAgentSkills(join(homedir(), ".claude", "skills"), "user"),
+    ...loadAgentSkills(join(homedir(), ".agents", "skills"), "user")].filter((k, i, all) => all.findIndex((x) => x.command === k.command) === i);
   skills = [...builtinSkills.filter((b) => !userSkills.some((u) => u.command === b.command)), ...userSkills];
 };
 reloadRoles();
@@ -510,7 +533,7 @@ const needJazz = () => { const j = jazz(); if (!j) throw new Error("Jazz is not 
 bridge.register(buildTools({ db, orch, roles: () => roles, jazz, requirements, rmWriter, etm, scm, scmWrite, rmProjects: () => settings.get().jazz.rm.projects, jazzAreas: () => jazzAreas(settings.get().jazz),
   onArtifact: (agentId) => { const a = db.getAgent(agentId); if (a?.chatId) emit({ type: "artifacts.changed", chatId: a.chatId }); }, emitTask: (task) => emit({ type: "task.updated", task }),
   deleteTask: (taskId) => emit({ type: "task.deleted", taskId }),
-  memory, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,
+  memory, headCommit: projectHead, memoryEnabled: () => settings.get().memory.enabled, onMemory: () => emit({ type: "memory.changed" }), knowledge, codeGraph,
   readOnly: () => settings.get().permissions.readOnly }));
 
 // ---------------- chat attachments ----------------
@@ -1003,6 +1026,22 @@ const api: FlashApi = {
     await shell.openPath(dir);
   },
   deleteMemory: async (id) => { memory.delete(Number(id)); emit({ type: "memory.changed" }); },
+  memoryHealth: async (projectId) => {
+    const proj = projectId ? db.getProject(projectId) : null;
+    const ms = memory.list(null, { projectId: projectId ?? null, limit: 2000 }).filter((m) => m.scope !== "session");
+    return memoryHealth(ms, {
+      exists: (path) => (proj ? existsSync(join(proj.path, path)) : null),
+      changedSince: (commit, paths) => {
+        if (!proj) return null;
+        try {
+          return execFileSync("git", ["diff", "--name-only", commit, "HEAD", "--", ...paths], { cwd: proj.path, encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] })
+            .split("\n").map((l) => l.trim()).filter(Boolean);
+        } catch { return null; }
+      },
+    });
+  },
+  mergeMemories: async (ids, keepId) => { const m = memory.merge(ids, keepId); emit({ type: "memory.changed" }); return m; },
+  confirmMemory: async (id) => { const cur = memory.require(id, null); const m = memory.confirm(cur.id, projectHead(cur.projectId)); emit({ type: "memory.changed" }); return m; },
   promoteMemory: async (id, to) => {
     const cur = memory.require(id, null);
     const m = memory.promote(cur.id, to, { projectId: cur.projectId, chatId: cur.chatId }).memory;

@@ -2090,3 +2090,13 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .eval-spark { display: flex; gap: 2px; margin-top: 4px; } .eval-spark i { width: 6px; height: 10px; border-radius: 2px; background: var(--red); } .eval-spark i.p { background: var(--green); }
 .eval-detail { margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: var(--bg2); } .eval-detail .ok { color: var(--green); } .eval-detail .bad { color: var(--red); } .eval-detail button.link { color: var(--accent); margin-top: 4px; }
 .card .big { font-size: 22px; font-weight: 600; }
+
+/* Memory health */
+.memory-health { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: var(--glass); border: 1px solid var(--rim); }
+.memory-health.has { border-color: color-mix(in srgb, var(--amber) 35%, var(--rim)); }
+.memory-health .ok-text { color: var(--green); }
+.health-lists { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.health-item { padding: 8px 10px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.health-why { display: flex; align-items: center; gap: 6px; font-size: var(--fs-s); color: var(--amber); font-weight: 600; }
+.health-text { font-size: var(--fs-m); }
+.health-text.keep { font-weight: 600; }

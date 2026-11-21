@@ -26,7 +26,7 @@ const s = (description: string) => ({ type: "string", description });
 export function buildTools(d: {
   db: Db; orch: Orchestrator; roles: () => RoleDef[]; jazz: () => JazzClient | null; emitTask: (t: Task) => void; deleteTask?: (id: string) => void;
   requirements?: Requirements; rmWriter?: RmWriter; rmProjects?: () => string[]; onArtifact?: (agentId: string) => void; jazzAreas?: () => string[];
-  memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void;
+  memory?: MemoryStore; memoryEnabled?: () => boolean; onMemory?: () => void; headCommit?: (projectId: string | null) => string | null;
   knowledge?: KnowledgeBase; codeGraph?: CodeGraph; readOnly?: () => boolean;
   etm?: () => EtmClient | null; scm?: (repo?: string) => ScmClient | null; scmWrite?: (repo?: string) => ScmWriter | null;
 }): ToolDef[] {
@@ -237,6 +237,13 @@ export function buildTools(d: {
       handler: async (a, c) => d.orch.proposePlan(c.agentId, a),
     },
     {
+      set: "core", name: "use_skill",
+      description: "Load one of the skills listed under Skills (packaged instructions for a task, Agent Skills / SKILL.md): returns its full instructions, "
+        + "its folder and the files it ships (scripts, references, templates) so you can read or run them. Load a skill before starting the task it covers.",
+      inputSchema: obj({ name: s("the skill's name as listed") }, ["name"]),
+      handler: async (a, c) => d.orch.useSkill(c.agentId, String(a.name ?? "")),
+    },
+    {
       set: "core", name: "update_state",
       description: "Record your working state: done, decisions, next steps, open questions, notes. If your session is restarted to save context, this is what you continue from. "
         + "done, decisions and files add to what is there; next and questions replace the current lists; notes replaces.",
@@ -371,7 +378,8 @@ export function buildTools(d: {
         replaces: { type: "array", items: { type: "number" }, description: "ids of memories this one corrects (they are deleted)" },
       }, ["content"]),
       handler: async (a, c) => {
-        const r = mem().save(a, memCtx(c.agentId));
+        const ctx = memCtx(c.agentId);
+        const r = mem().save({ ...a, commit: d.headCommit?.(ctx.projectId) ?? null }, ctx);
         return changed({ id: r.memory.id, scope: r.memory.scope, status: r.status, ...(r.replaced.length ? { replaced: r.replaced } : {}),
           ...(r.similar.length ? { similar: r.similar, hint: "similar memories exist: update or delete them if this one supersedes them" } : {}) });
       },
@@ -384,8 +392,8 @@ export function buildTools(d: {
         query: s("what you want to know, in words"), scope: scopeProp("only this scope (optional)"),
         kind: { type: "string", enum: [...MEMORY_KINDS] }, tag: s("only memories with this tag (optional)"), limit: { type: "number", description: "default 8, max 30" },
       }, ["query"]),
-      handler: async (a, c) => mem().search(String(a.query ?? ""), memCtx(c.agentId), { scopes: a.scope ? [a.scope] : undefined, kind: a.kind, tag: a.tag,
-        limit: Math.min(Number(a.limit) || 8, 30) }).map((h) => ({ ...memBrief(h), score: h.score })),
+      handler: async (a, c) => (await mem().prepare(String(a.query ?? "")), mem().search(String(a.query ?? ""), memCtx(c.agentId), { scopes: a.scope ? [a.scope] : undefined, kind: a.kind, tag: a.tag,
+        limit: Math.min(Number(a.limit) || 8, 30) }).map((h) => ({ ...memBrief(h), score: h.score }))),
     },
     {
       set: "core", name: "memory_list",

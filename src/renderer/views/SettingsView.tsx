@@ -240,6 +240,9 @@ function Agents(f: F) {
     <Row label="Remember specialists' results" hint="Each delegated specialist's result summary is saved as a short-term memory of the chat, so the other agents there know what was done."><Bool f={f} path="memory.captureResults" /></Row>
     <Row label="Sync project knowledge bases" hint="Keeps each project's knowledge base (Memory page) in step with .flashmaster/knowledge in its git repo: teammates' changes come in after a pull, your agents' updates go out to the folder for you to commit."><Bool f={f} path="memory.knowledgeSync" /></Row>
     <Row label="Knowledge sync interval (minutes)"><Num f={f} path="memory.knowledgeSyncMinutes" min={1} /></Row>
+    <Row label="Local embeddings" hint="Memory search also ranks by meaning, with an embedding model on your own computer (Ollama). Keyword and fuzzy search work without it; nothing leaves this computer."><Choice f={f} path="memory.embeddings.provider" options={[["off", "Off"], ["ollama", "Ollama (local)"]]} /></Row>
+    <Row label="Ollama address"><Text f={f} path="memory.embeddings.url" placeholder="http://127.0.0.1:11434" /></Row>
+    <Row label="Embedding model" hint="Pull it first, e.g. ollama pull nomic-embed-text."><Text f={f} path="memory.embeddings.model" placeholder="nomic-embed-text" /></Row>
     <InstructionSettings f={f} />
     <div className="row between">
       <h4>Agents</h4>
