@@ -113,6 +113,8 @@ export interface Settings {
     maxAttempts: number;
     /** Pick ECO / COMFORT / SPORT for a delegation by how hard its brief looks, when the coordinator names none. */
     autoRoute: boolean;
+    /** Task plans from propose_plan: "ask" shows the plan for the user to edit and approve; "auto" runs it at once. */
+    planApproval: "ask" | "auto";
   };
   /** Task board auto-cleanup; Review tasks and tasks with a working agent are always kept. */
   tasks: {
@@ -154,6 +156,12 @@ export interface Settings {
     showTokenCounts: boolean;
     /** Tokens one request may spend across the coordinator's whole tree (coordinator, specialists, helpers); 0 = unlimited. */
     taskBudget: number;
+    /**
+     * Who writes the rolling chat summary: "extractive" (no model call, free) or "model" (a cheap or local model, given
+     * as harness/model in summarizerModel; falls back to extractive when it fails).
+     */
+    summarizer: "extractive" | "model";
+    summarizerModel: string;
   };
   permissions: {
     approval: ApprovalPolicy;
@@ -381,7 +389,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL, orchestratorRules: "", modes: DUO_MODE_DEFAULTS },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true, maxTaskMinutes: 120, maxAttempts: 3, autoRoute: false },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true, maxTaskMinutes: 120, maxAttempts: 3, autoRoute: false, planApproval: "ask" },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   server: { url: "", hasToken: false },
@@ -400,6 +408,8 @@ export const DEFAULT_SETTINGS: Settings = {
     economyForDelegated: false,
     showTokenCounts: true,
     taskBudget: 1_000_000,
+    summarizer: "extractive",
+    summarizerModel: "",
   },
   permissions: { approval: "auto-all", readOnly: false, blockedCommands: "rm -rf /\nformat c:\ngit push --force", rules: DEFAULT_RULES, hooks: "" },
   traces: { enabled: true, retentionDays: 30 },

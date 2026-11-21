@@ -6,8 +6,9 @@
  * user sees them without the coordinator's context ever containing their transcript.
  */
 import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve as resolvePath } from "node:path";
-import type { AgentChecks, AgentRun, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, ToolRun } from "@shared/types";
+import { randomUUID } from "node:crypto";
+import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import type { AgentChecks, AgentRun, AgentState, AppEvent, AskCard, Attachment, Chat, HarnessId, Message, RoleDef, SkillDef, Task, TaskPlan, ToolRun } from "@shared/types";
 import { HARNESS_IDS } from "@shared/types";
 import { cliProxyUrl } from "./proxy";
 import { jazzToolsOn, type DuoModeProfile, type Settings } from "@shared/settings";
@@ -30,6 +31,8 @@ import { HookRunnerHost, parseHooks } from "./hooks";
 import { parseRules } from "./harness/rules";
 import { newTraceId, type TraceStore } from "./traces";
 import { attemptsReport, rankAttempts, routeByDifficulty, ROUTE_MODES, type Attempt, type RouteMode } from "./routing";
+import { dependencyContext, normaliseTasks, planOutline, planReport, readyTasks, resultOk, skipBlocked, validatePlan } from "./plan";
+import { mergeState, renderState, STATE_RULES } from "./agent-state";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
 import { slugRole, type AgentSpec } from "./roles";
@@ -192,6 +195,8 @@ interface Live {
   requestStart?: { at: number; base: number };
   /** The task-budget warning was shown for the current request. */
   budgetWarned?: boolean;
+  /** Working on a task of a plan: its result goes to the plan runner, not to its delegating agent as a report. */
+  inPlan?: boolean;
   /** Tracing: the trace of the request it works for, and its open spans (request, delegated task, current turn, tool calls). */
   traceId?: string;
   requestSpan?: string;
@@ -242,6 +247,9 @@ const DELIVER_NUDGE = "You ended your turn without delivering a result, so the a
   + "if you need the user, use status needs_decision with a question and options.";
 const RESTART_NOTE = (why: string) => `TheFlashMaster restarted you because the previous attempt at this task ${why}. `
   + "Do the task below and end with the result block. If something keeps failing, stop and report it (status blocked or failed) instead of retrying it.";
+const SUMMARY_PROMPT = "Summarise the conversation below for an AI agent that continues it with no other memory of it. Keep: what the user wants, "
+  + "decisions and their reasons, facts found (file names, values, error messages), what is done, what is still open. Bullet points, at most 300 words. "
+  + "Reply with the summary only.";
 const UNTANGLE_NOTE = (name: string, agentId: string) => `(${name} needs an answer before it can go on. Handle it yourself if you can: decide from the brief, `
   + `the project and memory, give it the missing context, or narrow the task, and send that as a follow-up (delegate with agentId ${agentId}, or in text mode DELEGATE <role> agent "${agentId}": …); or `
   + "give the work to another specialist. Ask the user (ask_user) only for missing access or credentials, a choice that changes what they asked for, or an irreversible step.)";
@@ -302,6 +310,8 @@ export class Orchestrator {
   /** Team slots taken by delegations that passed the cap but whose specialist hasn't started its turn yet, per coordinator. */
   private teamReserved = new Map<string, number>();
   /** Finished background specialists whose results still have to reach their coordinator, per coordinator. */
+  /** Plans being run (the same objects the runner mutates, so a cancel is seen at once). */
+  private runningPlans = new Map<string, TaskPlan>();
   private reports = new Map<string, { live: Live; result: string; timer: ReturnType<typeof setTimeout> | null; items: { l: Live; result: string }[] }>();
 
   constructor(private d: OrchestratorDeps) {}
@@ -478,7 +488,7 @@ export class Orchestrator {
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
     wait?: boolean; timeoutSec?: number; harness?: string; model?: string; provider?: string; args?: string; agentId?: string; folder?: string; local?: boolean;
-    mode?: string; attempts?: number }):
+    mode?: string; attempts?: number; onDone?: (result: string) => void }):
     Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string; model?: string | null }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
@@ -578,6 +588,9 @@ export class Orchestrator {
       live.resultTaken = false;
       live.recoveries = 0;
       live.task = { goal: a.goal, brief, taskId };
+      if (!a.agentId) this.d.db.setAgentState(live.agentId, mergeState(this.d.db.getAgentState(live.agentId), { goal: a.goal }));
+      live.inPlan = !!a.onDone;
+      if (a.onDone) live.waiters.push(a.onDone);
       if (this.d.traces) {
         live.traceId = parent.traceId ?? live.traceId ?? newTraceId();
         parent.traceId ??= live.traceId;
@@ -648,6 +661,205 @@ export class Orchestrator {
     this.flow(parentAgentId, { kind: "status", label: `best of ${ranked.length}: ${best.name ?? best.agentId} wins`, status: "done" });
     const winner = this.byAgent.get(best.agentId);
     return { agentId: best.agentId, name: best.name, status: best.status, result: attemptsReport(ranked), harness: winner?.harness, model: winner?.model ?? null };
+  }
+
+  // ---------- task plans ----------
+
+  /**
+   * The coordinator proposes a task graph. With Settings → Agents → Plans on "ask" the user sees it as a card, can edit
+   * it and approves it; on "auto" it runs at once. Either way code runs it in waves and the coordinator gets one result.
+   */
+  proposePlan(agentId: string, a: { title?: string; tasks?: unknown }): { planId: string; status: string; note: string } {
+    const l = this.byAgent.get(agentId);
+    if (!l) throw new Error("unknown agent");
+    if (l.depth > 0) throw new Error("only a coordinator proposes plans: delegate helpers directly, or say in your result what should happen next");
+    const tasks = normaliseTasks(a.tasks);
+    const errs = validatePlan(tasks, this.d.roles().map((r) => r.name));
+    if (errs.length) throw new Error(`plan not valid: ${errs.join("; ")}`);
+    const now = Date.now();
+    const plan: TaskPlan = { id: randomUUID(), chatId: l.chatId, agentId, title: String(a.title ?? "").trim().slice(0, 120) || "Plan", status: "draft", tasks, messageId: null, createdAt: now, updatedAt: now };
+    const auto = this.d.settings().agents.planApproval === "auto";
+    const m = this.d.db.addMessage({ chatId: l.chatId, parentId: l.threadRoot, author: "system", agentId, role: l.role.name, planId: plan.id,
+      content: `📋 **Plan** · ${plan.title}\n\n${planOutline(tasks)}` });
+    plan.messageId = m.id;
+    this.d.db.savePlan(plan);
+    this.d.emit({ type: "message.created", message: m });
+    this.d.emit({ type: "plan.updated", plan });
+    this.flow(agentId, { kind: "plan", label: `plan: ${plan.title} (${tasks.length} tasks)`, status: auto ? "running" : "needs_you" });
+    if (auto) {
+      void this.runPlan(plan.id).catch((e) => this.system(l.chatId, l.threadRoot, `⚠️ Plan failed: ${String(e?.message ?? e)}`, "error"));
+      return { planId: plan.id, status: "running", note: "The plan runs now; code starts each task when its dependencies are done. You get one message with every task's result when it finishes. End your turn with a short note." };
+    }
+    this.d.emit({ type: "notice", level: "info", text: `Plan to review: ${plan.title}` });
+    return { planId: plan.id, status: "draft", note: "The user sees the plan as a card, can edit it, and approves it before it runs. End your turn now with a one-line note; when it has run you get one message with every task's result." };
+  }
+
+  listPlans(chatId: string): TaskPlan[] { return this.d.db.listPlans(chatId); }
+  getPlan(planId: string): TaskPlan | null { return this.runningPlans.get(planId) ?? this.d.db.getPlan(planId); }
+
+  /** The user edited a draft plan on its card. */
+  updatePlan(planId: string, a: { title?: string; tasks?: unknown }): TaskPlan {
+    const plan = this.d.db.getPlan(planId);
+    if (!plan) throw new Error("unknown plan");
+    if (plan.status !== "draft") throw new Error("This plan already ran; ask the coordinator for a new one.");
+    const tasks = a.tasks === undefined ? plan.tasks : normaliseTasks(a.tasks);
+    const errs = validatePlan(tasks, this.d.roles().map((r) => r.name));
+    if (errs.length) throw new Error(errs.join("; "));
+    const next = { ...plan, title: String(a.title ?? plan.title).trim().slice(0, 120) || plan.title, tasks, updatedAt: Date.now() };
+    this.d.db.savePlan(next);
+    this.d.emit({ type: "plan.updated", plan: next });
+    return next;
+  }
+
+  /** The user approved a draft plan (optionally with a last edit): it starts. */
+  async approvePlan(planId: string, a?: { title?: string; tasks?: unknown }): Promise<TaskPlan> {
+    if (a) this.updatePlan(planId, a);
+    const plan = this.d.db.getPlan(planId);
+    if (!plan || plan.status !== "draft") throw new Error("This plan isn't waiting for approval.");
+    void this.runPlan(planId).catch((e) => this.system(plan.chatId, null, `⚠️ Plan failed: ${String(e?.message ?? e)}`, "error"));
+    return this.getPlan(planId)!;
+  }
+
+  /** Cancel: a draft never runs; a running plan starts no more tasks (running ones finish) and the coordinator is told. */
+  cancelPlan(planId: string): TaskPlan {
+    const plan = this.runningPlans.get(planId) ?? this.d.db.getPlan(planId);
+    if (!plan) throw new Error("unknown plan");
+    if (plan.status !== "draft" && plan.status !== "running") return plan;
+    const wasDraft = plan.status === "draft";
+    plan.status = "cancelled";
+    for (const t of plan.tasks) if (t.status === "pending") { t.status = "skipped"; t.result = "skipped: the plan was cancelled"; }
+    plan.updatedAt = Date.now();
+    this.d.db.savePlan(plan);
+    this.d.emit({ type: "plan.updated", plan });
+    if (wasDraft) this.wakeWith(plan.agentId, `The user declined your plan "${plan.title}". Ask what they'd like instead, or go on another way.`, "plan declined");
+    return plan;
+  }
+
+  private savePlanNow(plan: TaskPlan): void {
+    plan.updatedAt = Date.now();
+    this.d.db.savePlan(plan);
+    this.d.emit({ type: "plan.updated", plan: { ...plan, tasks: plan.tasks.map((t) => ({ ...t })) } });
+  }
+
+  /** Run a plan in waves: every task whose dependencies are done starts (team slots still apply); a failure skips its dependants. */
+  async runPlan(planId: string): Promise<TaskPlan> {
+    const plan = this.d.db.getPlan(planId);
+    if (!plan || plan.status !== "draft") throw new Error("This plan isn't waiting to run.");
+    const coord = this.byAgent.get(plan.agentId);
+    if (!coord || coord.stopped) {
+      plan.status = "failed";
+      this.savePlanNow(plan);
+      throw new Error("the coordinator that proposed this plan is no longer running: send your request again");
+    }
+    plan.status = "running";
+    this.runningPlans.set(plan.id, plan);
+    this.savePlanNow(plan);
+    const running = new Map<string, Promise<void>>();
+    const start = (t: TaskPlan["tasks"][number]) => {
+      t.status = "running";
+      const multi = (t.attempts ?? 1) > 1;
+      const p = new Promise<void>((resolve) => {
+        const finish = (r: string) => {
+          if (t.status !== "running") return resolve();
+          t.result = r.slice(0, 6000);
+          t.status = resultOk(r) ? "done" : "failed";
+          this.savePlanNow(plan);
+          resolve();
+        };
+        this.delegate(plan.agentId, { role: t.role, goal: t.goal, context: dependencyContext(plan, t), mode: t.mode ?? undefined, attempts: t.attempts ?? undefined,
+          wait: multi, timeoutSec: 1800, onDone: multi ? () => undefined : finish })
+          .then((r) => { t.agentId = r.agentId; this.savePlanNow(plan); if (multi) finish(r.result ?? ""); })
+          .catch((e: unknown) => finish(`error: ${String((e as Error)?.message ?? e)}`));
+      });
+      running.set(t.id, p.then(() => { running.delete(t.id); }));
+    };
+    for (;;) {
+      if (plan.status === "running") {
+        skipBlocked(plan);
+        for (const t of readyTasks(plan)) start(t);
+      }
+      if (!running.size) break;
+      this.savePlanNow(plan);
+      await Promise.race(running.values());
+    }
+    if (plan.status === "running") plan.status = plan.tasks.every((t) => t.status === "done") ? "done" : "failed";
+    this.runningPlans.delete(plan.id);
+    this.savePlanNow(plan);
+    const done = plan.tasks.filter((t) => t.status === "done").length;
+    this.flow(plan.agentId, { kind: "plan", label: `plan ${plan.status}: ${done}/${plan.tasks.length} tasks done`, status: plan.status });
+    this.wakeWith(plan.agentId, planReport(plan), `woken: plan "${plan.title}" ${plan.status}`);
+    return plan;
+  }
+
+  /** Give a coordinator a message as soon as it is free (results that arrive while it is busy wait for its turn to end). */
+  private wakeWith(agentId: string, input: string, label: string): void {
+    const p = this.byAgent.get(agentId);
+    if (!p || p.stopped || !this.live.has(p.key)) return;
+    if (p.busy || (p.textWaiting ?? 0) > 0) { setTimeout(() => this.wakeWith(agentId, input, label), REPORT_DEBOUNCE_MS); return; }
+    const chat = this.d.db.getChat(p.chatId);
+    if (!chat) return;
+    this.flow(agentId, { kind: "status", label: label.slice(0, 160), status: "running" });
+    void this.turn({ chat, threadRoot: p.threadRoot, role: p.role, input, skills: [], depth: p.depth, brief: null, liveKey: p.key, deliver: false, textRound: 0 })
+      .catch((e) => this.system(chat.id, p.threadRoot, `⚠️ ${String(e?.message ?? e)}`, "error"));
+  }
+
+  // ---------- working state and summaries ----------
+
+  /** update_state: the agent records what it has done, decided and will do next (merged; see agent-state.ts). */
+  updateState(agentId: string, u: Record<string, unknown>): { ok: true; state: AgentState } {
+    if (!this.byAgent.get(agentId) && !this.d.db.getAgent(agentId)) throw new Error("unknown agent");
+    const st = mergeState(this.d.db.getAgentState(agentId), u ?? {});
+    this.d.db.setAgentState(agentId, st);
+    return { ok: true, state: st };
+  }
+
+  agentState(agentId: string): AgentState | null { return this.d.db.getAgentState(agentId); }
+
+  /** A file the agent edited goes into its working state (relative to its folder). */
+  private noteStateFile(live: Live, root: string | null, path: string): void {
+    const base = this.agentWorkDir(live.agentId) ?? root;
+    const rel = base && isAbsolute(path) ? relative(base, path).replace(/\\/g, "/") : path.replace(/\\/g, "/");
+    if (!rel || rel.startsWith("..")) return;
+    const st = this.d.db.getAgentState(live.agentId);
+    if (st?.files.includes(rel)) return;
+    this.d.db.setAgentState(live.agentId, mergeState(st, { files: [rel] }));
+  }
+
+  /** Summarise the older part of a chat with the cheap / local model of Settings → Token efficiency, replacing the extractive summary. */
+  private async modelSummary(chatId: string, prev: string | null, msgs: Pick<Message, "author" | "role" | "content">[], upto: number): Promise<void> {
+    const s = this.d.settings();
+    const [h, ...rest] = s.tokens.summarizerModel.trim().split("/");
+    const harness = (HARNESS_IDS as string[]).includes(h ?? "") ? (h as HarnessId) : null;
+    if (!harness) return;
+    const transcript = msgs.map((m) => `${m.author === "user" ? "User" : (m.role ?? "Agent")}: ${m.content.replace(/\s+/g, " ").slice(0, 1500)}`).join("\n");
+    const prompt = [SUMMARY_PROMPT, prev ? `Earlier summary:\n${prev}` : "", `Conversation:\n${transcript.slice(-40_000)}`].filter(Boolean).join("\n\n");
+    try {
+      const text = (await this.oneShot(harness, rest.join("/") || null, prompt, 90_000)).trim();
+      if (!text || this.d.db.getChatSummary(chatId).upto !== upto) return; // a newer summary already replaced it
+      this.d.db.setChatSummary(chatId, text.slice(0, 4000), upto);
+    } catch (e) {
+      this.d.log?.("warn", `model summary failed (${s.tokens.summarizerModel}): ${String((e as Error)?.message ?? e)}; keeping the extractive one`);
+    }
+  }
+
+  /** One prompt to a model with no tools (read-only, every tool call refused); returns its text. */
+  private async oneShot(harness: HarnessId, model: string | null, prompt: string, timeoutMs: number): Promise<string> {
+    const s = this.d.settings();
+    const adapter = this.d.harnesses.get(this.d.harnesses.resolve(harness, s));
+    const hs = s.harnesses[adapter.id];
+    let text = "";
+    const session = await adapter.start({ cwd: this.d.dataDir ?? this.d.homeDir, model, extraArgs: hs?.args ?? "", executable: this.d.harnesses.cached(adapter.id)?.path ?? (hs?.path || null),
+      mcpServers: [], env: { ...networkEnv(s), ...(this.d.harnessEnv?.(adapter.id) ?? {}) }, resumeSessionId: null,
+      policy: { approval: "ask", readOnly: true, blocked: [], projectRoot: null },
+      onEvent: (e) => { if (e.type === "text") text += e.text; }, askPermission: async () => false });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([session.prompt(prompt), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("timed out")), timeoutMs); })]);
+      return text;
+    } finally {
+      clearTimeout(timer);
+      session.close();
+    }
   }
 
   /** Tokens the current request of a coordinator's tree spent so far (coordinator since the request + every agent started since). */
@@ -1877,6 +2089,8 @@ export class Orchestrator {
             summary = extractiveSummary(cs.summary, plan.summarise);
             const lastSeq = hist[hist.length - plan.keep.length - 1]?.seq ?? cs.upto;
             this.d.db.setChatSummary(t.chat.id, summary, lastSeq);
+            // A model summary replaces the extractive one when it arrives (the next fresh session uses it); nothing waits for it.
+            if (s.tokens.summarizer === "model" && s.tokens.summarizerModel.trim()) void this.modelSummary(t.chat.id, cs.summary, plan.summarise, lastSeq);
           }
           recent = (plan.compact ? plan.keep : hist).slice(-s.tokens.keepRecentTurns) as Message[];
         }
@@ -1886,6 +2100,7 @@ export class Orchestrator {
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
+            first ? renderState(this.d.db.getAgentState(live.agentId)) : "", first && live.parentAgentId ? STATE_RULES : "",
             first && live.local ? localRuntimeNote(live.harness, live.model, live.local.source) : "", first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? `${DUO_SPECIALIST_RULES}\n\n${DUO_REPORTING_RULES}` : STATUS_LINE_RULES) : "", first && this.duoOrchestrates(live, s) ? this.duoOrchestratorBrief(s) : first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       promptText = buildPrompt(firstTurn);
@@ -2402,7 +2617,7 @@ export class Orchestrator {
             }
           }
         } else if (e.type === "plan") this.setPlan(live.agentId, e.entries);
-        else if (e.type === "diff") this.recordChange(live, projectPath, e.path, e.oldText, e.newText);
+        else if (e.type === "diff") { this.recordChange(live, projectPath, e.path, e.oldText, e.newText); this.noteStateFile(live, projectPath, e.path); }
       },
       askPermission: (r) => this.askPermission(live, r),
     });
@@ -2823,6 +3038,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
     const parent = l.parentAgentId ? this.byAgent.get(l.parentAgentId) : undefined;
     const listening = l.waiters.length > 0 && !!parent && (parent.busy || (parent.textWaiting ?? 0) > 0);
     this.finishWaiters(l, result);
+    if (l.inPlan) { l.inPlan = false; l.delegated = false; return; }
     if (!l.delegated) return;
     l.delegated = false;
     if (listening || !parent || parent.stopped || l.stopped || result === "stopped") return;

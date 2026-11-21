@@ -221,6 +221,33 @@ export function buildTools(d: {
       },
     },
     {
+      set: "core", name: "propose_plan",
+      description: "Coordinators: for work with 3+ specialist steps that depend on each other, propose the whole task graph at once instead of delegating step by step. "
+        + "The user can edit and approve it (Settings → Agents → Plans); then the app runs it: every task whose dependsOn are done starts in parallel, each gets its dependencies' results, "
+        + "a failed task skips what depends on it, and you get one message with all results. End your turn after calling it.",
+      inputSchema: obj({
+        title: s("what the plan achieves, a few words"),
+        tasks: { type: "array", description: "the steps (at most 20)", items: obj({
+          id: s("short id, e.g. analyse; referenced by dependsOn"), title: s("short title"), role: s("specialist role, see list_roles"),
+          goal: s("the brief: what to achieve and done-when"), dependsOn: { type: "array", items: { type: "string" }, description: "ids of tasks whose results this one needs" },
+          mode: { type: "string", enum: ["eco", "comfort", "sport"], description: "difficulty (optional)" },
+          attempts: { type: "number", description: "best of N, 2-3 (optional)" },
+        }, ["id", "role", "goal"]) },
+      }, ["title", "tasks"]),
+      handler: async (a, c) => d.orch.proposePlan(c.agentId, a),
+    },
+    {
+      set: "core", name: "update_state",
+      description: "Record your working state: done, decisions, next steps, open questions, notes. If your session is restarted to save context, this is what you continue from. "
+        + "done, decisions and files add to what is there; next and questions replace the current lists; notes replaces.",
+      inputSchema: obj({
+        done: { type: "array", items: { type: "string" } }, decisions: { type: "array", items: { type: "string" }, description: "decision and why, one per item" },
+        next: { type: "array", items: { type: "string" } }, questions: { type: "array", items: { type: "string" } },
+        files: { type: "array", items: { type: "string" } }, notes: s("anything else to remember (replaces earlier notes)"),
+      }, []),
+      handler: async (a, c) => { d.orch.updateState(c.agentId, a); return { ok: true }; },
+    },
+    {
       set: "core", name: "ask_user",
       description: "Ask the user something you can't go on without (a decision, missing access or credentials, an unclear requirement). "
         + "They see a clear card in the chat with your question, why you're blocked and the options; their answer comes back to you as a new message. "

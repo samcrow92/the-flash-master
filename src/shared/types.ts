@@ -74,6 +74,8 @@ export interface Message {
   reactions: string[];
   /** A "needs you" card: an agent (or the app) waits for the user's answer to go on. */
   ask?: AskCard;
+  /** A task plan the coordinator proposed (shown as an editable card; the user approves it before it runs). */
+  planId?: string;
   replyCount: number;
   /** Root messages only: its thread is archived (hidden from the Threads panel and inline; restorable). */
   threadArchived?: boolean;
@@ -618,6 +620,7 @@ export type AppEvent =
   | { type: "checks.updated"; agentId: string }
   | { type: "trace.updated"; traceId: string }
   | { type: "evals.updated"; progress: EvalProgress }
+  | { type: "plan.updated"; plan: TaskPlan }
   | { type: "models.updated"; models: HarnessModels }
   | { type: "copilotUsage.updated"; usage: CopilotUsage }
   | { type: "artifacts.changed"; chatId: string }
@@ -766,3 +769,44 @@ export type SubmitSource = { kind: "folder"; path: string } | { kind: "files"; f
 /** What the Submit dialog shows after picking a folder or files (fields prefilled from plugin.json / the files). */
 export interface SubmitDraft { source: SubmitSource; meta: SubmitMeta; items: string[]; problems: string[] }
 export interface SubmitResult { ok: boolean; errors: string[]; kinds: PluginKind[]; items: string[]; submission?: Submission }
+
+// ---------- Task plans (an editable task graph the app runs in waves) ----------
+export type PlanTaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
+export interface PlanTask {
+  id: string;
+  title: string;
+  role: string;
+  goal: string;
+  /** Ids of the tasks whose results this one needs; it starts when all of them are done. */
+  dependsOn: string[];
+  mode?: string | null;
+  attempts?: number | null;
+  status: PlanTaskStatus;
+  agentId?: string | null;
+  result?: string | null;
+}
+export type PlanStatus = "draft" | "running" | "done" | "failed" | "cancelled";
+export interface TaskPlan {
+  id: string;
+  chatId: string;
+  /** The coordinator that proposed it; it gets the combined result. */
+  agentId: string;
+  title: string;
+  status: PlanStatus;
+  tasks: PlanTask[];
+  messageId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** An agent's working state: survives a session rollover or restart, so a fresh session picks up where the last left off. */
+export interface AgentState {
+  goal: string;
+  decisions: string[];
+  done: string[];
+  next: string[];
+  files: string[];
+  questions: string[];
+  notes: string;
+  updatedAt: number;
+}

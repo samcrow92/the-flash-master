@@ -893,6 +893,11 @@ const api: FlashApi = {
     const flags = batches.length > 1 ? regressions(all.filter((r) => r.batch === batches[0]), all.filter((r) => r.batch === batches[1])) : new Map<string, string>();
     return all.map((r) => (flags.has(r.id) ? { ...r, regression: flags.get(r.id) } : r));
   },
+  getPlan: async (planId) => orch.getPlan(planId),
+  updatePlan: async (planId, patch) => orch.updatePlan(planId, patch),
+  approvePlan: async (planId, patch) => orch.approvePlan(planId, patch),
+  cancelPlan: async (planId) => orch.cancelPlan(planId),
+  agentState: async (agentId) => orch.agentState(agentId),
   listTraces: async (chatId) => traces.list({ chatId: chatId ?? null, limit: 40 }),
   getTrace: async (traceId) => waterfall(traces.spans(traceId)),
   exportTrace: async (traceId) => JSON.stringify(toOtlp(traces.spans(traceId)), null, 1),
