@@ -394,7 +394,7 @@ export function budgetState(used: number, limit: number, warnPct: number): Budge
   return "ok";
 }
 
-export interface TextDelegation { role: string; harness?: string; folder?: string; model?: string; args?: string; agentId?: string; goal: string }
+export interface TextDelegation { role: string; harness?: string; folder?: string; model?: string; args?: string; agentId?: string; mode?: string; attempts?: number; goal: string }
 
 /** Instructions for a coordinator whose `delegate` tool didn't load (MCP blocked by policy, Pi without MCP…). */
 export const TEXT_DELEGATION_RULES = `## Delegation (text mode)
@@ -406,7 +406,9 @@ DELEGATE <role>@<harness> in "<folder>": <brief>   (run it in that folder instea
 DELEGATE <role>@<harness> model "<model>": <brief>   (run it on that model; for Pi write provider/model, e.g. DELEGATE scout@pi model "qwen-local-8800/qwen3.8:27b": …)
 DELEGATE <role>@<harness> args "<extra launch arguments>": <brief>   (rarely needed, e.g. args "--thinking high" for Pi)
 DELEGATE <role> agent "<agentId>": <answer or next step>   (a follow-up to a specialist you started: it continues with its context, e.g. to answer its question)
-in, model, args and agent can be combined in any order. Always use model "…" when the user or brief names a model or provider:
+DELEGATE <role> mode "eco": <brief>   (eco for simple lookups, comfort for ordinary work, sport for hard problems: picks the user's drive-mode model)
+DELEGATE <role> attempts "3": <brief>   (best of N for a hard or risky change: N specialists try it in their own copies; the app keeps the one whose checks pass, smallest change first)
+in, model, args, agent, mode and attempts can be combined in any order. Always use model "…" when the user or brief names a model or provider:
 a model named only in the brief text is not applied.
 A brief may run over several lines, paragraphs, lists and code blocks: it lasts until the next DELEGATE, AGENT or TOOL
 line, or a line with only END. Write END after a brief when text for the user follows it.
@@ -428,14 +430,15 @@ export function parseTextDelegations(text: string): TextDelegation[] {
     const raw = lines[i]!;
     if (/^\s*```/.test(raw)) { fence = !fence; continue; }
     if (fence) continue;
-    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?((?:\s+(?:in|model|args|agent)\s+(?:"[^"]*"|`[^`]*`))*)\s*:\s*(.*)$/.exec(raw);
+    const m = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+`?([A-Za-z][\w-]*)(?:@(copilot|opencode|cursor|claude|pi|duo))?`?((?:\s+(?:in|model|args|agent|mode|attempts)\s+(?:"[^"]*"|`[^`]*`))*)\s*:\s*(.*)$/.exec(raw);
     if (!m) continue;
     const opt: Record<string, string> = {};
-    for (const o of m[3]!.matchAll(/(in|model|args|agent)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
+    for (const o of m[3]!.matchAll(/(in|model|args|agent|mode|attempts)\s+(?:"([^"]*)"|`([^`]*)`)/g)) { const v = (o[2] ?? o[3] ?? "").trim(); if (v) opt[o[1]!] = v; }
     const { body, next } = briefBody(lines, i);
     const goal = [m[4]!.trim(), ...body].join("\n").trim();
     out.push({ role: m[1]!.toLowerCase(), ...(m[2] ? { harness: m[2] } : {}), ...(opt.in ? { folder: opt.in } : {}),
-      ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), ...(opt.agent ? { agentId: opt.agent } : {}), goal });
+      ...(opt.model ? { model: opt.model } : {}), ...(opt.args ? { args: opt.args } : {}), ...(opt.agent ? { agentId: opt.agent } : {}),
+      ...(opt.mode ? { mode: opt.mode.toLowerCase() } : {}), ...(Number(opt.attempts) > 1 ? { attempts: Math.floor(Number(opt.attempts)) } : {}), goal });
     i = next - 1;
   }
   return out.filter((d) => d.goal);

@@ -28,6 +28,7 @@ import { checkReports, reportFixPrompt } from "./report-check";
 import { checksFixPrompt, checksForParent, checksLine, loadChecks, runChecks, type CheckRun, type CheckRunner, type ChecksConfig } from "./checks";
 import { HookRunnerHost, parseHooks } from "./hooks";
 import { parseRules } from "./harness/rules";
+import { attemptsReport, rankAttempts, routeByDifficulty, ROUTE_MODES, type Attempt, type RouteMode } from "./routing";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
 import { slugRole, type AgentSpec } from "./roles";
@@ -180,6 +181,14 @@ interface Live {
   lastResult: string | null;
   /** The delegated task (goal and brief), so a specialist that didn't deliver can be restarted on it. */
   task?: { goal: string; brief: string | null; taskId?: string } | null;
+  /** When its current delegated task started (wall-clock limit, Settings → Agents → Time limit per task). */
+  taskStartedAt?: number;
+  /** When it was told to wrap up for hitting the time limit (it is stopped if still working after the grace period). */
+  timeLimitedAt?: number;
+  /** Coordinator: when the user's current request started and its own token count then (task budget across its tree). */
+  requestStart?: { at: number; base: number };
+  /** The task-budget warning was shown for the current request. */
+  budgetWarned?: boolean;
   /** Recovery attempts for the current delegated task (reminder, restart…), capped by agents.recoveryAttempts. */
   recoveries?: number;
   /** The agent raised a "needs you" card in this turn (ask_user): it's waiting for the user, not silent. */
@@ -207,6 +216,9 @@ interface Live {
 const MAX_CONCURRENT_FALLBACK = 4;
 /** Times a turn that missed a required deliverable (HTML report, diagrams) is sent back before the app gives up and warns. */
 const MAX_REPORT_FIXES = 2;
+const TIME_LIMIT_GRACE_MS = 3 * 60_000;
+const TIME_LIMIT_NUDGE = (mins: number) => `You have reached the ${mins}-minute time limit for this task. Stop starting new work now: commit what you have (if you changed code), `
+  + "then finish with your result block: what is done, what is left, and the next step. Use status failed if the goal isn't met.";
 /** Results of specialists that finish within this window wake their coordinator once, together. */
 const REPORT_DEBOUNCE_MS = 1500;
 /** lastActivity of a specialist the app closed for being idle (a follow-up with its agentId brings it back). */
@@ -456,11 +468,16 @@ export class Orchestrator {
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
   async delegate(parentAgentId: string, a: { role: string; goal: string; context?: string; files?: string[]; acceptance?: string;
-    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; provider?: string; args?: string; agentId?: string; folder?: string; local?: boolean }):
+    wait?: boolean; timeoutSec?: number; harness?: string; model?: string; provider?: string; args?: string; agentId?: string; folder?: string; local?: boolean;
+    mode?: string; attempts?: number }):
     Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string; model?: string | null }> {
     const parent = this.byAgent.get(parentAgentId);
     if (!parent) throw new Error("unknown parent agent");
     const s = this.d.settings();
+    // Best of N: several independent attempts in their own worktrees; the app picks the winner (checks, then size).
+    if ((a.attempts ?? 1) > 1 && !a.agentId) return this.delegateAttempts(parentAgentId, a);
+    // A request's whole tree shares one token budget: past it, no new specialist starts.
+    if (!a.agentId) this.checkTaskBudget(parent);
     if (parent.depth + 1 > s.agents.delegationDepth)
       throw new Error(parent.depth === 0
         ? "delegation is turned off (Settings → Agents → delegation depth is 0) — tell the user; don't do the work yourself"
@@ -474,8 +491,21 @@ export class Orchestrator {
     const want = a.harness && (HARNESS_IDS as string[]).includes(a.harness) ? (a.harness as HarnessId) : undefined;
     const projectPath = chat.projectId ? this.d.db.getProject(chat.projectId)?.path ?? null : null;
     const folder = a.folder?.trim() && !a.agentId ? this.resolveFolder(a.folder.trim(), projectPath) : null;
-    const model = delegateModel(a.model, a.provider);
+    let model = delegateModel(a.model, a.provider);
     const launchArgs = checkLaunchArgs(a.args);
+    // Drive mode for this delegation: the coordinator's `mode`, or (Route by difficulty) the app's guess from the brief.
+    // It picks the user's ECO / COMFORT / SPORT profile (Settings → Modes) unless a harness or model was named.
+    let routedHarness: HarnessId | undefined;
+    if (!a.agentId && !a.harness && !model && a.local !== true) {
+      const asked = ROUTE_MODES.includes(a.mode as RouteMode) ? { mode: a.mode as RouteMode, reason: "asked by the coordinator" }
+        : s.agents.autoRoute ? routeByDifficulty(`${a.goal}\n${a.context ?? ""}\n${a.acceptance ?? ""}`) : null;
+      const prof = asked ? s.modes[asked.mode] : null;
+      if (asked && prof && (prof.harness || prof.model)) {
+        routedHarness = prof.harness || undefined;
+        model = prof.model.trim() || null;
+        this.flow(parentAgentId, { kind: "status", label: `routed ${a.role} to ${asked.mode.toUpperCase()}: ${asked.reason}`, status: "routed" });
+      }
+    }
     // Local-only: asked for (local: true), or the role demands it. A brief that demands local inference prefers a local
     // runtime when one is set up (soft: without one it runs as before, and a refusal comes back with a locality hint).
     const strictLocal = a.local === true || !!this.role(a.role).local;
@@ -520,7 +550,7 @@ export class Orchestrator {
         reserved = await this.waitForTeamSlot(parent, a.wait === false);
         // A model (or provider) from the coordinator applies to the harness it asked for, or to the role's harness when it named none.
         live = this.ensureLive(chat, threadRoot, this.role(a.role), parent.depth + 1, `${parentAgentId}>${a.role}#${++this.instanceSeq}`, parentAgentId, brief,
-          want || model || local ? { harness: want, model, local } : undefined);
+          want || routedHarness || model || local ? { harness: want ?? routedHarness, model, local } : undefined);
         if (folder) { live.folder = folder; this.d.db.setAgentFolder(live.agentId, folder); }
         if (launchArgs) { live.launchArgs = launchArgs; this.d.db.setAgentLaunchArgs(live.agentId, launchArgs); }
       }
@@ -539,6 +569,8 @@ export class Orchestrator {
       live.resultTaken = false;
       live.recoveries = 0;
       live.task = { goal: a.goal, brief, taskId };
+      live.taskStartedAt = Date.now();
+      live.timeLimitedAt = undefined;
       done = a.wait === false ? null : new Promise<string>((resolve) => { waiter = resolve; live.waiters.push(resolve); });
       // Waiting delegations borrow the coordinator's slot; background ones (wait: false) queue for their own.
       const borrowSlot = a.wait !== false && parent.busy;
@@ -561,6 +593,112 @@ export class Orchestrator {
       return { agentId: live.agentId, name, status: "running", result: "Still running. Its result comes to you in a new message when it finishes." };
     }
     return { agentId: live.agentId, name, status: this.d.db.getAgent(live.agentId)?.status ?? "done", result, harness: live.harness, model: live.model };
+  }
+
+  /**
+   * Best of N (delegate with `attempts`): N independent instances of the role work on the same goal, each in its own
+   * worktree. When all are done the app ranks them (green checks, a finished result, then the smallest change) and
+   * returns the winner's result with a comparison. Nothing is discarded: the other branches stay for the user's review.
+   */
+  private async delegateAttempts(parentAgentId: string, a: Parameters<Orchestrator["delegate"]>[1]):
+    Promise<{ agentId: string; name?: string | null; status: string; result?: string; harness?: string; model?: string | null }> {
+    const s = this.d.settings();
+    const n = Math.min(Math.max(2, Math.floor(a.attempts ?? 2)), Math.max(2, s.agents.maxAttempts || 3));
+    const parent = this.byAgent.get(parentAgentId)!;
+    this.checkTaskBudget(parent);
+    this.flow(parentAgentId, { kind: "status", label: `best of ${n}: ${a.role} — ${a.goal.slice(0, 100)}`, status: "running" });
+    const runs = await Promise.all(Array.from({ length: n }, (_, i) => this.delegate(parentAgentId, { ...a, attempts: 1, wait: true, timeoutSec: Math.max(a.timeoutSec ?? 1800, 600),
+      context: `${a.context ?? ""}\n\nYou are attempt ${i + 1} of ${n} at this goal; other agents try it independently in their own copies and the best result is kept. Take the approach you think is best, and say what you'd verify next.`.trim() })
+      .catch((e: unknown) => ({ agentId: "", name: null, status: "failed", result: `error: ${String((e as Error)?.message ?? e)}` }))));
+    const attempts: Attempt[] = [];
+    for (const r of runs) {
+      if (!r.agentId) continue;
+      const ag = this.d.db.getAgent(r.agentId);
+      let checks = this.d.db.getCheckRun(r.agentId);
+      let changed: number | null = null;
+      if (ag?.worktree && ag.branch && !this.byAgent.get(r.agentId)?.busy) {
+        try { changed = (await this.workChanges(r.agentId)).files.reduce((sum, f) => sum + f.added + f.removed, 0); } catch { /* unknown size */ }
+        if (!checks) { try { checks = await this.runAgentChecks(r.agentId); } catch { /* no checks */ } }
+      }
+      attempts.push({ agentId: r.agentId, name: r.name ?? null, branch: ag?.branch ?? null, status: r.status, result: r.result ?? "", checks, changed });
+    }
+    if (!attempts.length) throw new Error(runs.map((r) => r.result).find(Boolean) ?? "no attempt could start");
+    const ranked = rankAttempts(attempts);
+    const best = ranked[0]!;
+    const chat = this.mustChat(parent.chatId);
+    this.system(chat.id, parent.threadRoot ?? parent.currentMessageId ?? parent.lastReplyId ?? null,
+      `🏁 Best of ${ranked.length}: **${best.name ?? best.agentId}** wins (${best.checks ? (best.checks.ok ? "checks passed" : "checks failed") : "no checks"}, ${best.changed ?? "?"} lines). `
+        + `${ranked.length > 1 ? `Kept for your review: ${ranked.slice(1).map((x) => x.name ?? x.agentId).join(", ")}.` : ""}`);
+    this.flow(parentAgentId, { kind: "status", label: `best of ${ranked.length}: ${best.name ?? best.agentId} wins`, status: "done" });
+    const winner = this.byAgent.get(best.agentId);
+    return { agentId: best.agentId, name: best.name, status: best.status, result: attemptsReport(ranked), harness: winner?.harness, model: winner?.model ?? null };
+  }
+
+  /** Tokens the current request of a coordinator's tree spent so far (coordinator since the request + every agent started since). */
+  requestTokens(rootAgentId: string): { used: number; since: number } | null {
+    const root = this.byAgent.get(rootAgentId);
+    if (!root?.requestStart) return null;
+    const { at, base } = root.requestStart;
+    const me = this.d.db.getAgent(rootAgentId);
+    let used = me ? Math.max(0, me.tokensIn + me.tokensOut - base) : 0;
+    for (const ag of this.d.db.listAgents({})) {
+      if (ag.id === rootAgentId || ag.chatId !== root.chatId || ag.startedAt < at) continue;
+      if (this.teamRoot(ag.id) === rootAgentId) used += ag.tokensIn + ag.tokensOut;
+    }
+    return { used, since: at };
+  }
+
+  /** Refuse to start another specialist when the request's tree has spent its task budget (Settings → Token efficiency). */
+  private checkTaskBudget(parent: Live): void {
+    const limit = this.d.settings().tokens.taskBudget;
+    if (!limit || limit <= 0) return;
+    const rootId = this.teamRoot(parent.agentId);
+    const r = this.requestTokens(rootId);
+    if (!r) return;
+    const root = this.byAgent.get(rootId);
+    if (r.used < limit) {
+      const pct = Math.round((r.used / limit) * 100);
+      if (pct >= this.d.settings().tokens.warnAtPercent) this.flow(parent.agentId, { kind: "status", label: `task budget at ${pct}% (${r.used.toLocaleString()} / ${limit.toLocaleString()} tokens)`, status: "budget" });
+      return;
+    }
+    const msg = `task budget reached: this request used ${r.used.toLocaleString()} of ${limit.toLocaleString()} tokens across the coordinator and its specialists`;
+    this.flow(parent.agentId, { kind: "status", label: msg.slice(0, 160), status: "budget" });
+    if (root && !root.budgetWarned) {
+      root.budgetWarned = true;
+      this.system(root.chatId, root.threadRoot ?? root.currentMessageId ?? null, `🛑 ${msg[0]!.toUpperCase()}${msg.slice(1)}. No new specialists start for it; running ones finish. Raise it in Settings → Token efficiency → Task budget.`, "warn");
+    }
+    throw new Error(`${msg}. Don't start more agents: finish with what you have, tell the user what is done and what is left, and that they can raise the task budget in Settings → Token efficiency`);
+  }
+
+  /**
+   * Wall-clock limit per delegated task (Settings → Agents → Time limit per task), called every 30 s with the stuck
+   * watchdog. Past the limit the specialist is interrupted and told to wrap up with what it has; still working 3 minutes
+   * later, it is stopped and its delegating agent gets a "time limit" result. Returns the agents it acted on.
+   */
+  checkTimeLimits(now = Date.now()): string[] {
+    const mins = this.d.settings().agents.maxTaskMinutes;
+    if (!mins || mins <= 0) return [];
+    const acted: string[] = [];
+    for (const l of this.live.values()) {
+      if (!l.busy || l.stopped || !l.delegated || !l.parentAgentId || !l.taskStartedAt || l.awaitingApproval) continue;
+      if (now - l.taskStartedAt < mins * 60_000) continue;
+      const who = `${l.role.icon} ${agentLabel(l, l.role.title)}`;
+      if (!l.timeLimitedAt) {
+        l.timeLimitedAt = now;
+        l.redirect = { input: TIME_LIMIT_NUDGE(mins), attachments: [], msgIds: [], nudge: true };
+        this.flow(l.agentId, { kind: "status", label: `time limit (${mins} min): told to wrap up`, status: "budget" });
+        this.system(l.chatId, l.threadRoot, `⏱ **${who}** reached the ${mins}-minute limit per task, so TheFlashMaster asked it to wrap up with what it has.`);
+        void l.session?.cancel();
+        acted.push(l.agentId);
+      } else if (now - l.timeLimitedAt > TIME_LIMIT_GRACE_MS) {
+        this.flow(l.agentId, { kind: "status", label: `time limit: stopped`, status: "budget" });
+        this.system(l.chatId, l.threadRoot, `⏹ **${who}** kept working past its time limit, so it was stopped. Its work so far is kept${l.branch ? ` on ${l.branch}` : ""}.`, "warn");
+        this.finishDelegated(l, `failed: stopped at the ${mins}-minute time limit per task (Settings → Agents). Partial work is kept${l.branch ? ` on branch ${l.branch}` : ""}; follow up with agentId ${l.agentId} or split the task.`);
+        void this.stop(l.agentId);
+        acted.push(l.agentId);
+      }
+    }
+    return acted;
   }
 
   /** Called by the coordinator's `create_agent` tool (and text-mode AGENT blocks): define a new agent, optionally run it. */
@@ -1559,6 +1697,12 @@ export class Orchestrator {
     // Budgets — checked before spending anything.
     const blocked = this.checkBudgets(live, t.chat);
     if (blocked) return;
+    // A user's new request to a coordinator starts a new task budget for its whole tree.
+    if (live.depth === 0 && !live.parentAgentId && t.msgIds?.length) {
+      const me = this.d.db.getAgent(live.agentId);
+      live.requestStart = { at: Date.now(), base: me ? me.tokensIn + me.tokensOut : 0 };
+      live.budgetWarned = false;
+    }
 
     live.busy = true;
     live.idleSince = null;
@@ -2417,7 +2561,7 @@ export class Orchestrator {
       if (!known.has(r.role) || r.role === live.role.name) return `### ${r.role}
 Not run: unknown role. Available: ${[...known].filter((n) => n !== live.role.name).join(", ")}.`;
       try {
-        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, model: r.model, args: r.args, agentId: r.agentId, wait: true, timeoutSec: 1800 });
+        const x = await this.delegate(live.agentId, { role: r.role, goal: r.goal, harness: r.harness, folder: r.folder, model: r.model, args: r.args, agentId: r.agentId, mode: r.mode, attempts: r.attempts, wait: true, timeoutSec: 1800 });
         return `### ${r.role}${x.name ? ` · ${x.name}` : ""}${x.harness ? ` (${x.harness}${x.model ? ` · ${x.model}` : ""})` : ""}
 ${x.result ?? `status: ${x.status}`}`;
       } catch (e) { return `### ${r.role}
