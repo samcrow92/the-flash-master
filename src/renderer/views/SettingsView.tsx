@@ -336,6 +336,9 @@ function InstructionSettings({ f }: { f: F }) {
     <Row label="Unslop writing style" hint="Every agent follows pstack's unslop rules (no AI filler, no em dashes, plain words) in its replies and in text it writes through tools: commits, PR descriptions, comments, docs. /unslop applies it to one message.">
       <Bool f={f} path="agents.unslop" />
     </Row>
+    <Row label="Rich replies (A2UI)" hint="The agent you talk to presents its replies as A2UI (a2ui.org) components: cards, lists, tabs, buttons and forms, drawn in the chat with the app's own look. Buttons send your choice back as your next message. Specialists keep writing plain text. Applies to new agent sessions.">
+      <Bool f={f} path="agents.a2ui" />
+    </Row>
     <Row label="Team rules" hint="Sent to every agent as part of its stable instructions — your workflow, conventions and setup. Keep it short (it is part of every session).">
       <Area f={f} path="agents.houseRules" rows={6} />
     </Row>

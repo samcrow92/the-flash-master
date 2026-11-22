@@ -9,6 +9,7 @@
  */
 import type { Message, RoleDef, SkillDef } from "@shared/types";
 import { briefBody } from "@shared/briefs";
+import { a2uiForHistory } from "@shared/a2ui";
 import { cutToken, findCommand, findMention } from "@shared/inline-commands";
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
@@ -104,7 +105,7 @@ export function buildTurnPrompt(p: PromptParts): string {
     if (p.brief) out.push(`## Brief\n${p.brief}`);
     if (p.summary) out.push(`## Conversation so far (summary)\n${p.summary}`);
     if (p.recent.length) {
-      out.push("## Recent turns\n" + p.recent.map((m) => `${m.author === "user" ? "User" : (m.role ?? "Agent")}: ${m.content}`).join("\n\n"));
+      out.push("## Recent turns\n" + p.recent.map((m) => `${m.author === "user" ? "User" : (m.role ?? "Agent")}: ${a2uiForHistory(m.content)}`).join("\n\n"));
     }
   }
   if (p.memory?.trim()) out.push(p.memory.trim());
@@ -183,8 +184,9 @@ export function planCompaction<T extends Pick<Message, "author" | "role" | "cont
 export function extractiveSummary(prev: string | null, msgs: Pick<Message, "author" | "role" | "content">[], maxChars = 2400): string {
   const lines = msgs.map((m) => {
     const who = m.author === "user" ? "User" : (m.role ?? "Agent");
-    const result = parseResult(m.content);
-    const body = result.summary ?? firstSentences(m.content, 240);
+    const content = a2uiForHistory(m.content);
+    const result = parseResult(content);
+    const body = result.summary ?? firstSentences(content, 240);
     return `- ${who}: ${body.replace(/\s+/g, " ").trim()}`;
   });
   const merged = [prev, ...lines].filter(Boolean).join("\n");
@@ -522,3 +524,44 @@ function scanTextToolCalls(text: string, known?: Set<string>): { call: TextToolC
   }
   return out;
 }
+
+/**
+ * The main agent (the one the user talks to) presents every reply as A2UI v1.0 (https://a2ui.org), rendered by the chat
+ * with the app's own components (src/renderer/components/A2ui.tsx). Specialists keep writing plain text for their parent.
+ */
+export const A2UI_RULES = `## Replies as A2UI (rich UI in the chat)
+The chat renders A2UI v1.0 (a2ui.org) with the basic catalog. Present every reply to the user as UI: start with one plain
+sentence that states the outcome (shown where UI can't be, such as notifications), then end the reply with ONE \`\`\`a2ui block
+that holds everything the user needs: cards, rows, lists, tabs, buttons. Don't repeat the block's content as prose.
+This shapes the reply style above: paragraphs, lists and links go inside the block's Text components.
+Format: valid JSON (no comments or trailing commas), normally a single createSurface with components and dataModel:
+{"version":"1.0","createSurface":{"surfaceId":"<new id every reply, e.g. reply-build-3>","catalogId":"https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","components":[…],"dataModel":{…}}}
+Components are a flat list; parents refer to children by id; exactly one has "id":"root".
+- Text{text, variant: body|caption} (text takes simple Markdown: **bold**, \`code\`, "### heading", bullet lists, and file or web links as the reply style describes)
+- Icon{name: check|info|warning|error|help|star|folder|search|settings|edit|delete|refresh|send|event|person|mail|lock|download|upload|play|pause|stop}
+- Row/Column{children, justify: start|center|end|spaceBetween, align: start|center|end|stretch}, List{children, direction}, Card{child}, Divider{}
+- Tabs{tabs:[{title, child}]}, Modal{trigger, content}, Image{url, description}
+- Button{child (a Text id), variant: default|primary|borderless, action}
+- TextField{label, value, placeholder, variant: shortText|longText|number|obscured}, CheckBox{label, value}, Slider{label, min, max, value},
+  ChoicePicker{label, options:[{label, value}], value (string list), variant: mutuallyExclusive|multipleSelection, displayStyle: chips|checkbox}, DateTimeInput{label, value, enableDate, enableTime}
+- "weight": n (like flex-grow) on direct children of a Row or Column.
+children: ["a","b"], or a template {"componentId":"item","path":"/items"} that repeats "item" per list entry (inside it, paths without a leading / are relative to the entry).
+Data binding: any text or value may be {"@path":"/pointer"} into dataModel; inputs write back to their path. Functions:
+{"@call":"formatString","args":{"value":"\${/done} of \${/total} done"}}, formatNumber, formatCurrency{value, currency}, formatDate{value, format}, pluralize{value, one, other}.
+Checks on inputs and buttons: "@checks":[{"condition":{"@call":"required","args":{"value":{"@path":"/name"}}},"message":"Name is required"}] (also email, length, numeric, and, or, not).
+Button actions: {"event":{"name":"approve","userMessage":"Approve the plan","context":{"choice":{"@path":"/choice"}}}} sends the user's
+click back to you as their next message (userMessage, then an \`\`\`a2ui-action block with the resolved context). Offer next steps
+and decisions as buttons. A link: {"functionCall":{"@call":"openUrl","args":{"url":"https://…"}}}.
+Keep it small (about 40 components at most) and calm: a Card per topic, an Icon for status, captions for detail. No colours or themes; the app styles it.
+Outside the block, as usual: DELEGATE/AGENT/TOOL lines, tool calls (ask_user, delegate…), code, diffs and logs in normal Markdown fences.
+Example:
+Build fixed: 2 tests were failing on Windows paths.
+\`\`\`a2ui
+{"version":"1.0","createSurface":{"surfaceId":"reply-build-1","catalogId":"https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","components":[
+{"id":"root","component":"Card","child":"col"},{"id":"col","component":"Column","children":["head","list","acts"]},
+{"id":"head","component":"Row","children":["ic","title"]},{"id":"ic","component":"Icon","name":"check"},{"id":"title","component":"Text","text":"### Build is green"},
+{"id":"list","component":"List","children":{"componentId":"item","path":"/fixes"}},{"id":"item","component":"Text","text":{"@path":"text"}},
+{"id":"acts","component":"Row","children":["b1","b2"]},{"id":"b1","component":"Button","variant":"primary","child":"b1t","action":{"event":{"name":"open_pr","userMessage":"Open the PR"}}},
+{"id":"b1t","component":"Text","text":"Open the PR"},{"id":"b2","component":"Button","child":"b2t","action":{"event":{"name":"show_diff","userMessage":"Show me the diff"}}},{"id":"b2t","component":"Text","text":"Show the diff"}],
+"dataModel":{"fixes":[{"text":"\`paths.ts\`: normalise backslashes"},{"text":"\`build.test.ts\`: use path.join"}]}}}
+\`\`\``;

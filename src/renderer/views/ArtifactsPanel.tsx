@@ -40,7 +40,7 @@ export function ArtifactsPanel({ chatId }: { chatId: string }) {
       if (m.author !== "agent") continue;
       for (const b of m.content.matchAll(/```([\w+#.-]*)[^\n]*\n([\s\S]*?)```/g)) {
         const lang = (b[1] || "text").toLowerCase();
-        if (["ishikawa", "mermaid", "result"].includes(lang)) continue;
+        if (["ishikawa", "mermaid", "result", "a2ui", "a2ui-action"].includes(lang)) continue;
         const code = b[2]!.replace(/\n$/, "");
         if (code.split("\n").length < 2 && code.length < 60) continue;
         const named = /^(?:\/\/|#|--|;|\/\*)\s*(?:file:\s*)?([\w./\\-]+\.\w{1,6})\b/.exec(code)?.[1];

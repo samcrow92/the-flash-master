@@ -1,6 +1,7 @@
 import { briefHeadline, replyParts, type DelegationPart, type ResultPart } from "@shared/replyParts";
 import { roleOf } from "../store";
 import { Markdown } from "./Markdown";
+import { A2uiBlock } from "./A2ui";
 import { useKeptState } from "./virtual";
 import { Bot, ChevronDown, ChevronRight, CircleAlert, CircleCheck, CircleHelp, CircleX, CornerDownRight, RoleIcon } from "./icons";
 
@@ -8,7 +9,7 @@ import { Bot, ChevronDown, ChevronRight, CircleAlert, CircleCheck, CircleHelp, C
  * An agent's prose, made easy to scan: text-mode delegations and new agents as one-line cards (brief one click away),
  * the <result> block as a status card, and a trailing "Details" section folded.
  */
-export function ReplyText({ text, id }: { text: string; id: string }) {
+export function ReplyText({ text, id, chatId, threadId }: { text: string; id: string; chatId?: string; threadId?: string | null }) {
   const parts = replyParts(text);
   return <>{parts.map((p, i) => {
     const k = `${id}:${i}`;
@@ -18,6 +19,7 @@ export function ReplyText({ text, id }: { text: string; id: string }) {
       case "agent": return <Expandable key={k} id={k} icon={<Bot size={14} />} label={<><b>New agent</b> {p.name}</>} line={p.description} body={p.instructions} />;
       case "result": return <ResultCard key={k} r={p.result} />;
       case "details": return <Details key={k} id={k} title={p.title} text={p.text} />;
+      case "a2ui": return <A2uiBlock key={k} id={k} source={p.source} open={p.open} chatId={chatId} threadId={threadId} />;
     }
   })}</>;
 }

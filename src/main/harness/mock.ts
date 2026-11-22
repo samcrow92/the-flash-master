@@ -19,6 +19,8 @@ export class MockSession implements HarnessSession {
   private turn = 0;
   /** "[silent-always]": every reply of this session is empty, to try (and test) recovery and the "needs you" card. */
   private silent = false;
+  /** The session was told to reply with A2UI (the main agent): button clicks get an A2UI answer too. */
+  private a2ui = false;
 
   constructor(private o: SessionOptions, private delayMs: number) {}
 
@@ -73,7 +75,11 @@ export class MockSession implements HarnessSession {
     // with an Ishikawa and link it, as real agents are told to (shows the enforcement loop offline).
     const report = /\bhtml report\b/i.test(request) || /TheFlashMaster checked your result/.test(text) ? this.writeReport() : null;
     const screenshot = /\bscreenshot\b/i.test(request) ? this.writeScreenshot() : null;
-    const reply = [
+    // "status overview" to the main agent: the same answer as A2UI rich UI (when it was given the A2UI rules) or as Markdown.
+    if (text.includes("## Replies as A2UI")) this.a2ui = true;
+    const clicked = this.a2ui ? /```a2ui-action\n(.*)/.exec(request)?.[1] : undefined;
+    const overview = /\bstatus overview\b/i.test(request) ? mockOverview(this.a2ui) : clicked ? mockActionAck(clicked) : null;
+    const reply = overview ?? [
       `**${role}** (mock harness, turn ${this.turn}) received:`,
       `> ${request.trim().split("\n")[0]!.slice(0, 160)}`,
       ...(attachments?.length ? ["", `Attachments received: ${attachments.map((a) => `${a.name} (${a.kind})`).join(", ")}`] : []),
@@ -261,4 +267,71 @@ function mockPng(w: number, h: number): Buffer {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+/** A main-agent status reply, as A2UI v1.0 or as the plain Markdown an agent writes without it (screenshots, tests). */
+export function mockOverview(a2ui: boolean): string {
+  const tasks = [
+    { icon: "check", title: "Root cause found", detail: "Shared PWM timer resets below 9 V at cold start" },
+    { icon: "check", title: "Fix ready for review", detail: "`brake_light.c`: 20 ms debounce on the lamp output" },
+    { icon: "warning", title: "HIL run below -10 °C pending", detail: "Cold chamber booked for Thursday" },
+  ];
+  if (!a2ui) {
+    return ["Brake ECU flicker: the cause is found and a fix is ready; one cold-start test is still open.", "",
+      "### Where things stand", ...tasks.map((t) => `- **${t.title}**: ${t.detail}`), "",
+      "Next step: run the HIL tests, review the fix, or open the RCA report. Which one?"].join("\n");
+  }
+  const surface = { version: "1.0", createSurface: { surfaceId: "reply-brake-status", catalogId: "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+    components: [
+      { id: "root", component: "Column", children: ["card", "next"] },
+      { id: "card", component: "Card", child: "col" },
+      { id: "col", component: "Column", children: ["head", "tasks", "div", "stats"] },
+      { id: "head", component: "Row", children: ["headIcon", "headText"] },
+      { id: "headIcon", component: "Icon", name: "info" },
+      { id: "headText", component: "Column", children: ["title", "sub"], weight: 1 },
+      { id: "title", component: "Text", text: "### Brake ECU flicker" },
+      { id: "sub", component: "Text", variant: "caption", text: { "@call": "formatString", args: { value: "${/done} of ${/total} steps done · updated 14:05" } } },
+      { id: "tasks", component: "List", children: { componentId: "task", path: "/tasks" } },
+      { id: "task", component: "Row", children: ["taskIcon", "taskText"], align: "start" },
+      { id: "taskIcon", component: "Icon", name: { "@path": "icon" } },
+      { id: "taskText", component: "Column", children: ["taskTitle", "taskDetail"], weight: 1 },
+      { id: "taskTitle", component: "Text", text: { "@path": "title" }, weight: "bold" },
+      { id: "taskDetail", component: "Text", variant: "caption", text: { "@path": "detail" } },
+      { id: "div", component: "Divider" },
+      { id: "stats", component: "Row", justify: "spaceBetween", children: ["s1", "s2", "s3"] },
+      { id: "s1", component: "Text", text: "**3** causes checked" },
+      { id: "s2", component: "Text", text: "**1** fix ready" },
+      { id: "s3", component: "Text", text: "**1** test open" },
+      { id: "next", component: "Card", child: "nextCol" },
+      { id: "nextCol", component: "Column", children: ["nextTitle", "pick", "acts"] },
+      { id: "nextTitle", component: "Text", text: "**What next?**" },
+      { id: "pick", component: "ChoicePicker", label: "Include in the HIL run", variant: "multipleSelection", value: { "@path": "/scope" },
+        options: [{ label: "-20 °C cold start", value: "cold" }, { label: "Low voltage (8.5 V)", value: "lowv" }, { label: "CAN bus-off", value: "busoff" }] },
+      { id: "acts", component: "Row", children: ["run", "review", "report"] },
+      { id: "run", component: "Button", variant: "primary", child: "runT", action: { event: { name: "run_hil", userMessage: "Run the HIL tests", context: { scope: { "@path": "/scope" } } } } },
+      { id: "runT", component: "Text", text: "Run the HIL tests" },
+      { id: "review", component: "Button", child: "reviewT", action: { event: { name: "review_fix", userMessage: "Show me the fix" } } },
+      { id: "reviewT", component: "Text", text: "Review the fix" },
+      { id: "report", component: "Button", variant: "borderless", child: "reportT", action: { event: { name: "open_report", userMessage: "Open the RCA report" } } },
+      { id: "reportT", component: "Text", text: "Open the RCA report" },
+    ],
+    dataModel: { done: 2, total: 3, tasks, scope: ["cold", "lowv"] } } };
+  return ["Brake ECU flicker: the cause is found and a fix is ready; one cold-start test is still open.", "", "```a2ui", JSON.stringify(surface), "```"].join("\n");
+}
+
+/** The mock main agent's answer to an A2UI button click: a small confirmation card. */
+function mockActionAck(actionJson: string): string {
+  let name = "action", ctx: Record<string, unknown> = {};
+  try { const a = JSON.parse(actionJson).action; name = String(a.name); ctx = a.context ?? {}; } catch { /* keep the defaults */ }
+  const scope = Array.isArray(ctx.scope) ? (ctx.scope as string[]).join(", ") : "";
+  const surface = { version: "1.0", createSurface: { surfaceId: `reply-ack-${Date.now().toString(36)}`, catalogId: "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+    components: [
+      { id: "root", component: "Card", child: "row" },
+      { id: "row", component: "Row", children: ["ic", "col"], align: "start" },
+      { id: "ic", component: "Icon", name: "refresh" },
+      { id: "col", component: "Column", children: ["t", "d"], weight: 1 },
+      { id: "t", component: "Text", text: `**Started:** ${name.replace(/_/g, " ")}` },
+      { id: "d", component: "Text", variant: "caption", text: scope ? `Scope: ${scope}. I'll post the results here when the run finishes.` : "I'll post the result here when it's done." },
+    ] } };
+  return [`Started ${name.replace(/_/g, " ")} (mock).`, "", "```a2ui", JSON.stringify(surface), "```"].join("\n");
 }
