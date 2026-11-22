@@ -107,6 +107,8 @@ export interface Settings {
     noProjectFolder: string;
     /** Send pstack's unslop writing rules (skills/pstack/unslop.md) to every agent, for replies and for text written through tools. */
     unslop: boolean;
+    /** The main agent (the one you talk to) presents its replies as A2UI rich UI (a2ui.org), rendered in the chat. */
+    a2ui: boolean;
     /** Wall-clock limit per delegated task (minutes, 0 = none): the specialist is told to wrap up, then stopped. */
     maxTaskMinutes: number;
     /** Most parallel attempts a best-of-N delegation may start (delegate `attempts`). */
@@ -391,7 +393,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   duo: { hosts: "", coordinator: false, coordinatorModel: DUO_COORDINATOR_MODEL, orchestratorRules: "", modes: DUO_MODE_DEFAULTS },
   chat: { maxAttachmentMB: 20, defaultSendWhileBusy: "steer" },
-  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true, maxTaskMinutes: 120, maxAttempts: 3, autoRoute: false, planApproval: "ask" },
+  agents: { maxConcurrent: 4, maxParallelSpecialists: 3, toolMode: "text", roleOverrides: {}, delegationDepth: 3, autoTaskFromDelegation: true, instructionMode: "clean", keepProjectInstructions: false, houseRules: "", reportDiagrams: true, stuckAfterMinutes: 10, toolTimeoutMinutes: 0, recoveryAttempts: 2, closeIdleAfterMinutes: 30, isolateWriters: true, noProjectFolder: "", unslop: true, a2ui: true, maxTaskMinutes: 120, maxAttempts: 3, autoRoute: false, planApproval: "ask" },
   tasks: { deleteFinishedAfterMinutes: 60, deleteStaleAfterDays: 3 },
   updates: { autoCheck: true, autoDownload: true, channel: "stable", feedUrl: "", hasToken: false },
   server: { url: "", hasToken: false },

@@ -6,6 +6,8 @@
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
  *   FLASH_SMOKE_IMAGES=<dir>      only images in chats: a pasted picture, an agent screenshot (inline + tool call), the viewer
  *   FLASH_SMOKE_HTML=<dir>        only HTML reports in chats: the report card, the inline preview and the full viewer, dark and light
+ *   FLASH_SMOKE_A2UI=<dir>        only A2UI replies: the main agent's status answer as plain Markdown (A2UI off) and as rich UI, then a
+ *                                 button click that goes back to the agent, dark and light
  *   FLASH_SMOKE_CHECKS=<dir>      only checks before merge and permission rules: a specialist's branch with failing checks on the
  *                                 Agents and Review pages, Settings → Permissions and → Checks, dark and light (FLASH_SMOKE_PROJECT =
  *                                 a git repo whose .flashmaster/checks.json is committed)
@@ -120,6 +122,46 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await shot(join(imgDir, "chat-images-light.png"));
       log(imgs >= 3 && viewer ? "info" : "error", `smoke-images: inline=${imgs} viewer=${viewer}`);
       app.exit(imgs >= 3 && viewer ? 0 : 1);
+      return;
+    }
+    const a2uiDir = process.env.FLASH_SMOKE_A2UI;
+    if (ok && a2uiDir) {
+      mkdirSync(a2uiDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "brake-ecu")`);
+      const pass = { before: false, surface: false, sent: false };
+      const ask = async (a2ui: boolean, theme: "dark" | "light", title: string) => {
+        await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock", theme: ${JSON.stringify(theme)} }, agents: { a2ui: ${a2ui} } })`);
+        const chatId = await js<string>(`(async()=>{const p=(await window.flash.api.listProjects()).find(x=>x.name==="brake-ecu");`
+          + `const c=await window.flash.api.createChat({projectId:p.id,title:${JSON.stringify(title)}});return c.id})()`);
+        win.webContents.reload();
+        await sleep(2000);
+        if (!(await click(title, ".chat-link"))) { await click("brake-ecu", ".project-name"); await sleep(300); await click(title, ".chat-link"); }
+        await sleep(900);
+        await js(`window.flash.api.sendMessage({chatId:${JSON.stringify(chatId)},content:'Give me a status overview of the brake light flicker work.'})`);
+        await sleep(6000);
+        await js(`document.querySelector('.msg-agent:last-of-type')?.scrollIntoView({block:'end'})`);
+        await sleep(400);
+      };
+      for (const theme of ["dark", "light"] as const) {
+        await ask(false, theme, `Status (Markdown) ${theme}`);
+        pass.before = await js<boolean>(`!document.querySelector('.a2ui-surface') && document.body.innerText.includes('Where things stand')`);
+        await shot(join(a2uiDir, `before-${theme}.png`));
+        await ask(true, theme, `Status (A2UI) ${theme}`);
+        pass.surface = await js<boolean>(`!!document.querySelector('.a2ui-surface .a2ui-card') && document.querySelectorAll('.a2ui-chip.on').length === 2`);
+        await shot(join(a2uiDir, `after-${theme}.png`));
+        await js(`document.querySelector('.a2ui-chip:not(.on)')?.click()`);
+        await sleep(200);
+        await js(`document.querySelector('.a2ui-button.primary')?.click()`);
+        await sleep(6000);
+        pass.sent = await js<boolean>(`[...document.querySelectorAll('.msg-user .plain')].some(x=>x.textContent.trim()==='Run the HIL tests')`);
+        await js(`document.querySelector('.a2ui-button.done')?.scrollIntoView({block:'start'})`);
+        await sleep(400);
+        await shot(join(a2uiDir, `after-click-${theme}.png`));
+      }
+      const good = pass.before && pass.surface && pass.sent;
+      log(good ? "info" : "error", `smoke-a2ui: ${JSON.stringify(pass)}`);
+      app.exit(good ? 0 : 1);
       return;
     }
     const htmlDir = process.env.FLASH_SMOKE_HTML;

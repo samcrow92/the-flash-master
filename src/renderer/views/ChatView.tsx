@@ -30,6 +30,7 @@ import { chatToOpen, sheetTab, switcherChats, threadFaces, type SheetTab } from 
 import { showSheet } from "../components/SheetTabs";
 import { chatKey } from "../agentChat";
 import { newChatIn, openProjectChat } from "../chatNav";
+import { stripA2uiAction } from "@shared/a2ui";
 
 /** Per open chat: scroll a message into view even when it isn't mounted (search results, jump-to-message). */
 const revealers = new Map<string, (id: string, block?: "start" | "center") => boolean>();
@@ -336,8 +337,8 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
         </div>
         <div className="msg-content">
           {(m.steer || m.delivery) && <DeliveryBadge steer={m.steer} state={m.delivery} />}
-          {m.author === "user" ? (editing ? <EditBox m={m} onDone={() => setEditing(false)} /> : <div className="plain">{m.content}</div>)
-            : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} messageId={m.id} live={m.status === "streaming"} />
+          {m.author === "user" ? (editing ? <EditBox m={m} onDone={() => setEditing(false)} /> : <div className="plain">{stripA2uiAction(m.content)}</div>)
+            : m.author === "agent" ? <ReplyBody content={m.content} tools={m.tools} messageId={m.id} live={m.status === "streaming"} chatId={m.chatId} threadId={m.parentId} />
             : m.ask ? <AskCard m={m} />
             : m.planId ? <PlanCard m={m} />
             : <>{!!m.tools?.length && <ToolRuns tools={m.tools} />}<Markdown text={m.content} /></>}

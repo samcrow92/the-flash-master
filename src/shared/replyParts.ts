@@ -5,6 +5,7 @@
  */
 
 import { briefBody } from "./briefs";
+import { looksLikeA2ui } from "./a2ui";
 
 export interface DelegationPart { role: string; harness: string | null; brief: string }
 export interface ResultPart { status: string; question: string | null; summary: string | null; findings: string[]; artifacts: string[] }
@@ -14,7 +15,9 @@ export type ReplyPart =
   | { kind: "delegations"; items: DelegationPart[] }
   | { kind: "agent"; name: string; description: string; instructions: string }
   | { kind: "result"; result: ResultPart }
-  | { kind: "details"; title: string; text: string };
+  | { kind: "details"; title: string; text: string }
+  /** An A2UI v1.0 block (```a2ui, or ```json holding A2UI messages); `open` = the closing fence hasn't arrived yet. */
+  | { kind: "a2ui"; source: string; open: boolean };
 
 // Same shapes the app carries out (src/main/context.ts), also when written as a list item or in bold.
 const DELEGATE = /^\s*(?:[-*]\s+)?(?:\*\*)?DELEGATE(?:\*\*)?\s+([\w.-]+)(?:@([\w-]+))?([^:\n]*):\s*(.*)$/;
@@ -67,6 +70,18 @@ function lineParts(text: string, out: ReplyPart[]): void {
   let fence = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
+    const a2 = !fence ? /^\s*```(a2ui|json)\s*$/.exec(line) : null;
+    if (a2) {
+      let j = i + 1;
+      while (j < lines.length && !/^\s*```\s*$/.test(lines[j]!)) j++;
+      const source = lines.slice(i + 1, j).join("\n");
+      if (a2[1] === "a2ui" || looksLikeA2ui(source)) {
+        flush();
+        out.push({ kind: "a2ui", source, open: j >= lines.length });
+        i = j;
+        continue;
+      }
+    }
     if (/^\s*```/.test(line)) { fence = !fence; md.push(line); continue; }
     if (fence) { md.push(line); continue; }
     const d = DELEGATE.exec(line);
