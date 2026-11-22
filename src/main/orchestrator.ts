@@ -35,7 +35,7 @@ import { dependencyContext, normaliseTasks, planOutline, planReport, readyTasks,
 import { mergeState, renderState, STATE_RULES } from "./agent-state";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
-import { slugRole, type AgentSpec } from "./roles";
+import { loadAgentSkills, PROJECT_SKILL_DIRS, skillsIndex, slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
   parseResult, type ResultStatus, parseTextAgents, parseTextDelegations, parseTextToolCalls, stripTextToolCalls, resultForParent, textToolRules, type ToolInfo, TEXT_DELEGATION_RULES, type TextDelegation,
@@ -327,7 +327,7 @@ export class Orchestrator {
     // Steering: a message sent while the chat's agent is working goes into the running turn.
     const busyLive = [...this.live.values()].find((l) => l.chatId === chatId && l.threadRoot === threadRoot && l.busy);
     const mentioned = parseMention(content, this.d.roles().map((r) => r.name)).role;
-    const command = this.slash(content).command;
+    const command = this.slash(content, chat).command;
     const steer = !!busyLive && (o.whileBusy ?? this.d.settings().chat.defaultSendWhileBusy) === "steer" && !command
       && (!mentioned || mentioned === busyLive.role.name);
     const queued = !!busyLive && !steer && !command && (!mentioned || mentioned === busyLive.role.name);
@@ -425,15 +425,36 @@ export class Orchestrator {
   }
 
   /** The message's /command: a leading one, or a known one (built-in or skill) anywhere in the text. */
-  private slash(content: string) {
-    return parseSlash(content, [...BUILTIN_COMMAND_NAMES, ...this.d.skills().map((k) => k.command)]);
+  private slash(content: string, chat?: Chat) {
+    return parseSlash(content, [...BUILTIN_COMMAND_NAMES, ...(chat ? this.skillsFor(chat) : this.d.skills()).map((k) => k.command)]);
+  }
+
+  /** The app's and the user's skills, plus the chat project's Agent Skills (.flashmaster/skills, .claude/skills, .agents/skills), which win on a name clash. */
+  skillsFor(chat: Pick<Chat, "projectId">): SkillDef[] {
+    const base = this.d.skills();
+    const path = chat.projectId ? this.d.db.getProject(chat.projectId)?.path : null;
+    if (!path) return base;
+    const own = PROJECT_SKILL_DIRS.flatMap((d) => loadAgentSkills(join(path, d), "project"));
+    return [...own.filter((k, i) => own.findIndex((x) => x.command === k.command) === i), ...base.filter((b) => !own.some((k) => k.command === b.command))];
+  }
+
+  /** use_skill: an Agent Skill's full instructions, with its folder and files so the agent can read the scripts and references it ships. */
+  useSkill(agentId: string, name: string): { name: string; description: string; instructions: string; folder: string | null; files: string[] } {
+    const a = this.d.db.getAgent(agentId);
+    const chat = a?.chatId ? this.d.db.getChat(a.chatId) : null;
+    const all = chat ? this.skillsFor(chat) : this.d.skills();
+    const n = String(name ?? "").trim().toLowerCase();
+    const k = all.find((x) => x.name.toLowerCase() === n || x.command === n || x.command === n.replace(/^\//, ""));
+    if (!k) throw new Error(`unknown skill "${name}": one of ${all.filter((x) => x.dir).map((x) => x.name).join(", ") || "(none installed)"}`);
+    if (a) this.flow(agentId, { kind: "status", label: `using skill ${k.name}`, status: "skill" });
+    return { name: k.name, description: k.description, instructions: k.body.slice(0, 40_000), folder: k.dir ?? null, files: k.files ?? [] };
   }
 
   /** Run a stored user message: slash commands, @mentions, then the agent's turn. */
   private async dispatch(chat: Chat, threadRoot: string | null, userMsg: Message, content: string, attachments: Attachment[],
     pick?: { harness: HarnessId; model: string | null }): Promise<void> {
     const chatId = chat.id;
-    const slash = this.slash(content);
+    const slash = this.slash(content, chat);
     if (slash.command === "superpowers") {
       const on = !chat.superpowers;
       this.d.db.updateChat(chatId, { superpowers: on });
@@ -2095,14 +2116,17 @@ export class Orchestrator {
           recent = (plan.compact ? plan.keep : hist).slice(-s.tokens.keepRecentTurns) as Message[];
         }
         // Skills declared by the role load once, on the session's first turn; slash-command skills load per message.
-        const roleSkills = first ? this.d.skills().filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k)) : [];
+        const chatSkills = first ? this.skillsFor(t.chat) : [];
+        const roleSkills = chatSkills.filter((k) => t.role.skills.includes(k.command) && !t.skills.includes(k));
         return buildTurnPrompt({ role: t.role, projectPath: workDir, skills: [...roleSkills, ...t.skills], summary, recent, input: t.input,
           brief: t.brief, firstTurn: first, clean: s.agents.instructionMode === "clean", memory: this.recallMemory(live, t.chat, `${t.brief ?? ""}\n${t.input}`, first),
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
-            first ? renderState(this.d.db.getAgentState(live.agentId)) : "", first && live.parentAgentId ? STATE_RULES : "",
+            first ? renderState(this.d.db.getAgentState(live.agentId)) : "", first ? skillsIndex(chatSkills.filter((k) => !roleSkills.includes(k) && !t.skills.includes(k))) : "", first && live.parentAgentId ? STATE_RULES : "",
             first && live.local ? localRuntimeNote(live.harness, live.model, live.local.source) : "", first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? `${DUO_SPECIALIST_RULES}\n\n${DUO_REPORTING_RULES}` : STATUS_LINE_RULES) : "", first && this.duoOrchestrates(live, s) ? this.duoOrchestratorBrief(s) : first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
+      // Local embeddings (when on) rank recalled memories by meaning too: embed the query before the prompt is built.
+      if (this.memoryOn() && s.memory?.autoInject) await this.d.memory?.prepare(`${t.brief ?? ""}\n${t.input}`.slice(0, 4000), 1500);
       promptText = buildPrompt(firstTurn);
       this.setStatus(live, "running", "Thinking…");
       // Autopilot is read per turn, so toggling it applies to the very next message.
@@ -3136,7 +3160,7 @@ Failed: ${String((e as Error)?.message ?? e)}`; }
   }
 
   private activeSkills(chat: Chat, command: string | null): SkillDef[] {
-    const skills = this.d.skills();
+    const skills = this.skillsFor(chat);
     if (command) {
       const s = skills.find((k) => k.command === command);
       if (s) return [s];

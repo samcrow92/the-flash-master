@@ -246,6 +246,10 @@ export interface SkillDef {
   command: string; // slash command, e.g. "brainstorm"
   description: string;
   body: string;
+  /** Agent Skills (SKILL.md in a folder): the folder, its other files (relative), and where it came from. */
+  dir?: string;
+  files?: string[];
+  source?: "builtin" | "user" | "project";
 }
 
 export interface HarnessStatus {
@@ -442,6 +446,15 @@ export interface Memory {
   expiresAt: number | null;
   /** Project knowledge base entry: its slug (file `.flashmaster/knowledge/<slug>.md` in the project's repo); null = a plain memory. */
   kbSlug?: string | null;
+  /** The project commit (git HEAD) when it was saved or last confirmed; files it mentions that changed since make it "maybe stale". */
+  commit?: string | null;
+}
+
+/** Memory health: near-duplicates to merge, memories that may be out of date, and ones nobody uses. */
+export interface MemoryHealth {
+  duplicates: { ids: number[]; similarity: number }[];
+  stale: { id: number; reason: string }[];
+  unused: number[];
 }
 
 /** Why an entry of the project knowledge base could not be synced between the repo folder and the app's database. */

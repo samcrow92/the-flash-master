@@ -16,6 +16,7 @@
 import type { Memory, MemoryHit, MemoryKind, MemoryScope } from "@shared/types";
 import { MEMORY_KINDS, MEMORY_SCOPES } from "@shared/types";
 import type { Db } from "./db";
+import { denseCosine, fromBlob, toBlob, type Embedder } from "./embeddings";
 
 type Row = Record<string, any>;
 const DAY = 86_400_000;
@@ -44,6 +45,8 @@ export interface SaveInput {
   pinned?: boolean;
   /** Ids of memories this one replaces (they are deleted), e.g. a corrected fact. */
   replaces?: number[];
+  /** The project's current commit (git HEAD), kept as provenance for project memories. */
+  commit?: string | null;
 }
 
 export interface SaveResult {
@@ -82,8 +85,97 @@ export class MemoryStore {
   shortTermDays = () => 7;
   halfLifeDays = 30;
 
+  private embedder: Embedder | null = null;
+  /** Query embeddings computed ahead of a (synchronous) search by prepare(). */
+  private queryVecs = new Map<string, Float32Array>();
+  private embedding: Promise<number> | null = null;
+
   constructor(private db: Db, private now: () => number = Date.now) {
     this.index = this.ensureIndex();
+  }
+
+  /** Local embeddings on (an embedder) or off (null). Vectors of another model are ignored until re-embedded. */
+  setEmbedder(e: Embedder | null): void {
+    if (e?.model !== this.embedder?.model) this.queryVecs.clear();
+    this.embedder = e;
+    if (e) void this.embedMissing().catch(() => 0);
+  }
+  get embeddingModel(): string | null { return this.embedder?.model ?? null; }
+
+  /** Embed a query so the next search for it also ranks by meaning. Never throws; gives up after `timeoutMs`. */
+  async prepare(query: string, timeoutMs = 2000): Promise<boolean> {
+    const e = this.embedder;
+    const q = query.trim().slice(0, 4000);
+    if (!e || !q) return false;
+    if (this.queryVecs.has(q)) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const [v] = await Promise.race([e.embed([q]), new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("timeout")), timeoutMs); })]);
+      if (!v) return false;
+      this.queryVecs.set(q, v);
+      if (this.queryVecs.size > 64) this.queryVecs.delete(this.queryVecs.keys().next().value!);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Embed memories that have no vector for the current model yet (in batches; one run at a time). Returns how many. */
+  embedMissing(limit = 200): Promise<number> {
+    const e = this.embedder;
+    if (!e) return Promise.resolve(0);
+    if (this.embedding) return this.embedding;
+    this.embedding = (async () => {
+      let n = 0;
+      try {
+        const rows = this.all(`SELECT m.id, m.content, m.tags FROM memories m LEFT JOIN memory_vectors v ON v.memory_id = m.id AND v.model = ?
+          WHERE v.memory_id IS NULL ORDER BY m.updated_at DESC LIMIT ?`, e.model, limit);
+        for (let i = 0; i < rows.length; i += 16) {
+          const batch = rows.slice(i, i + 16);
+          const vecs = await e.embed(batch.map((r) => `${r.content} ${r.tags ?? ""}`.trim()));
+          batch.forEach((r, k) => { if (vecs[k]) this.run("INSERT OR REPLACE INTO memory_vectors(memory_id, model, vec) VALUES(?,?,?)", r.id, e.model, toBlob(vecs[k]!)); });
+          n += batch.length;
+        }
+      } finally {
+        this.embedding = null;
+      }
+      return n;
+    })();
+    return this.embedding;
+  }
+
+  /** Memories of `ids` ranked by meaning against an embedded query (ids and similarity, best first). */
+  private denseRank(qv: Float32Array, ids: Set<number>): { id: number; sim: number }[] {
+    const model = this.embedder?.model;
+    if (!model) return [];
+    return this.all("SELECT memory_id, vec FROM memory_vectors WHERE model=?", model)
+      .filter((r) => ids.has(Number(r.memory_id)))
+      .map((r) => ({ id: Number(r.memory_id), sim: denseCosine(qv, fromBlob(r.vec as Uint8Array)) }))
+      .filter((x) => x.sim > 0.35).sort((a, b) => b.sim - a.sim);
+  }
+
+  /** Merge near-duplicates into the one worth keeping (tags joined, highest importance, use counts added). Returns it. */
+  merge(ids: number[], keepId: number): Memory {
+    const ms = ids.map((i) => this.get(Number(i))).filter((m): m is Memory => !!m && !m.kbSlug);
+    const keep = ms.find((m) => m.id === keepId);
+    if (!keep || ms.length < 2) throw new Error("pick at least two memories to merge, one of them to keep");
+    const rest = ms.filter((m) => m.id !== keep.id);
+    this.update(keep.id, { tags: [...new Set(ms.flatMap((m) => m.tags))], importance: Math.max(...ms.map((m) => m.importance)), pinned: ms.some((m) => m.pinned) });
+    this.run("UPDATE memories SET access_count=access_count+?, expires_at=? WHERE id=?", rest.reduce((n, m) => n + m.accessCount, 0),
+      ms.some((m) => m.expiresAt === null) ? null : keep.expiresAt, keep.id);
+    for (const m of rest) this.delete(m.id);
+    return this.get(keep.id)!;
+  }
+
+  /** The user checked a memory and it still holds: it gets the current commit, and no longer counts as stale or unused. */
+  confirm(id: number, commit: string | null): Memory {
+    const m = this.get(id);
+    if (!m) throw new Error(`unknown memory id ${id}`);
+    const t = this.now();
+    this.run("UPDATE memories SET commit_sha=?, updated_at=?, last_accessed_at=? WHERE id=?", commit ?? m.commit ?? null, t, t, id);
+    return this.get(id)!;
   }
 
   private get raw() { return this.db.raw; }
@@ -160,12 +252,15 @@ export class MemoryStore {
         content: keep, kind, tags: [...new Set([...dup.m.tags, ...tags])], importance: Math.max(dup.m.importance, importance),
         pinned: dup.m.pinned || !!input.pinned,
       });
-      return { memory: merged, status: "merged", similar: [], replaced };
+      if (input.commit && scope !== "user") this.run("UPDATE memories SET commit_sha=? WHERE id=?", input.commit, merged.id);
+      return { memory: this.get(merged.id) ?? merged, status: "merged", similar: [], replaced };
     }
     const expires = scope === "session" ? t + Math.max(0.01, this.shortTermDays()) * DAY : null;
+    const commit = scope === "user" ? null : (input.commit ?? null);
     const r = this.run(`INSERT INTO memories(scope, project_id, chat_id, kind, content, tags, importance, pinned, source_agent_id, source_role,
-      created_at, updated_at, last_accessed_at, access_count, expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
-    scope, owner.projectId, owner.chatId, kind, content, tags.join(" "), importance, input.pinned ? 1 : 0, ctx.agentId ?? null, ctx.role ?? null, t, t, t, expires);
+      created_at, updated_at, last_accessed_at, access_count, expires_at, commit_sha) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
+    scope, owner.projectId, owner.chatId, kind, content, tags.join(" "), importance, input.pinned ? 1 : 0, ctx.agentId ?? null, ctx.role ?? null, t, t, t, expires, commit);
+    if (this.embedder) void this.embedMissing(16).catch(() => 0);
     const memory = this.get(Number(r.lastInsertRowid))!;
     const similar = scored.filter((x) => x.sim >= SIMILAR_AT).slice(0, 3)
       .map((x) => ({ id: x.m.id, scope: x.m.scope, content: clip(x.m.content, 200), similarity: round(x.sim) }));
@@ -191,6 +286,7 @@ export class MemoryStore {
   }
 
   delete(id: number): boolean {
+    this.run("DELETE FROM memory_vectors WHERE memory_id=?", id);
     return Number(this.run("DELETE FROM memories WHERE id=?", id).changes) > 0;
   }
 
@@ -253,7 +349,11 @@ export class MemoryStore {
         .filter((x) => x.sim > FUZZY_FLOOR).sort((a, b) => b.sim - a.sim);
       // A weak fuzzy match (shared trigrams by chance) only counts a little: its rank weight grows with similarity.
       const weight = new Map(sims.map((x) => [x.id, Math.min(1, (x.sim - FUZZY_FLOOR) / 0.3)]));
-      const rel = fuse([lexical, sims.map((x) => x.id)], [undefined, weight]);
+      const qd = this.queryVecs.get(q.slice(0, 4000));
+      const dense = qd ? this.denseRank(qd, new Set(pool.map((m) => m.id))) : [];
+      const dWeight = new Map(dense.map((x) => [x.id, Math.min(1, (x.sim - 0.35) / 0.3)]));
+      const rel = dense.length ? fuse([lexical, sims.map((x) => x.id), dense.map((x) => x.id)], [undefined, weight, dWeight])
+        : fuse([lexical, sims.map((x) => x.id)], [undefined, weight]);
       hits = pool.filter((m) => rel.has(m.id)).map((m) => {
         const relevance = rel.get(m.id)!;
         return { ...m, relevance: round(relevance), score: round(0.65 * relevance + 0.2 * this.recency(m, t) + 0.15 * (m.importance / 5) + (m.pinned ? 0.05 : 0)) };
@@ -392,7 +492,7 @@ function toMemory(r: Row): Memory {
     tags: String(r.tags ?? "").split(/\s+/).filter(Boolean), importance: Number(r.importance), pinned: !!r.pinned,
     sourceAgentId: r.source_agent_id ?? null, sourceRole: r.source_role ?? null, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
     lastAccessedAt: Number(r.last_accessed_at), accessCount: Number(r.access_count), expiresAt: r.expires_at == null ? null : Number(r.expires_at),
-    kbSlug: r.kb_slug ?? null,
+    kbSlug: r.kb_slug ?? null, commit: r.commit_sha ?? null,
   };
 }
 

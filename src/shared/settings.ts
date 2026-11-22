@@ -276,6 +276,8 @@ export interface Settings {
     captureResults: boolean; // save each specialist's result summary as a short-term memory of the chat
     knowledgeSync: boolean; // keep each project's knowledge base in step with .flashmaster/knowledge in its repo (at start and every few minutes)
     knowledgeSyncMinutes: number;
+    /** Optional local embeddings for memory search (Ollama); keyword + fuzzy search work without them. */
+    embeddings: { provider: "off" | "ollama"; url: string; model: string };
   };
   data: {
     retentionDays: number; // 0 = keep forever
@@ -438,7 +440,8 @@ export const DEFAULT_SETTINGS: Settings = {
   vector: { canoePath: "", canoeVersion: "", davinciCliPath: "", caplIncludePaths: "",
     mcpEnabled: true, mcpAutoDetect: true, mcpConfigPath: "", canoeMcp: "", canoeDocsMcp: "" },
   network: { proxy: "", noProxy: "", caBundlePath: "", offline: false }, // empty = use https_proxy/no_proxy env vars
-  memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true, knowledgeSync: true, knowledgeSyncMinutes: 2 },
+  memory: { enabled: true, autoInject: true, maxInjected: 6, shortTermDays: 7, captureResults: true, knowledgeSync: true, knowledgeSyncMinutes: 2,
+    embeddings: { provider: "off", url: "http://127.0.0.1:11434", model: "nomic-embed-text" } },
   data: { retentionDays: 0 },
   advanced: { logLevel: "info", devTools: false, showMockHarness: true },
 };

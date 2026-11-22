@@ -65,6 +65,54 @@ export function loadSkills(dir: string): SkillDef[] {
   });
 }
 
+/** Folders a project keeps Agent Skills in (each skill is a folder with a SKILL.md). */
+export const PROJECT_SKILL_DIRS = [".flashmaster/skills", ".claude/skills", ".agents/skills"];
+
+/**
+ * Agent Skills (the SKILL.md format): every `<dir>/<skill>/SKILL.md`, with YAML front matter `name` and `description`.
+ * Only the name and description go into prompts; an agent loads the body (and sees the folder's other files) with use_skill.
+ */
+export function loadAgentSkills(dir: string, source: NonNullable<SkillDef["source"]>): SkillDef[] {
+  if (!existsSync(dir)) return [];
+  const out: SkillDef[] = [];
+  let entries: import("node:fs").Dirent[];
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith(".")) continue;
+    const folder = join(dir, e.name);
+    const file = ["SKILL.md", "skill.md"].map((f) => join(folder, f)).find((f) => existsSync(f));
+    if (!file) continue;
+    try {
+      const { meta, body } = parseFrontmatter(readFileSync(file, "utf8"));
+      const name = str(meta.name, e.name);
+      out.push({ name, command: slugRole(str(meta.command, name)) || slugRole(e.name), description: str(meta.description).slice(0, 1024), body,
+        dir: folder, files: listFiles(folder).filter((f) => f.toLowerCase() !== "skill.md"), source });
+    } catch { /* unreadable skill: skipped */ }
+  }
+  return out;
+}
+
+function listFiles(root: string, rel = "", depth = 0, out: string[] = []): string[] {
+  if (depth > 3 || out.length >= 60) return out;
+  let entries: import("node:fs").Dirent[];
+  try { entries = readdirSync(join(root, rel), { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    if (e.name.startsWith(".") || e.name === "node_modules") continue;
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) listFiles(root, r, depth + 1, out); else out.push(r);
+    if (out.length >= 60) break;
+  }
+  return out;
+}
+
+/** The skills index an agent sees on a new session: names and one-line descriptions only. */
+export function skillsIndex(skills: SkillDef[], max = 30): string {
+  const list = skills.filter((k) => k.dir).slice(0, max);
+  if (!list.length) return "";
+  return ["## Skills", "Packaged instructions for specific tasks. When one fits what you are doing, load it with use_skill (name) before you start, and follow it.",
+    ...list.map((k) => `- ${k.name}: ${k.description.replace(/\s+/g, " ").slice(0, 200)}`)].join("\n");
+}
+
 export const ROLE_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
 const HARNESSES = ["copilot", "opencode", "cursor", "claude", "pi", "duo", "mock"];
 
