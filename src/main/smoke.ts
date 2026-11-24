@@ -13,6 +13,8 @@
  *                                 two targets on the Evals page, dark and light (FLASH_SMOKE_PROJECT = a git repo)
  *   FLASH_SMOKE_PLAN=<dir>        only task plans: a proposed plan being edited, then the same plan after it ran, dark and light
  *   FLASH_SMOKE_MEMORY=<dir>      only memory health (near-duplicates, a memory whose file is gone) on the Memory page, dark and light
+ *   FLASH_SMOKE_TRACE=<dir>       only traceability and the review inbox: the Traceability page over trace files, test tags and JUnit
+ *                                 results in FLASH_SMOKE_PROJECT, the evidence report, and the inbox on the Review page, dark and light
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
@@ -220,6 +222,58 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       }
       const good = pass.chip && pass.pop && pass.rules;
       log(good ? "info" : "error", `smoke-checks: ${JSON.stringify(pass)}`);
+      app.exit(good ? 0 : 1);
+      return;
+    }
+    const traceDir = process.env.FLASH_SMOKE_TRACE;
+    if (ok && traceDir && hooks) {
+      mkdirSync(traceDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      const put = (rel: string, text: string) => { mkdirSync(join(proj, rel, ".."), { recursive: true }); writeFileSync(join(proj, rel), text); };
+      put(".flashmaster/trace/requirements.csv", [
+        "ID,Title", "LAMP-101,The brake lamp shall light within 50 ms of the pedal switch closing",
+        "LAMP-102,The brake lamp input shall be debounced for 20 ms", "LAMP-103,The lamp shall stay on while the pedal is pressed at any speed",
+        "LAMP-104,A lamp open-circuit shall set DTC 0x9A41", "LAMP-105,The lamp shall flash at 4 Hz during emergency braking",
+        "LAMP-106,The lamp state shall be sent on CAN 0x3F2 every 100 ms"].join("\n"));
+      put("tests/test_lamp.py", ["# @req LAMP-101", "def test_lamp_on_latency():", "    assert True", "",
+        "# @req LAMP-102", "def test_debounce_20ms():", "    assert True", "", "# Verifies: LAMP-103", "def test_on_at_low_speed():", "    assert True", "",
+        "# @req LAMP-106", "def test_can_cycle():", "    assert True", "", "# @req LAMP-110", "def test_legacy_relay():", "    assert True"].join("\n"));
+      put("test-results/pytest.xml", `<testsuites><testsuite name="lamp"><testcase classname="tests.test_lamp" name="test_lamp_on_latency"/>
+<testcase classname="tests.test_lamp" name="test_debounce_20ms"/><testcase classname="tests.test_lamp" name="test_on_at_low_speed"><failure message="lamp off at 4 km/h"/></testcase>
+</testsuite></testsuites>`);
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock" }, checks: { autoRun: false } })`);
+      const project = hooks.db.createProject("brake-ecu", proj);
+      const chat = hooks.db.createChat({ projectId: project.id, title: "General", kind: "project", agentRole: "flashmaster" });
+      await hooks.orch.sendUserMessage(chat.id, "Which DTC should the open-circuit check set? [needs-decision]", null);
+      await sleep(5000);
+      const coord = hooks.db.listAgents().find((a) => a.role === "flashmaster");
+      if (coord) hooks.orch.proposePlan(coord.id, { title: "Close the lamp verification gaps", tasks: [
+        { id: "t1", title: "Test the open-circuit DTC", role: "tester", goal: "Add a test for LAMP-104" },
+        { id: "t2", title: "Fix the low-speed lamp", role: "software-expert", goal: "Make test_on_at_low_speed pass" }] });
+      win.webContents.reload();
+      await sleep(2500);
+      const pass = { matrix: false, report: false, inbox: false };
+      for (const theme of ["dark", "light"] as const) {
+        if (theme === "light") { await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`); win.webContents.reload(); await sleep(2500); }
+        await click("Traceability", ".sidebar button");
+        await sleep(1500);
+        await click("All", ".seg button");
+        await sleep(400);
+        pass.matrix = await js<boolean>(`document.querySelectorAll('.trace-table tbody tr').length >= 6`);
+        await shot(join(traceDir, `traceability-${theme}.png`));
+        await click("Evidence report", "button");
+        await sleep(2500);
+        pass.report = await js<boolean>(`!!document.querySelector('.html-viewer iframe')`);
+        await shot(join(traceDir, `evidence-report-${theme}.png`));
+        await js(`document.querySelector('.html-viewer')?.click()`);
+        await sleep(400);
+        await click("Review", ".sidebar button");
+        await sleep(1500);
+        pass.inbox = await js<boolean>(`document.querySelectorAll('.inbox li, .inbox .inbox-item').length >= 2`);
+        await shot(join(traceDir, `review-inbox-${theme}.png`));
+      }
+      const good = pass.matrix && pass.report && pass.inbox;
+      log(good ? "info" : "error", `smoke-trace: ${JSON.stringify(pass)}`);
       app.exit(good ? 0 : 1);
       return;
     }

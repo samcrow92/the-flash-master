@@ -1,4 +1,5 @@
 import { ImageViewer } from "./components/ImageViewer";
+import { TraceabilityView } from "./views/TraceabilityView";
 import { HtmlViewer } from "./components/HtmlViewer";
 import { useEffect, useReducer } from "react";
 import { dragReducer, hasFiles, idle } from "./fileDrag";
@@ -94,6 +95,7 @@ export function App() {
         {view.kind === "dashboard" && <DashboardView />}
         {view.kind === "timeline" && <TimelineView key={view.traceId ?? ""} traceId={view.traceId} />}
         {view.kind === "evals" && <EvalsView />}
+        {view.kind === "traceability" && <TraceabilityView />}
         {view.kind === "tasks" && <TasksView />}
         {view.kind === "memory" && <MemoryView />}
         {view.kind === "jazz" && <JazzView />}

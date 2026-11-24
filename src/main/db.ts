@@ -475,6 +475,13 @@ export class Db {
     return { id: r.id, chatId: r.chat_id, agentId: r.agent_id, title: r.title, status: r.status, tasks, messageId: r.message_id ?? null,
       createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) };
   }
+  /** "Needs you" cards nobody has answered yet, newest first. */
+  openAsks(limit = 50): Message[] {
+    return this.all("SELECT * FROM messages WHERE meta LIKE '%\"ask\":%' ORDER BY seq DESC LIMIT 200").map((r) => this.hydrate(r)).filter((m) => m.ask && !m.ask.answer).slice(0, limit);
+  }
+  draftPlans(): import("@shared/types").TaskPlan[] {
+    return this.all("SELECT id FROM plans WHERE status='draft' ORDER BY created_at DESC LIMIT 50").map((r) => this.getPlan(r.id as string)!).filter(Boolean);
+  }
   listPlans(chatId: string): import("@shared/types").TaskPlan[] {
     return this.all("SELECT id FROM plans WHERE chat_id=? ORDER BY created_at DESC", chatId).map((r) => this.getPlan(r.id as string)!).filter(Boolean);
   }

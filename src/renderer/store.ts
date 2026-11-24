@@ -19,6 +19,7 @@ export type View =
   | { kind: "flow"; agentId: string }
   | { kind: "timeline"; traceId?: string }
   | { kind: "evals" }
+  | { kind: "traceability" }
   | { kind: "marketplace" }
   | { kind: "docs"; page?: string };
 
