@@ -554,7 +554,7 @@ function MarketplaceSettings(f: F) {
       </div>
     ))}
     <h4>Options</h4>
-    <Row label="Check for plugin updates at startup" hint="You get a notice and an ‘Update all’ button in the Marketplace."><Bool f={f} path="marketplace.autoCheckUpdates" /></Row>
+    <Row label="Check for plugin updates at startup" hint="Also checks your Flash server submissions every 15 minutes. Off by default: press Refresh in the Marketplace to check."><Bool f={f} path="marketplace.autoCheckUpdates" /></Row>
     <Row label="Allow plugins to add tool servers (MCP)" hint="Tool servers run programs on this PC. When off, they are added disabled — enable them in Settings → MCP if you trust them."><Bool f={f} path="marketplace.allowMcpServers" /></Row>
   </>;
 }
@@ -649,7 +649,7 @@ function UsageSettings(f: F) {
     <h4>Options</h4>
     <Row label="Credits per month (if Copilot can’t be asked)" hint="Only used when Copilot’s sign-in isn’t available: available = this minus what Copilot reports as used. 0 = not set."><Num f={f} path="usage.includedCredits" /></Row>
     <Row label="Show usage bar under the chat box"><Bool f={f} path="usage.copilotMeter" /></Row>
-    <Row label="Re-read every (minutes)" hint="Picks up Copilot sessions that finished outside the app. 0 = only after Copilot turns here and when you press refresh."><Num f={f} path="usage.refreshMinutes" /></Row>
+    <Row label="Re-read every (minutes)" hint="Re-reads Copilot's session logs on this computer (nothing is sent). Available credits are asked from GitHub only after Copilot turns here and when you press refresh. 0 = off."><Num f={f} path="usage.refreshMinutes" /></Row>
     <p className="muted small">Token usage of TheFlashMaster’s own agents (all harnesses) is on the Dashboard.</p>
   </>;
 }
@@ -974,7 +974,7 @@ function Updates({ f }: { f: F }) {
         <code>{u?.feed || "not set"}</code></div>
       {u?.serverError && u.source === "repository" && <div className="muted small">The Flash server could not be used ({u.serverError}), so the repository feed answered.</div>}
     </div>
-    <Row label="Check automatically" hint="At start and every 6 hours."><Bool f={f} path="updates.autoCheck" /></Row>
+    <Row label="Check automatically" hint="At start and every 6 hours. Off by default: nothing is sent unless you press Check for updates."><Bool f={f} path="updates.autoCheck" /></Row>
     <Row label="Download in the background" hint="Installing always asks first."><Bool f={f} path="updates.autoDownload" /></Row>
     <Row label="Channel"><Choice f={f} path="updates.channel" options={[["stable", "Stable releases"], ["beta", "Include pre-releases"]]} /></Row>
     <Row label="Update source (override)" hint="Normally set in the repository (package.json → flashmaster.updates.url). A GitHub repository URL (github.com or GitHub Enterprise) or a web folder containing latest.json.">

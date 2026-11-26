@@ -475,3 +475,34 @@ describe("safety rules hold on Autopilot", () => {
     expect(read("src/main/tools.ts")).not.toMatch(/mergeWork\(/);
   });
 });
+
+describe("no telemetry, nothing sent in the background", () => {
+  const pkg = JSON.parse(read("package.json")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  const trackers = /sentry|posthog|mixpanel|amplitude|segment|analytics|telemetry|bugsnag|datadog|newrelic|applicationinsights|logrocket|rollbar|honeybadger|raygun|crashpad|electron-log-remote|update-electron-app/i;
+
+  it("ships no analytics, crash-reporting or telemetry package", () => {
+    expect(deps.filter((d) => trackers.test(d))).toEqual([]);
+  });
+  it("never starts Electron's crash reporter or a tracking call in app code", () => {
+    const files = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+    const hits = files("src").filter((f) => /crashReporter|sendBeacon|google-analytics|googletagmanager/.test(read(f)));
+    expect(hits).toEqual([]);
+  });
+  it("keeps automatic network checks off by default (update checks, plugin checks, submission polling, credit refresh)", () => {
+    expect(DEFAULT_SETTINGS.updates).toMatchObject({ autoCheck: false, autoDownload: false });
+    expect(DEFAULT_SETTINGS.marketplace.autoCheckUpdates).toBe(false);
+    expect(DEFAULT_SETTINGS.usage.refreshMinutes).toBe(0);
+    expect(read("src/main/index.ts")).toMatch(/const pollQuietly = \(\) => \{ if \(settings\.get\(\)\.marketplace\.autoCheckUpdates\)/);
+  });
+  it("leaves third-party cloud MCP servers off until the user turns them on", () => {
+    expect(MCP_CATALOG.find((c) => c.id === "context7")?.defaultEnabled).toBe(false);
+  });
+  it("gives every child process the telemetry opt-outs", () => {
+    expect(read("src/main/harness/process.ts")).toMatch(/telemetryOptOutEnv\(env\)/);
+    expect(read("src/main/mcp.ts")).toMatch(/telemetryOptOutEnv\(spec\.env\)/);
+    expect(read("src/main/terminal.ts")).toMatch(/telemetryOptOutEnv\(\)/);
+    expect(read("src/main/orchestrator.ts")).toMatch(/const env: Record<string, string> = telemetryOptOutEnv\(\);/);
+  });
+});

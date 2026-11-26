@@ -18,6 +18,7 @@ import { jazzToolsOn, type Settings } from "@shared/settings";
 import type { McpServerSpec } from "./harness/types";
 import { runCapture, splitArgs, which } from "./harness/process";
 import { networkEnv } from "./orchestrator";
+import { telemetryOptOutEnv } from "./privacy";
 import { MCP_CATALOG, catalogState, roleMatches, type CatalogServer } from "@shared/mcp-catalog";
 
 interface Paths {
@@ -373,7 +374,7 @@ export async function selfTestServer(spec: McpServerSpec, timeoutMs = 20000): Pr
   const { spawn } = await import("node:child_process");
   return new Promise((resolve) => {
     let out = "", err = "", done = false;
-    const child = spawn(spec.command, spec.args, { env: spec.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(spec.command, spec.args, { env: { ...telemetryOptOutEnv(spec.env), ...spec.env }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     const finish = (r: { ok: boolean; tools: number; detail: string }) => { if (done) return; done = true; clearTimeout(t); try { child.kill(); } catch { /* gone */ } resolve({ name: spec.name, ...r }); };
     const t = setTimeout(() => finish({ ok: false, tools: 0, detail: `no answer within ${timeoutMs / 1000}s${err ? ` — ${err.trim().slice(-300)}` : ""}` }), timeoutMs);
     child.on("error", (e) => finish({ ok: false, tools: 0, detail: `cannot start: ${e.message}` }));
@@ -400,7 +401,7 @@ export function baseEnv(): Record<string, string> {
     "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"];
   const out: Record<string, string> = {};
   for (const k of keep) { const v = process.env[k]; if (v) out[k] = v; }
-  return out;
+  return { ...telemetryOptOutEnv(), ...out };
 }
 
 export const venvPython = (venv: string) => (process.platform === "win32" ? join(venv, "Scripts", "python.exe") : join(venv, "bin", "python"));

@@ -2,12 +2,14 @@ import crossSpawn from "cross-spawn";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { HarnessStatus } from "@shared/types";
+import { telemetryOptOutEnv } from "../privacy";
 
 const isWin = process.platform === "win32";
 
 /** Spawn safely on all platforms. cross-spawn handles Windows .cmd shims and argument escaping (no shell injection). */
 export function spawnTool(command: string, args: string[], opts: SpawnOptions): ChildProcess {
-  return crossSpawn(command, args, { windowsHide: true, ...opts, detached: !isWin });
+  const env = opts.env ?? process.env;
+  return crossSpawn(command, args, { windowsHide: true, ...opts, env: { ...telemetryOptOutEnv(env), ...env }, detached: !isWin });
 }
 
 /** Kill a process and its children. */

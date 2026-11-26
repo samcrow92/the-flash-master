@@ -644,13 +644,20 @@ async function readCopilotQuota(dir: string): Promise<{ quota: Quota | null; fro
   try { return { quota: await fetchQuota(quotaFetch as any, t.token, process.env.FLASH_GITHUB_API), from: t.from, error: null }; }
   catch (e: any) { return { quota: null, from: t.from, error: String(e?.message ?? e) }; }
 }
-function refreshCopilotUsage(): Promise<CopilotUsage | null> {
+/** The last answer from GitHub, reused by local-only refreshes (they read Copilot's session logs and send nothing). */
+let lastQuota: { quota: Quota | null; from: string | null; error: string | null } = { quota: null, from: null, error: null };
+/**
+ * Re-reads Copilot usage. `online` also asks GitHub for the available credits with Copilot's sign-in: only when the user
+ * presses refresh or has just used Copilot here. Startup and the timer stay local (no data leaves the computer).
+ */
+function refreshCopilotUsage(online = true): Promise<CopilotUsage | null> {
   if (usageInflight) return usageInflight;
   const now = new Date();
   const period = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
   const dir = copilotHome(homedir());
   if (copilotUsage) setUsage({ ...copilotUsage, loading: true });
-  usageInflight = Promise.all([scanSessionLogs(dir, Date.UTC(period.year, period.month - 1, 1)), readCopilotQuota(dir)])
+  const quota = online ? readCopilotQuota(dir).then((q) => (lastQuota = q)) : Promise.resolve(lastQuota);
+  usageInflight = Promise.all([scanSessionLogs(dir, Date.UTC(period.year, period.month - 1, 1)), quota])
     .then(([logs, q]) => setUsage(toUsage(
       summarizeLocal(logs, liveLedger.all(), period, { allowance: settings.get().usage.includedCredits, quota: q.quota, signIn: q.from }),
       { advertised: usageAdvertised?.advertised ?? null, commands: usageAdvertised?.commands, quotaError: q.error, resetAt: q.quota?.resetAt })))
@@ -664,7 +671,7 @@ const scheduleUsage = () => {
   usageTimer = null;
   const u = settings.get().usage;
   if (!u.copilotMeter || u.refreshMinutes <= 0) return;
-  usageTimer = setInterval(() => void refreshCopilotUsage(), Math.max(5, u.refreshMinutes) * 60000);
+  usageTimer = setInterval(() => void refreshCopilotUsage(false), Math.max(5, u.refreshMinutes) * 60000);
 };
 
 // ---------------- Flash server (flash-server/API.md) ----------------
@@ -1415,6 +1422,16 @@ let proxyCreds: ParsedProxy["credentials"];
 let proxySource = "system";
 const proxyEffective = new WeakMap<Electron.Session, ProxyCfg>();
 const proxiedSessions = () => [session.defaultSession, jazzSession(), updatesSession()];
+/**
+ * Chromium's spell checker downloads its dictionaries from Google on Linux (Windows and macOS use the system's own).
+ * Point it at a local folder instead, so nothing is fetched; .bdic files dropped there are used.
+ */
+function blockSpellcheckDownloads(): void {
+  const url = pathToFileURL(join(dataDir, "dictionaries")).toString() + "/";
+  const apply = (s: Electron.Session) => { try { s.setSpellCheckerDictionaryDownloadURL(url); } catch { /* not supported here */ } };
+  for (const s of proxiedSessions()) apply(s);
+  app.on("session-created", apply);
+}
 async function applyProxy(): Promise<void> {
   const n = settings.get().network;
   const fromEnv = envProxy();
@@ -1482,6 +1499,7 @@ app.whenReady().then(async () => {
   jazzSession().setCertificateVerifyProc((req, cb) => cb(settings.get().jazz.trustServerCert && jazzHosts().has(req.hostname) ? 0 : -3));
   await Promise.all([secrets.load(secretFile), secrets.load(copilotSecret), secrets.load(updateSecret), secrets.load(serverSecret)]);
   await applyProxy();
+  blockSpellcheckDownloads();
   serveReports();
   const port = await bridge.start();
   mcp.setBridge(`http://127.0.0.1:${port}`, bridge.token);
@@ -1491,14 +1509,15 @@ app.whenReady().then(async () => {
   void harnesses.detectAll(settings.get()).then((list) => {
     for (const h of list) if (h.available && h.id !== "mock" && Date.now() - (modelState(h.id).fetchedAt ?? 0) > 86400000) void refreshModels(h.id);
     const u = settings.get().usage;
-    if (u.copilotMeter) void refreshCopilotUsage(); // local files only: cheap, so always fresh at start
+    if (u.copilotMeter) void refreshCopilotUsage(false); // local files only: cheap, so always fresh at start
     scheduleUsage();
   });
   void vectorMcp.refresh();
   void mcp.ensure().then((servers) => { emit({ type: "mcp.status", servers }); if (settings.get().exam.autoSetup) void runExamSetup(true, true); });
   if (settings.get().marketplace.autoCheckUpdates) setTimeout(() => void checkPluginUpdates().catch((e) => log("warn", `marketplace check failed: ${String(e)}`)), 4000);
-  // Review status of my Flash server submissions: at start and every 15 minutes (status changes become notices).
-  const pollQuietly = () => void pollSubmissions().catch((e) => log("warn", `submissions: ${String(e?.message ?? e)}`));
+  // Review status of my Flash server submissions: at start and every 15 minutes (status changes become notices), only when
+  // automatic marketplace checks are on. Otherwise the Marketplace page asks when the user opens it.
+  const pollQuietly = () => { if (settings.get().marketplace.autoCheckUpdates) void pollSubmissions().catch((e) => log("warn", `submissions: ${String(e?.message ?? e)}`)); };
   setTimeout(pollQuietly, 8000);
   setInterval(pollQuietly, 15 * 60000);
 });
