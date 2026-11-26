@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { chatCredits, creditsText, usageLabel } from "@shared/usage-label";
 export { usageLabel, unitName } from "@shared/usage-label";
 import { agentTitle, api, useStore } from "../store";
@@ -22,12 +21,7 @@ export function UsageMeter({ chatId = null }: { chatId?: string | null }) {
     ? <span className="usage-chat" title={`Counted in this chat:\n${mine.agents.map((a) => `${agentTitle(a)}: ${creditsText(a.credits, unit)}`).join("\n")}`}>
         This chat · <strong>{creditsText(mine.total, unit)}</strong></span>
     : null;
-  // Check on first view when there is no fresh data (e.g. Copilot was set up after the app started).
-  useEffect(() => {
-    if (!cfg?.copilotMeter) return;
-    const stale = !u || Date.now() - u.fetchedAt > Math.max(5, cfg.refreshMinutes || 30) * 60000;
-    if (stale && !u?.loading) void api().copilotUsage(true);
-  }, [cfg?.copilotMeter]);
+  // No automatic check on view: asking GitHub for credits happens only after a Copilot turn or when refresh is pressed.
   if (!cfg?.copilotMeter) return null;
   const open = () => st.setView({ kind: "settings", tab: "usage" });
   const refresh = <button className="ghost tiny" disabled={u?.loading} onClick={() => api().copilotUsage(true)} title="Refresh Copilot usage">

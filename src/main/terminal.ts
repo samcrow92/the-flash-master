@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { AppEvent } from "@shared/types";
+import { telemetryOptOutEnv } from "./privacy";
 
 /** The parts of node-pty this module uses (loaded lazily: it is a native module, and most sessions never open a terminal). */
 interface Pty {
@@ -56,7 +57,7 @@ export class Terminals {
     this.spawnFn ??= await this.loadSpawn();
     const shell = defaultShell();
     const cwd = input.cwd && isDir(input.cwd) ? input.cwd : homedir();
-    const env = { ...process.env, TERM_PROGRAM: "TheFlashMaster", COLORTERM: "truecolor" } as Record<string, string>;
+    const env = { ...telemetryOptOutEnv(), ...process.env, TERM_PROGRAM: "TheFlashMaster", COLORTERM: "truecolor" } as Record<string, string>;
     delete env.ELECTRON_RUN_AS_NODE;
     const pty = this.spawnFn(shell.file, shell.args, {
       name: "xterm-256color", cols: clamp(input.cols), rows: clamp(input.rows), cwd, env, useConpty: true,

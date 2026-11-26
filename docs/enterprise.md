@@ -5,7 +5,7 @@
 - **Portable** (`…-x64-portable.exe`): a single file, nothing to install. Data lives in `%APPDATA%\TheFlashMaster`. To keep the data next to the exe, set the environment variable `FLASH_DATA_DIR=<folder>`.
 - **Installer** (`…-x64-setup.exe`): a per-user NSIS installer (`perMachine: false`). It needs no admin rights and lets the user choose the folder.
 - **Code signing:** add the repository secrets `WIN_CSC_LINK` (a base64 `.pfx` or a URL) and `WIN_CSC_KEY_PASSWORD`. The release workflow then signs both executables. Unsigned builds work, but SmartScreen will warn.
-- **No telemetry, no auto-update, no login.** Updates are new releases that you distribute.
+- **No telemetry, no automatic update checks, no login.** Updates are new releases that you distribute. What the app sends, and when, is listed in [privacy.md](privacy.md).
 
 ## Policy file (preset and lock settings)
 

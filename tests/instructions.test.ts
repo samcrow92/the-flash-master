@@ -45,7 +45,7 @@ describe("instruction isolation", () => {
     const r = cleanOpencodeConfig(data, { XDG_CONFIG_HOME: xdg });
     expect(r.ok).toBe(true);
     const cfg = JSON.parse(readFileSync(join(r.dir, "opencode", "opencode.json"), "utf8"));
-    expect(cfg).toEqual({ provider: { corp: { options: { baseURL: "https://llm.corp/v1" } } }, model: "corp/gpt-5" });
+    expect(cfg).toEqual({ provider: { corp: { options: { baseURL: "https://llm.corp/v1" } } }, model: "corp/gpt-5", share: "disabled" });
     expect(existsSync(join(r.dir, "opencode", "AGENTS.md"))).toBe(false);
     expect(existsSync(join(r.dir, "opencode", "agent"))).toBe(false);
   });

@@ -31,13 +31,13 @@ function setup(patch: unknown = {}) {
 }
 
 describe("recommended MCP servers", () => {
-  it("defaults: Context7, Sequential Thinking and MarkItDown on; others off", () => {
+  it("defaults: Sequential Thinking and MarkItDown on (local); Context7 (a cloud service) and the others off", () => {
     const on = MCP_CATALOG.filter((c) => catalogState(c, {}).enabled).map((c) => c.id);
-    expect(on).toEqual(["context7", "sequential-thinking", "markitdown"]);
+    expect(on).toEqual(["sequential-thinking", "markitdown"]);
   });
 
   it("attaches installed servers only to their roles", () => {
-    const { boot } = setup();
+    const { boot } = setup({ mcp: { catalog: { context7: { enabled: true } } } });
     const names = (r: string) => boot.specsFor(role(r), "a1").map((s) => s.name);
     expect(names("software-expert")).toEqual(["flashmaster-core", "context7"]);
     expect(names("analyst")).toEqual(["flashmaster-core", "markitdown"]); // sequential-thinking not installed → skipped
@@ -51,7 +51,7 @@ describe("recommended MCP servers", () => {
   });
 
   it("honours role overrides, '*', API keys and disabling", () => {
-    const { boot, set } = setup({ mcp: { catalog: { context7: { roles: "*", env: "CONTEXT7_API_KEY=ctx7sk_1" } } } });
+    const { boot, set } = setup({ mcp: { catalog: { context7: { enabled: true, roles: "*", env: "CONTEXT7_API_KEY=ctx7sk_1" } } } });
     const c7 = boot.specsFor(role("presentation-expert"), "a").find((s) => s.name === "context7");
     expect(c7?.env.CONTEXT7_API_KEY).toBe("ctx7sk_1");
     set({ mcp: { catalog: { context7: { roles: "*", enabled: false } } } });

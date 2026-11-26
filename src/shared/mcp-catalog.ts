@@ -24,7 +24,7 @@ export const MCP_CATALOG: CatalogServer[] = [
     description: "Fetches current, version-specific documentation and code examples for libraries and frameworks, so agents stop guessing APIs.",
     runtime: "npm", package: "@upstash/context7-mcp", bin: "context7-mcp",
     env: [{ key: "CONTEXT7_API_KEY", label: "API key (optional, higher rate limits)", optional: true, secret: true }],
-    roles: ["flashmaster", "software-expert", "architect", "reviewer", "tester", "challenger", "winidea-debugger"], defaultEnabled: true,
+    roles: ["flashmaster", "software-expert", "architect", "reviewer", "tester", "challenger", "winidea-debugger"], defaultEnabled: false,
     homepage: "https://github.com/upstash/context7",
   },
   {

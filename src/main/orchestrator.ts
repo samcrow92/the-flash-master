@@ -35,6 +35,7 @@ import { dependencyContext, normaliseTasks, planOutline, planReport, readyTasks,
 import { mergeState, renderState, STATE_RULES } from "./agent-state";
 import { duoGitlabHosts, gitlabRepoProblem } from "./harness/duo";
 import { isLocalHarness, localRuntimeNote, needsLocalInference, pickLocalRuntime, type LocalPick } from "./locality";
+import { telemetryOptOutEnv } from "./privacy";
 import { loadAgentSkills, PROJECT_SKILL_DIRS, skillsIndex, slugRole, type AgentSpec } from "./roles";
 import {
   budgetState, HTML_REPORT_RULES, buildBrief, buildTurnPrompt, estimateTokens, extractiveSummary, parseMention, parseSlash, planCompaction,
@@ -3292,7 +3293,7 @@ export function checkLaunchArgs(args?: string | null): string | null {
 const HARNESS_EXIT = /harness exited|failed to start|exited again after a restart/i;
 
 export function networkEnv(s: Settings): Record<string, string> {
-  const env: Record<string, string> = {};
+  const env: Record<string, string> = telemetryOptOutEnv();
   // The MCP servers reach the app over 127.0.0.1: make sure an inherited corporate proxy never intercepts that.
   const inherited = process.env.no_proxy || process.env.NO_PROXY || "";
   const local = "localhost,127.0.0.1";

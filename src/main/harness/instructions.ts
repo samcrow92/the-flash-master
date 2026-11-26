@@ -77,13 +77,16 @@ export function cleanOpencodeConfig(dataDir: string, env: NodeJS.ProcessEnv): { 
     const src = join(env.XDG_CONFIG_HOME || join(env.USERPROFILE || env.HOME || homedir(), ".config"), "opencode");
     rmSync(target, { recursive: true, force: true });
     mkdirSync(target, { recursive: true });
+    let wrote = false;
     if (existsSync(src)) {
       for (const f of readdirSync(src)) {
         if (/^agents?\.md$/i.test(f) || /^claude\.md$/i.test(f)) continue; // the instructions we drop
         if (/^(opencode|config)\.jsonc?$/i.test(f)) {
           const cfg = parseJsonc(readFileSync(join(src, f), "utf8"));
           delete cfg.instructions;
+          cfg.share = "disabled"; // never upload sessions to opencode's share service
           writeFileSync(join(target, f.replace(/\.jsonc$/i, ".json")), JSON.stringify(cfg, null, 2));
+          wrote = true;
         } else if (/^(agent|agents|command|commands|mode|modes|plugin|plugins)$/i.test(f)) {
           continue; // user-level custom agents/commands/plugins carry their own prompts
         } else if (!f.startsWith(".")) {
@@ -91,6 +94,7 @@ export function cleanOpencodeConfig(dataDir: string, env: NodeJS.ProcessEnv): { 
         }
       }
     }
+    if (!wrote) writeFileSync(join(target, "opencode.json"), JSON.stringify({ share: "disabled" }, null, 2));
     return { ok: true, dir };
   } catch (e: any) {
     return { ok: false, dir, error: String(e?.message ?? e) };
