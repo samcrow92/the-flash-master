@@ -47,7 +47,8 @@ export type ThreadStatus = "working" | "needs_you" | "idle";
 export function threadStatus(chatId: string, agents: AgentRun[]): ThreadStatus {
   const mine = agents.filter((a) => a.chatId === chatId);
   if (mine.some((a) => a.status === "running")) return "working";
-  if (mine.some((a) => a.lastActivity?.startsWith("❓ Needs you"))) return "needs_you";
+  // Set by the main process when an agent raises a "needs you" card (ask_user, or a reply that ends needing a decision / blocked).
+  if (mine.some((a) => /^(❓ Needs you|Needs your decision|Blocked)\b/.test(a.lastActivity ?? ""))) return "needs_you";
   return "idle";
 }
 

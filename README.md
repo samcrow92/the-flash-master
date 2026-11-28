@@ -31,7 +31,8 @@ The principles behind it, and what changes fit, are in [VISION.md](VISION.md).
 
 - **Projects:** pick a local folder; agents work inside it. Each project has any number of **chats**.
 - **Master chat** with **TheFlashMaster**, the coordinator. It plans, delegates to specialists, tracks tasks and integrates the results.
-- **Streaming** replies, **threads** (reply to any message), and **reactions**. ✅/❌ reactions double as tool-approval answers.
+- **Project threads** like the Claude app: each project has a **Coordinator** chat that starts a thread per feature or request (one feature can have several). Threads are full chats you can open and steer, listed under their feature in the sidebar, and report back to the coordinator when they finish.
+- **Streaming** replies and **reactions**. ✅/❌ reactions double as tool-approval answers.
 - **Models from each harness:** the model field suggests the models each harness reports (Copilot and OpenCode via ACP, Pi via RPC; cached; ↻ refreshes). You can still type any id.
 - **Clean harness instructions:** in the default *clean* mode, each CLI's own preloaded instructions (AGENTS.md, CLAUDE.md, custom rules, skills, extensions) are switched off. Copilot gets `--no-custom-instructions`; Pi gets `--no-context-files --no-skills --no-extensions --no-prompt-templates`; OpenCode gets a clean config copy plus its disable flags. GitLab Duo can only be overridden partially. Agents then follow only TheFlashMaster's agent definitions plus your **team rules** (Settings → Agents). There's an option to keep a project's AGENTS.md. Logins are untouched.
 - **Agents that look alive:** working specialists pulse softly and show activity dots on the Specialists pill at the top right of the chat (open it and click one to watch its progress), avatars animate while replies stream, and running agent chips glow. Animation is reduced when Windows' "reduce motion" setting is on.

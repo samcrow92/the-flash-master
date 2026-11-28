@@ -156,6 +156,9 @@ describe("project tree", () => {
     const a = (status: AgentRun["status"], lastActivity: string | null = null) => ({ chatId: "t", status, lastActivity }) as AgentRun;
     expect(threadStatus("t", [a("running")])).toBe("working");
     expect(threadStatus("t", [a("idle", "❓ Needs you: which bus?")])).toBe("needs_you");
+    // Regression: a reply ending with "status: needs_decision" overwrote the card's "❓ Needs you" activity, so the dot stayed grey.
+    expect(threadStatus("t", [a("idle", "Needs your decision: Set A or B?")])).toBe("needs_you");
+    expect(threadStatus("t", [a("idle", "Blocked: no access")])).toBe("needs_you");
     expect(threadStatus("t", [a("idle", "Done")])).toBe("idle");
     expect(threadStatus("other", [a("running")])).toBe("idle");
   });

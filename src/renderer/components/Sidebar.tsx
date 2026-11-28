@@ -139,7 +139,7 @@ export function Sidebar() {
                 {closed && working > 0 && <span className="pulse" title={`${working} working`} />}
                 <span className="count">{f.threads.length}</span>
               </button>
-              {!closed && f.threads.map((c) => chatRow(c, "thread"))}
+              {!closed && f.threads.map((c) => chatRow(c, "thread-row"))}
             </div>
           );
         })}

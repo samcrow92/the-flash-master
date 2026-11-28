@@ -2048,18 +2048,18 @@ button.card.trace-card { text-align: left; cursor: pointer; color: var(--fg); fo
 .chat-link.coord { font-weight: 600; }
 .coord-icon { color: var(--accent); flex: none; }
 [data-theme="light"] .coord-icon { color: #c88a00; }
-.feature-row { background: transparent; border: none; display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 8px 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; text-align: left; border-radius: 6px; }
+.feature-row { background: transparent; border: none; display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 8px 3px 22px; color: var(--muted); font-size: 11.5px; font-weight: 600; text-align: left; border-radius: 6px; }
 .feature-row:not(.static):hover { color: var(--fg); }
 .feature-row .feature-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feature-row .count { font-weight: 400; color: var(--muted); opacity: .8; }
 .feature-row .chev { transition: transform .15s; }
 .feature-row .chev.open { transform: rotate(90deg); }
-.chat-link.thread { padding-left: 22px; }
+.chat-link.thread-row { padding-left: 46px; }
 .thread-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); opacity: .45; }
 .thread-dot.working { background: var(--blue); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 25%, transparent); animation: pulse 1.2s infinite; }
 .thread-dot.needs_you { background: var(--amber); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent); }
 a.chat-ref { color: var(--blue); cursor: pointer; }
-.crumb-feature { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.crumb-feature { color: var(--muted); padding: 4px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .thread-banner { display: flex; align-items: center; gap: 8px; margin: 4px auto 0; width: min(760px, calc(100% - 32px)); padding: 7px 12px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 12.5px; }
 .thread-banner b { color: var(--fg); font-weight: 600; }
 .thread-banner > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
