@@ -1,7 +1,7 @@
 /**
  * Smoke / demo driver (CI + docs screenshots). Enabled only by env vars:
  *   FLASH_SMOKE_SHOT=<file.png>   boot, screenshot, exit 0 when the UI rendered
- *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, thread, reactions,
+ *   FLASH_SMOKE_DEMO=<dir>        additionally drive a full demo (project, streaming chat, reactions,
  *                                 views) through the real UI with the mock harness, saving <dir>/<n>-<view>.png
  *   FLASH_SMOKE_ASK=<dir>         only the "needs you" cards (a question, a specialist that delivered nothing), dark and light
  *   FLASH_SMOKE_IMAGES=<dir>      only images in chats: a pasted picture, an agent screenshot (inline + tool call), the viewer
@@ -16,6 +16,8 @@
  *   FLASH_SMOKE_TRACE=<dir>       only traceability and the review inbox: the Traceability page over trace files, test tags and JUnit
  *                                 results in FLASH_SMOKE_PROJECT, the evidence report, and the inbox on the Review page, dark and light
  *   FLASH_SMOKE_GRAPH=<dir>       only the knowledge base's code graph: Scan code with the real graphify on FLASH_SMOKE_PROJECT
+ *   FLASH_SMOKE_THREADS=<dir>     only project threads: a coordinator chat with threads under two features in the sidebar, then a
+ *                                 thread with its banner, dark and light
  *   FLASH_SMOKE_SERVER=<dir>      only the Flash server features (settings, marketplace, submit, my submissions, updates) against
  *                                 a built-in stub server (smoke-server.ts); FLASH_SMOKE_PICK = the folder the Submit dialog "picks"
  */
@@ -48,7 +50,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(2000);
       await click("brake-ecu", ".project-name");
       await sleep(300);
-      await click("General", ".chat-link");
+      await click("Coordinator", ".chat-link");
       await sleep(500);
       await js(`(()=>{const t=document.querySelector('.chat > .composer-wrap .composer2 textarea');const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;set.call(t,'Calibrate the brake model for the cold start [needs-decision]');t.dispatchEvent(new Event('input',{bubbles:true}));t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
       await sleep(5000);
@@ -65,19 +67,12 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`document.querySelector('.ask-card.answered')?.scrollIntoView({block:'start'})`);
       await sleep(400);
       await shot(join(askDir, "needs-you-answered-dark.png"));
-      // The recovery attempts, as they show in the specialist's thread.
-      await js(`document.querySelector('.thread-pill')?.click()`);
-      await sleep(900);
-      await js(`[...document.querySelectorAll('.inline-thread.open .sys-line')].find(x=>x.textContent.includes('recovery'))?.scrollIntoView({block:'center'})`);
-      await sleep(400);
-      await shot(join(askDir, "recovery-thread-dark.png"));
-      await js(`document.querySelector('.thread-pill.open')?.click()`);
       await js(`window.flash.api.updateSettings({ general: { theme: "light" } })`);
       win.webContents.reload();
       await sleep(2500);
       await click("brake-ecu", ".project-name");
       await sleep(300);
-      await click("General", ".chat-link");
+      await click("Coordinator", ".chat-link");
       await sleep(800);
       await bottom();
       await sleep(600);
@@ -96,7 +91,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(2000);
       await click("brake-ecu", ".project-name");
       await sleep(300);
-      await click("General", ".chat-link");
+      await click("Coordinator", ".chat-link");
       await sleep(600);
       // A picture the user pasted (drawn on a canvas), sent with a request that makes the mock agent take a "screenshot".
       await js(`(async()=>{const st=document.querySelector('[data-chat]');const chatId=st.dataset.chat;const c=document.createElement('canvas');c.width=640;c.height=360;const g=c.getContext('2d');const gr=g.createLinearGradient(0,0,640,360);gr.addColorStop(0,'#1d3b6a');gr.addColorStop(1,'#5b2b6e');g.fillStyle=gr;g.fillRect(0,0,640,360);g.strokeStyle='#ffb347';g.lineWidth=5;g.beginPath();for(let x=0;x<=640;x+=8){const y=190-70*Math.sin(x/60)*Math.exp(-x/500);x?g.lineTo(x,y):g.moveTo(x,y)}g.stroke();g.fillStyle='rgba(255,255,255,.85)';g.font='bold 26px sans-serif';g.fillText('Brake lamp current, -20 °C',24,44);const a=await window.flash.api.saveAttachment({chatId,name:'scope-capture.png',mime:'image/png',dataBase64:c.toDataURL('image/png').split(',')[1]});await window.flash.api.sendMessage({chatId,content:'The lamp flickers on this scope capture. Take a screenshot of the cold-start dashboard.',attachments:[a]});})()`);
@@ -115,7 +110,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(2500);
       await click("brake-ecu", ".project-name");
       await sleep(300);
-      await click("General", ".chat-link");
+      await click("Coordinator", ".chat-link");
       await sleep(1500);
       await js(`document.querySelector('.md-img[src]')?.scrollIntoView({block:'center'})`);
       await sleep(500);
@@ -132,7 +127,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await js(`window.flash.api.createProject(${JSON.stringify(proj)}, "brake-ecu")`);
       win.webContents.reload();
       await sleep(2000);
-      const openChat = async () => { await click("brake-ecu", ".project-name"); await sleep(300); await click("General", ".chat-link"); await sleep(900); };
+      const openChat = async () => { await click("brake-ecu", ".project-name"); await sleep(300); await click("Coordinator", ".chat-link"); await sleep(900); };
       await openChat();
       await js(`(async()=>{const chatId=document.querySelector('[data-chat]').dataset.chat;await window.flash.api.sendMessage({chatId,content:'Analyse the brake light flicker at cold start and write an html report.'});})()`);
       await sleep(7000);
@@ -416,7 +411,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await click("flash-master", ".project-name");
       await sleep(300);
       const memoryPage = async () => {
-        await click("General", ".chat-link"); // opening a project chat makes it the current project, which the Memory page shows
+        await click("Coordinator", ".chat-link"); // opening a project chat makes it the current project, which the Memory page shows
         await sleep(600);
         await click("Memory", ".sidebar button");
         await sleep(1200);
@@ -456,6 +451,46 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(800);
       await shot(join(graphDir, "5-code-map-entry.png"));
       app.exit(0);
+      return;
+    }
+    const threadsDir = process.env.FLASH_SMOKE_THREADS;
+    if (ok && threadsDir && hooks) {
+      mkdirSync(threadsDir, { recursive: true });
+      const proj = process.env.FLASH_SMOKE_PROJECT ?? app.getPath("temp");
+      await js(`window.flash.api.updateSettings({ general: { defaultHarness: "mock", theme: "dark" } })`);
+      const project = hooks.db.createProject("flash-tool", proj);
+      const coord = hooks.db.ensureCoordinator(project.id);
+      await hooks.orch.sendUserMessage(coord.id, "Add CAN log export to BLF and ASC, and start the XCP flashing work in parallel.", null);
+      await sleep(3500);
+      const coordAgent = hooks.db.listAgents().find((a) => a.chatId === coord.id);
+      const threads = [
+        { feature: "CAN log export", title: "Design export dialog", brief: "Design the export dialog for CAN logs (BLF and ASC)." },
+        { feature: "CAN log export", title: "Implement BLF writer", brief: "Implement the BLF writer for CAN and CAN FD frames [hang]" },
+        { feature: "CAN log export", title: "Choose ASC timestamp format", brief: "Pick the ASC timestamp format [needs-decision]" },
+        { feature: "Flash over XCP", title: "Spike XCP on CAN", brief: "Spike XCP on CAN with the VN1630." },
+        { feature: "Flash over XCP", title: "Wire flash progress UI", brief: "Wire the flash progress UI [hang]" },
+      ];
+      const ids: string[] = [];
+      for (const t of threads) { if (coordAgent) ids.push((await hooks.orch.startThread(coordAgent.id, t)).threadId); await sleep(300); }
+      await sleep(6000);
+      const pass = { tree: false, banner: false };
+      const open = async (title: string) => { await click(title, ".chat-link"); await sleep(1200); };
+      for (const theme of ["dark", "light"] as const) {
+        await js(`window.flash.api.updateSettings({ general: { theme: ${JSON.stringify(theme)} } })`);
+        win.webContents.reload();
+        await sleep(2500);
+        await js(`document.querySelector('.project-name[aria-expanded="false"]')?.click()`);
+        await sleep(500);
+        await open("Coordinator");
+        pass.tree ||= await js<boolean>(`document.querySelectorAll('.chat-list.tree .feature-row').length >= 2 && !!document.querySelector('.chat-link.thread-row .thread-dot.working')`);
+        await shot(join(threadsDir, `coordinator-${theme}.png`));
+        await open("Implement BLF writer");
+        pass.banner ||= await js<boolean>(`!!document.querySelector('.thread-banner')`);
+        await shot(join(threadsDir, `thread-${theme}.png`));
+      }
+      log(pass.tree && pass.banner ? "info" : "error", `smoke-threads: ${JSON.stringify(pass)}`);
+      await hooks.orch.stopAll();
+      app.exit(pass.tree && pass.banner ? 0 : 1);
       return;
     }
     const serverDir = process.env.FLASH_SMOKE_SERVER;
@@ -524,7 +559,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await sleep(2000);
       await click("brake-ecu", ".project-name");
       await sleep(300);
-      await click("General", ".chat-link");
+      await click("Coordinator", ".chat-link");
       await sleep(500);
       const send = async (text: string, sel = ".chat > .composer-wrap .composer2 textarea") => {
         await js(`(()=>{const t=document.querySelector(${JSON.stringify(sel)});const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;set.call(t,${JSON.stringify(text)});t.dispatchEvent(new Event('input',{bubbles:true}));t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
@@ -544,40 +579,9 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
       await shot(join(demo, "1c-specialists-popout.png"));
       await js(`document.querySelector('.pill-stack > .spec-float:not(.agents-float) .spec-pill')?.click()`);
       await sleep(4500);
-      await js(`[...document.querySelectorAll('.msg-agent .msg-actions button')].find(b=>b.title==='Reply in thread')?.click()`);
-      await sleep(500);
-      await send("@reviewer double-check the signal scaling", ".side-sheet .tpl-item.open .composer2 textarea");
-      await sleep(5500);
-      await js(`(async()=>{const st=window.flash.api;const chats=await st.listChats((await st.listProjects())[0].id);const msgs=await st.listMessages(chats[0].id,null);const a=msgs.find(m=>m.author==='agent');if(a){await st.toggleReaction(a.id,'👍');await st.toggleReaction(a.id,'🚀');}})()`);
+      await js(`(async()=>{const st=window.flash.api;const chats=await st.listChats((await st.listProjects())[0].id);const c=chats.find(x=>x.coordinator)??chats[0];const msgs=await st.listMessages(c.id,null);const a=msgs.find(m=>m.author==='agent');if(a){await st.toggleReaction(a.id,'👍');await st.toggleReaction(a.id,'🚀');}})()`);
       await sleep(600);
-      await shot(join(demo, "2-chat-thread-reactions.png"));
-      // Threads open in the floating side sheet; the chat keeps only the "N replies" chip.
-      await js(`document.querySelector('.thread-pill')?.closest('.msg')?.scrollIntoView({block:'center'})`);
-      await sleep(400);
-      await shot(join(demo, "2-threads-panel.png"));
-      // Thread cleanup: the row menu (archive / delete), then the archived thread in its own section and as a chip in the chat
-      await js(`document.querySelector('.threads-panel .tpl-item button[title="Thread actions"]')?.click()`);
-      await sleep(300);
-      await shot(join(demo, "2f-thread-menu.png"));
-      await click("Archive thread", ".ctx-item");
-      await sleep(500);
-      await js(`document.querySelector('.tpl-archived-head')?.click()`);
-      await js(`document.querySelector('.thread-pill.archived')?.closest('.msg')?.scrollIntoView({block:'center'})`);
-      await sleep(500);
-      await shot(join(demo, "2g-thread-archived.png"));
-      await js(`document.querySelector('.threads-panel .tpl-item button[title="Thread actions"]')?.click()`);
-      await sleep(200);
-      await click("Restore thread", ".ctx-item");
-      await sleep(500);
-      await js(`document.querySelector('.side-sheet button[aria-label="Close side sheet"]')?.click()`);
-      await sleep(500);
-      await shot(join(demo, "2-sheet-closed.png"));
-      await js(`document.querySelector('.thread-pill')?.click()`);
-      await sleep(700);
-      await js(`document.querySelector('.side-sheet .tpl-item button[title="Open in new window"]')?.click()`);
-      await sleep(3500);
-      const tw = BrowserWindow.getAllWindows().find((w) => w !== win && w.webContents.getURL().includes("#thread/"));
-      if (tw) { writeFileSync(join(demo, "2-thread-window.png"), (await tw.webContents.capturePage()).toPNG()); tw.close(); }
+      await shot(join(demo, "2-chat-reactions.png"));
       await click("Progress", ".chat-controls button");
       await sleep(900);
       await shot(join(demo, "2b-progress-flow.png"));
@@ -649,7 +653,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await js(`(async()=>{const p=(await window.flash.api.listProjects())[0];const c=(await window.flash.api.listChats(p.id))[0];return c.id})()`).then(() => undefined);
         await click("brake-ecu", ".project-name");
         await sleep(300);
-        await click("General", ".chat-link");
+        await click("Coordinator", ".chat-link");
         await sleep(1200);
         await shot(join(demo, "9d-light-chat.png"));
         await js(`document.querySelector('.theme-toggle')?.click()`);
@@ -842,7 +846,7 @@ export async function runSmoke(win: BrowserWindow, log: (l: "info" | "error", m:
         await sleep(2500);
         await click("brake-ecu", ".project-name");
         await sleep(300);
-        await click("General", ".chat-link");
+        await click("Coordinator", ".chat-link");
         await sleep(1000);
         await shot(join(demo, "10-usage-meter.png"));
         await click("Jazz", ".sidebar button");

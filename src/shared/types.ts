@@ -48,6 +48,12 @@ export interface Chat {
   archived: boolean;
   pinned: boolean;
   createdAt: number;
+  /** The project's coordinator chat: it starts threads (start_thread) and hears back from them. One per project. */
+  coordinator: boolean;
+  /** A thread: the coordinator chat that started it (null = a top-level chat). */
+  parentChatId: string | null;
+  /** The feature or request a thread belongs to; threads are grouped by it in the sidebar (null = ungrouped). */
+  feature: string | null;
 }
 
 export interface Message {
@@ -618,6 +624,7 @@ export interface EvalProgress { running: boolean; batch: string | null; done: nu
 
 export type AppEvent =
   | { type: "message.created"; message: Message }
+  | { type: "chat.upserted"; chat: Chat }
   | { type: "message.delta"; messageId: string; chatId: string; delta: string }
   | { type: "message.tools"; messageId: string; chatId: string; tools: ToolRun[] }
   | { type: "message.updated"; message: Message }

@@ -13,8 +13,8 @@ describe("panel resize sizes", () => {
 
   it("grows a right edge when dragged right and a left edge when dragged left", () => {
     expect(dragSize("sidebar", 252, 40, 1)).toBe(292);
-    expect(dragSize("threads", 340, -60, -1)).toBe(400);
-    expect(dragSize("threads", 340, 60, -1)).toBe(280);
+    expect(dragSize("side", 380, -60, -1)).toBe(440);
+    expect(dragSize("side", 380, 60, -1)).toBe(320);
     expect(dragSize("termH", 420, 100, 1)).toBe(520);
   });
 
@@ -36,10 +36,9 @@ describe("panel resize sizes", () => {
     for (const p of Object.values(PANELS)) expect(css).toContain(`var(${p.cssVar}, ${p.def}px)`);
   });
 
-  it("sidebar, Threads, Progress, Artifacts and terminal each carry a resize handle", () => {
+  it("sidebar, Progress, Artifacts and terminal each carry a resize handle", () => {
     const files: Record<string, string> = {
       "src/renderer/components/Sidebar.tsx": 'panel="sidebar"',
-      "src/renderer/views/ThreadsPanel.tsx": 'panel="threads"',
       "src/renderer/views/FlowView.tsx": 'panel="side"',
       "src/renderer/views/ArtifactsPanel.tsx": 'panel="side"',
       "src/renderer/components/TerminalPanel.tsx": 'panel="termH"',

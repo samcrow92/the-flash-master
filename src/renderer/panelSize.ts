@@ -1,12 +1,12 @@
 /**
- * Drag-to-resize sizes for the side panels (sidebar, Threads, Progress/Artifacts) and the terminal.
+ * Drag-to-resize sizes for the side panels (sidebar, Progress/Artifacts) and the terminal.
  *
  * Sizes live in CSS variables on <html> and in localStorage, never in React state: a drag writes the variable once per
  * animation frame and nothing re-renders, so the chat's message list only sees its width change (it re-measures through
  * its ResizeObserver, as on a window resize) and no render cascade can start from here.
  */
 
-export type PanelId = "sidebar" | "threads" | "side" | "termW" | "termH";
+export type PanelId = "sidebar" | "side" | "termW" | "termH";
 
 export interface PanelSpec {
   /** CSS variable the stylesheet reads (with the default as fallback). */
@@ -18,7 +18,6 @@ export interface PanelSpec {
 
 export const PANELS: Record<PanelId, PanelSpec> = {
   sidebar: { cssVar: "--sidebar-w", def: 252, min: 200, max: 480 },
-  threads: { cssVar: "--threads-w", def: 340, min: 260, max: 680 },
   side: { cssVar: "--side-w", def: 380, min: 300, max: 900 },
   termW: { cssVar: "--term-w", def: 860, min: 420, max: 4000 },
   termH: { cssVar: "--term-h", def: 420, min: 160, max: 4000 },
