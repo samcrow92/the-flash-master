@@ -236,6 +236,16 @@ const TIME_LIMIT_NUDGE = (mins: number) => `You have reached the ${mins}-minute 
   + "then finish with your result block: what is done, what is left, and the next step. Use status failed if the goal isn't met.";
 /** Results of specialists that finish within this window wake their coordinator once, together. */
 const REPORT_DEBOUNCE_MS = 1500;
+/** Opens a thread's first turn: who started it and that its result goes back there. */
+const THREAD_BRIEF_NOTE = (home: string, feature: string) => `You are a thread the coordinator (chat “${home}”) started for the feature “${feature}”. `
+  + "Work on this brief on your own; the user may open this thread and steer you. When you finish, end with the outcome: it goes back to the coordinator.";
+/** For a project's coordinator chat: it runs the work as threads the user can open, grouped by feature. */
+export const THREAD_RULES = `## Threads: one per piece of work
+You are this project's coordinator. For each feature or request the user brings, start threads with start_thread
+(feature = a short name for the feature; reuse it for every thread of that feature, title = the thread's task, brief = goal,
+context and acceptance). A thread is a full chat with its own agent that the user can open and steer; prefer it over
+delegate for any work longer than a quick lookup. Threads report back to you in a "Thread results" message: don't wait or poll.
+Use list_threads to see where they stand and message_thread to steer one. Keep your own replies short: what started, what finished, what needs the user.`;
 /** lastActivity of a specialist the app closed for being idle (a follow-up with its agentId brings it back). */
 const IDLE_CLOSED = "Closed after";
 const MAX_TEXT_ROUNDS = 12;
@@ -313,6 +323,8 @@ export class Orchestrator {
   /** Finished background specialists whose results still have to reach their coordinator, per coordinator. */
   /** Plans being run (the same objects the runner mutates, so a cancel is seen at once). */
   private runningPlans = new Map<string, TaskPlan>();
+  /** Thread results waiting to wake their coordinator chat (batched like specialist results). Key: coordinator chat id. */
+  private threadReports = new Map<string, { timer: ReturnType<typeof setTimeout> | null; items: { chatId: string; result: string }[] }>();
   private reports = new Map<string, { live: Live; result: string; timer: ReturnType<typeof setTimeout> | null; items: { l: Live; result: string }[] }>();
 
   constructor(private d: OrchestratorDeps) {}
@@ -321,7 +333,7 @@ export class Orchestrator {
 
   /** Handle a user message. Returns the stored user message; the agent reply streams via events. */
   async sendUserMessage(chatId: string, content: string, parentId: string | null,
-    o: { attachments?: Attachment[]; whileBusy?: "queue" | "steer" } = {}): Promise<Message> {
+    o: { attachments?: Attachment[]; whileBusy?: "queue" | "steer"; from?: { agentId: string; role: string } } = {}): Promise<Message> {
     const chat = this.mustChat(chatId);
     const threadRoot = parentId ? (this.d.db.getMessage(parentId)?.parentId ?? parentId) : null;
     const attachments = o.attachments ?? [];
@@ -333,7 +345,7 @@ export class Orchestrator {
       && (!mentioned || mentioned === busyLive.role.name);
     const queued = !!busyLive && !steer && !command && (!mentioned || mentioned === busyLive.role.name);
     const userMsg = this.d.db.addMessage({ chatId, parentId: threadRoot, author: "user", content, attachments, steer,
-      delivery: steer ? "sent" : queued ? "queued" : undefined });
+      delivery: steer ? "sent" : queued ? "queued" : undefined, agentId: o.from?.agentId, role: o.from?.role });
     this.d.emit({ type: "message.created", message: userMsg });
     if (steer && busyLive) { await this.steer(busyLive, content, attachments, userMsg.id); return userMsg; }
     await this.dispatch(chat, threadRoot, userMsg, content, attachments);
@@ -505,6 +517,117 @@ export class Orchestrator {
     void this.turn({ chat, threadRoot: null, role, input: brief, skills: this.activeSkills(chat, null), depth: 0, brief: null, taskId })
       .catch((e) => this.system(chat.id, null, `⚠️ ${String(e?.message ?? e)}`, "error"));
     return this.d.db.getAgent(live.agentId)!;
+  }
+
+  // ------------------------------------------------------------------ project threads
+
+  /** The coordinator chat whose threads a chat belongs to: a thread's parent, or the chat itself. */
+  private threadHome(chat: Chat): Chat {
+    return (chat.parentChatId && this.d.db.getChat(chat.parentChatId)) || chat;
+  }
+
+  /**
+   * Called by the `start_thread` tool. The chat's coordinator starts a thread: its own chat (agent, session, worktree)
+   * under a feature, which the user can open and steer. It reports back to the coordinator when its work ends.
+   */
+  async startThread(callerAgentId: string, a: { feature?: string; title?: string; brief?: string; role?: string; harness?: string; model?: string; mode?: string }):
+    Promise<{ threadId: string; title: string; feature: string; note: string }> {
+    const caller = this.byAgent.get(callerAgentId);
+    if (!caller) throw new Error("unknown caller");
+    if (caller.depth > 0 || caller.parentAgentId) throw new Error("only the chat's coordinator starts threads; use delegate for a sub-task of your own task");
+    const brief = String(a.brief ?? "").trim();
+    const feature = String(a.feature ?? "").trim().slice(0, 80);
+    if (!brief) throw new Error("brief is required: what the thread should do, with the facts it needs");
+    if (!feature) throw new Error("feature is required: the feature or request this thread belongs to (reuse the same name for every thread of one feature)");
+    const home = this.threadHome(this.mustChat(caller.chatId));
+    const roleName = a.role?.trim() || home.agentRole;
+    if (!this.d.roles().some((r) => r.name === roleName)) throw new Error(`unknown role "${roleName}"; see list_roles`);
+    const title = (String(a.title ?? "").trim() || brief.split(/\r?\n/)[0]!).replace(/\s+/g, " ").slice(0, 60);
+    let chat = this.d.db.createChat({ projectId: home.projectId, title, kind: "project", agentRole: roleName, autopilot: home.autopilot, parentChatId: home.id, feature });
+    const harness = HARNESS_IDS.find((h) => h === a.harness) ?? null;
+    const mode = (["local", "eco", "comfort", "sport"] as const).find((m) => m === a.mode) ?? null;
+    chat = this.d.db.updateChat(chat.id, { harness: harness ?? home.harness, model: a.model?.trim() || (harness ? null : home.model), mode: mode ?? home.mode, duoMode: home.duoMode ?? null });
+    if (!home.coordinator && home.projectId && !this.d.db.listChats(home.projectId).some((c) => c.coordinator)) {
+      this.d.emit({ type: "chat.upserted", chat: this.d.db.updateChat(home.id, { coordinator: true }) });
+    }
+    this.d.emit({ type: "chat.upserted", chat });
+    // The brief opens the thread as a message from the coordinator, so the user sees what it was asked.
+    const msg = this.d.db.addMessage({ chatId: chat.id, author: "user", agentId: caller.agentId, role: caller.role.name, content: brief });
+    this.d.emit({ type: "message.created", message: msg });
+    const role = this.role(roleName);
+    void this.turn({ chat, threadRoot: null, role, input: `${THREAD_BRIEF_NOTE(home.title, feature)}\n\n${brief}`, skills: this.activeSkills(chat, null), depth: 0, brief: null, msgIds: [msg.id] })
+      .catch((e) => this.system(chat.id, null, `⚠️ ${String(e?.message ?? e)}`, "error"));
+    return { threadId: chat.id, title, feature,
+      note: "The thread runs on its own and the user can open and steer it. Its result comes to you in a new message when it finishes; don't wait or poll. message_thread sends it more direction." };
+  }
+
+  /** Called by the `list_threads` tool: the threads of the caller's coordinator chat with their state. */
+  listThreads(callerAgentId: string, a: { feature?: string } = {}): { threads: { threadId: string; title: string; feature: string | null; state: string; last: string | null }[] } {
+    const caller = this.byAgent.get(callerAgentId);
+    if (!caller) throw new Error("unknown caller");
+    const home = this.threadHome(this.mustChat(caller.chatId));
+    const want = a.feature?.trim().toLowerCase();
+    const threads = this.d.db.listThreads(home.id).filter((c) => !c.archived && (!want || c.feature?.toLowerCase() === want)).map((c) => {
+      const last = this.d.db.listMessages(c.id, null).filter((m) => m.author === "agent").at(-1);
+      return { threadId: c.id, title: c.title, feature: c.feature, state: this.threadState(c.id), last: last ? last.content.replace(/\s+/g, " ").slice(0, 200) : null };
+    });
+    return { threads };
+  }
+
+  /** working (an agent runs), needs_you (an open "needs you" card), done (it replied), or new. */
+  threadState(chatId: string): "working" | "needs_you" | "done" | "new" {
+    if ([...this.live.values()].some((l) => l.chatId === chatId && l.busy)) return "working";
+    const msgs = this.d.db.listMessages(chatId, null);
+    if (msgs.some((m) => m.ask && !m.ask.answer)) return "needs_you";
+    return msgs.some((m) => m.author === "agent") ? "done" : "new";
+  }
+
+  /** Called by the `message_thread` tool: more direction for one of the coordinator's threads (steers it when busy, else a new turn). */
+  async messageThread(callerAgentId: string, a: { threadId?: string; message?: string }): Promise<{ sent: true; state: string }> {
+    const caller = this.byAgent.get(callerAgentId);
+    if (!caller) throw new Error("unknown caller");
+    const home = this.threadHome(this.mustChat(caller.chatId));
+    const target = a.threadId ? this.d.db.getChat(a.threadId) : null;
+    if (!target || target.parentChatId !== home.id) throw new Error("no such thread of this coordinator; see list_threads");
+    const text = String(a.message ?? "").trim();
+    if (!text) throw new Error("message is required");
+    const m = await this.sendUserMessage(target.id, text, null, { whileBusy: "steer", from: { agentId: caller.agentId, role: caller.role.name } });
+    return { sent: true, state: m.steer ? "steered into its running turn" : "started a new turn" };
+  }
+
+  /** A thread's coordinator finished (nothing of its own team still running): tell the coordinator chat that started it. */
+  private threadFinished(chat: Chat, result: string): void {
+    const home = chat.parentChatId ? this.d.db.getChat(chat.parentChatId) : null;
+    if (!home) return;
+    const r = this.threadReports.get(home.id) ?? { timer: null, items: [] };
+    r.items = r.items.filter((x) => x.chatId !== chat.id).concat({ chatId: chat.id, result });
+    this.threadReports.set(home.id, r);
+    if (r.timer) clearTimeout(r.timer);
+    r.timer = setTimeout(() => this.deliverThreadReports(home.id), REPORT_DEBOUNCE_MS);
+  }
+
+  private deliverThreadReports(homeId: string): void {
+    const r = this.threadReports.get(homeId);
+    if (!r) return;
+    r.timer = null;
+    const home = this.d.db.getChat(homeId);
+    if (!home) { this.threadReports.delete(homeId); return; }
+    const coord = [...this.live.values()].find((l) => l.chatId === homeId && l.threadRoot === null && l.depth === 0 && !l.stopped);
+    if (coord && (coord.busy || (coord.textWaiting ?? 0) > 0)) { r.timer = setTimeout(() => this.deliverThreadReports(homeId), REPORT_DEBOUNCE_MS); return; }
+    this.threadReports.delete(homeId);
+    const items = r.items.map((x) => ({ ...x, chat: this.d.db.getChat(x.chatId) })).filter((x) => x.chat && !x.chat.archived);
+    if (!items.length) return;
+    const still = this.d.db.listThreads(homeId).filter((c) => !c.archived && this.threadState(c.id) === "working").map((c) => `“${c.title}”`);
+    const lines = items.map((x) => `### Thread “${x.chat!.title}” (feature ${x.chat!.feature ?? "none"}, threadId ${x.chatId}, ${this.threadState(x.chatId).replace("_", " ")})\n${x.result}`);
+    const input = ["## Thread results", ...lines, still.length ? `Still working: ${still.join(", ")}. Their results come in a later message.` : "No other thread is working.",
+      "Continue: tell the user where the feature stands in a few lines. Start the next thread if the feature needs one, or send a thread more direction with message_thread. "
+        + "A thread that asks or is blocked waits for the user in its own chat: mention it so they can open it."].join("\n\n");
+    const notice = this.d.db.addMessage({ chatId: homeId, author: "system",
+      content: items.map((x) => `🧵 Thread **${x.chat!.title}** ${this.threadState(x.chatId) === "needs_you" ? "needs you" : "finished"} · ${x.chat!.feature ?? ""} · [Open thread](flash-chat://${x.chatId})`).join("\n") });
+    this.d.emit({ type: "message.created", message: notice });
+    const role = coord?.role ?? this.role(home.agentRole);
+    void this.turn({ chat: home, threadRoot: null, role, input, skills: [], depth: 0, brief: null, liveKey: coord?.key, deliver: false, textRound: 0 })
+      .catch((e) => this.system(homeId, null, `⚠️ ${String(e?.message ?? e)}`, "error"));
   }
 
   /** Called by the flashmaster-core MCP `delegate` tool. */
@@ -2124,7 +2247,7 @@ export class Orchestrator {
           houseRules: [s.agents.houseRules, this.d.extraRules?.() ?? "",
             first && s.agents.unslop !== false && !t.skills.some((k) => k.command === "unslop") ? unslopRules(this.d.skills().find((k) => k.command === "unslop")) : "",
             first ? renderState(this.d.db.getAgentState(live.agentId)) : "", first ? skillsIndex(chatSkills.filter((k) => !roleSkills.includes(k) && !t.skills.includes(k))) : "", first && live.parentAgentId ? STATE_RULES : "",
-            first && live.local ? localRuntimeNote(live.harness, live.model, live.local.source) : "", first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? `${DUO_SPECIALIST_RULES}\n\n${DUO_REPORTING_RULES}` : STATUS_LINE_RULES) : "", first && this.duoOrchestrates(live, s) ? this.duoOrchestratorBrief(s) : first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
+            first && live.local ? localRuntimeNote(live.harness, live.model, live.local.source) : "", first && live.worktree ? `You work in your own git worktree (an isolated copy of the project) on branch ${live.branch}. Commit your changes on that branch before you finish; the user reviews and merges it. Don't push, and don't switch branches.` : "", first && s.agents.reportDiagrams ? HTML_REPORT_RULES : "", first && live.textDelegation ? TEXT_DELEGATION_RULES : "", first ? (live.parentAgentId ? SPECIALIST_ASK_RULES : NEEDS_YOU_RULES) : "", first && live.parentAgentId ? (live.harness === "duo" ? `${DUO_SPECIALIST_RULES}\n\n${DUO_REPORTING_RULES}` : STATUS_LINE_RULES) : "", first && this.duoOrchestrates(live, s) ? this.duoOrchestratorBrief(s) : first && live.depth === 0 && this.coordinates(live, s) ? COORDINATOR_FEEDBACK_RULES : "", first && live.depth === 0 && t.chat.coordinator && this.coordinates(live, s) ? THREAD_RULES : "", first && this.memoryOn() ? MEMORY_RULES : "", first && live.textTools ? this.textToolsFor(live) : ""].filter((x) => x.trim()).join("\n\n") });
       };
       // Local embeddings (when on) rank recalled memories by meaning too: embed the query before the prompt is built.
       if (this.memoryOn() && s.memory?.autoInject) await this.d.memory?.prepare(`${t.brief ?? ""}\n${t.input}`.slice(0, 4000), 1500);
@@ -2365,6 +2488,9 @@ export class Orchestrator {
       this.finishDelegated(live, result);
       if (crashed && !live.stopped) this.offerHarnessSwitch(live, t);
       if (this.coordinatorFeedback(live, t, outcome)) return;
+      if (t.chat.parentChatId && live.depth === 0 && !live.parentAgentId && !live.stopped && !live.paused && !live.queue.length && !this.ownWorking(live.agentId).length) {
+        this.threadFinished(t.chat, outcome.result);
+      }
     }
     if (!live.paused && !live.stopped && live.queue.length) {
       const items = live.queue.splice(0);

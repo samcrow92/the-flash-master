@@ -379,6 +379,7 @@ export const useStore = create<State>((set, get) => ({
   apply(e) {
     const st = get();
     switch (e.type) {
+      case "chat.upserted": st.upsertChat(e.chat); return;
       case "message.created": {
         const m = e.message;
         if (!st.chatById[m.chatId]) {

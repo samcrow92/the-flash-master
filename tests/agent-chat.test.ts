@@ -9,7 +9,7 @@ import type { AgentRun, Chat } from "../src/shared/types";
 
 const chat = (id: string, agentRole: string, createdAt: number, extra: Partial<Chat> = {}): Chat => ({
   id, projectId: "p1", title: id, kind: "project", agentRole, harness: null, model: null, superpowers: false, mode: null,
-  autopilot: false, archived: false, pinned: false, createdAt, ...extra,
+  autopilot: false, archived: false, pinned: false, createdAt, coordinator: false, parentChatId: null, feature: null, ...extra,
 });
 const agent = (id: string, role: string, status: AgentRun["status"], chatId: string | null, startedAt = 1) =>
   ({ id, role, status, chatId, startedAt, projectId: "p1" } as AgentRun);

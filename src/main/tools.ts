@@ -128,6 +128,32 @@ export function buildTools(d: {
       handler: (a, c) => d.orch.delegate(c.agentId, a),
     },
     {
+      set: "core", name: "start_thread",
+      description: "Coordinator only: start a thread for a feature or request. A thread is its own chat with its own agent (session, worktree) that the user can open and steer, "
+        + "listed under its feature in the sidebar. Use it for real work (anything longer than a quick lookup); one feature can have several threads. "
+        + "Returns at once; the thread's result comes to you in a \"Thread results\" message when it finishes.",
+      inputSchema: obj({
+        feature: s("the feature or request this belongs to, a short name (e.g. \"CAN log export\"); reuse it exactly for every thread of that feature"),
+        title: s("the thread's task in a few words (e.g. \"Implement BLF writer\")"),
+        brief: s("goal, the facts it needs, relevant files and when it is done"),
+        role: s("agent role for the thread (optional, default: this chat's role); see list_roles"),
+        harness: { type: "string", enum: ["copilot", "opencode", "cursor", "claude", "pi", "duo"], description: "agent CLI for the thread (optional, default: this chat's)" },
+        model: s("model for that harness (optional)"),
+        mode: { type: "string", enum: ["local", "eco", "comfort", "sport"], description: "drive mode for the thread (optional, default: this chat's)" },
+      }, ["feature", "title", "brief"]),
+      handler: (a, c) => d.orch.startThread(c.agentId, a),
+    },
+    {
+      set: "core", name: "list_threads", description: "Coordinator only: the threads you started, with state (working, needs_you, done, new) and the start of each one's last reply. feature: only that feature's.",
+      inputSchema: obj({ feature: s("only threads of this feature (optional)") }),
+      handler: async (a, c) => d.orch.listThreads(c.agentId, a),
+    },
+    {
+      set: "core", name: "message_thread", description: "Coordinator only: send one of your threads more direction. Steers its running turn, or starts a new one when it is idle. Its result comes back as a Thread results message.",
+      inputSchema: obj({ threadId: s("threadId from start_thread or list_threads"), message: s("what to tell it") }, ["threadId", "message"]),
+      handler: (a, c) => d.orch.messageThread(c.agentId, a),
+    },
+    {
       set: "core", name: "create_agent",
       description: "Create a new custom agent (any kind of specialist you need: its own instructions, tools, harness) when no existing role fits, "
         + "and optionally run it right away with a brief. Saved to the user's agents (reusable) unless keep is false. Afterwards delegate to it by name.",

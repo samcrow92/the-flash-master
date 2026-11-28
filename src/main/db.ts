@@ -88,6 +88,11 @@ export const MIGRATIONS: string[] = [
   // v18: memory provenance (the project commit a memory was saved or confirmed at) and optional local embeddings
   `ALTER TABLE memories ADD COLUMN commit_sha TEXT;
    CREATE TABLE memory_vectors(memory_id INTEGER PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);`,
+  // v19: project threads: each project has a coordinator chat that starts thread chats, grouped by feature
+  `ALTER TABLE chats ADD COLUMN coordinator INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE chats ADD COLUMN parent_chat_id TEXT;
+   ALTER TABLE chats ADD COLUMN feature TEXT;
+   CREATE INDEX chats_parent ON chats(parent_chat_id);`,
 ];
 
 type Row = Record<string, any>;
@@ -209,26 +214,47 @@ export class Db {
     if (r) return toChat(r);
     return this.createChat({ projectId: null, title: "TheFlashMaster", kind: "master", agentRole: "flashmaster" });
   }
-  createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string; autopilot?: boolean }): Chat {
+  createChat(i: { projectId: string | null; title: string; kind: "master" | "project"; agentRole: string; autopilot?: boolean;
+    coordinator?: boolean; parentChatId?: string | null; feature?: string | null }): Chat {
     const c: Chat = {
       id: newId(), projectId: i.projectId, title: i.title, kind: i.kind, agentRole: i.agentRole,
       harness: null, model: null, superpowers: false, mode: null, duoMode: null, autopilot: i.autopilot ?? this.defaultAutopilot, archived: false, pinned: false, createdAt: now(),
+      coordinator: !!i.coordinator, parentChatId: i.parentChatId ?? null, feature: i.feature?.trim() || null,
     };
-    this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,autopilot,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-      c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.autopilot ? 1 : 0, c.createdAt);
+    this.run("INSERT INTO chats(id,project_id,title,kind,agent_role,harness,model,superpowers,autopilot,created_at,coordinator,parent_chat_id,feature) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      c.id, c.projectId, c.title, c.kind, c.agentRole, null, null, 0, c.autopilot ? 1 : 0, c.createdAt, c.coordinator ? 1 : 0, c.parentChatId, c.feature);
     return c;
+  }
+  /** The project's coordinator chat, created on first use (the project's first chat becomes it when there is one and none is marked yet). */
+  ensureCoordinator(projectId: string): Chat {
+    const r = this.get("SELECT * FROM chats WHERE project_id=? AND coordinator=1 LIMIT 1", projectId);
+    if (r) return toChat(r);
+    const first = this.get("SELECT * FROM chats WHERE project_id=? AND parent_chat_id IS NULL AND archived=0 AND title IN ('General','New chat') ORDER BY created_at LIMIT 1", projectId);
+    if (first && !this.get("SELECT 1 AS x FROM messages WHERE chat_id=? LIMIT 1", first.id)) {
+      this.run("UPDATE chats SET coordinator=1, title='Coordinator', pinned=1 WHERE id=?", first.id);
+      return this.getChat(first.id as string)!;
+    }
+    const c = this.createChat({ projectId, title: "Coordinator", kind: "project", agentRole: "flashmaster", coordinator: true });
+    this.run("UPDATE chats SET pinned=1 WHERE id=?", c.id);
+    return { ...c, pinned: true };
+  }
+  /** Threads a coordinator chat started, oldest first. */
+  listThreads(parentChatId: string): Chat[] {
+    return this.all("SELECT * FROM chats WHERE parent_chat_id=? ORDER BY created_at", parentChatId).map(toChat);
   }
   updateChat(id: string, patch: Partial<Chat>): Chat {
     const c = this.getChat(id);
     if (!c) throw new Error(`chat ${id} not found`);
     const n = { ...c, ...patch };
-    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, duo_mode=?, autopilot=?, archived=?, pinned=? WHERE id=?",
-      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.duoMode ?? null, n.autopilot ? 1 : 0, n.archived ? 1 : 0, n.pinned ? 1 : 0, id);
+    n.feature = n.feature?.trim() || null;
+    this.run("UPDATE chats SET title=?, agent_role=?, harness=?, model=?, superpowers=?, mode=?, duo_mode=?, autopilot=?, archived=?, pinned=?, feature=? WHERE id=?",
+      n.title, n.agentRole, n.harness, n.model, n.superpowers ? 1 : 0, n.mode, n.duoMode ?? null, n.autopilot ? 1 : 0, n.archived ? 1 : 0, n.pinned ? 1 : 0, n.feature, id);
     return n;
   }
   deleteChat(id: string): void {
     this.run("DELETE FROM chats WHERE id=?", id);
     this.run("DELETE FROM plans WHERE chat_id=?", id);
+    this.run("UPDATE chats SET parent_chat_id=NULL WHERE parent_chat_id=?", id); // its threads stay, as top-level chats
   }
   /** Highest message seq of a chat (context-reset boundary). */
   lastSeq(chatId: string): number {
@@ -724,6 +750,7 @@ const toChat = (r: Row): Chat => ({
   id: r.id, projectId: r.project_id ?? null, title: r.title, kind: r.kind, agentRole: r.agent_role, harness: r.harness ?? null,
   model: r.model ?? null, superpowers: !!r.superpowers, mode: r.mode ?? null, duoMode: r.duo_mode ?? null, autopilot: !!r.autopilot,
   archived: !!r.archived, pinned: !!r.pinned, createdAt: Number(r.created_at),
+  coordinator: !!r.coordinator, parentChatId: r.parent_chat_id ?? null, feature: r.feature ?? null,
 });
 const toAgent = (r: Row): AgentRun => ({
   id: r.id, projectId: r.project_id ?? null, chatId: r.chat_id ?? null, role: r.role, name: r.name ?? null, harness: r.harness, model: r.model ?? null,

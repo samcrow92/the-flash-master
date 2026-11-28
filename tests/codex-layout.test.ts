@@ -8,7 +8,7 @@ import { matchShortcut } from "../src/renderer/commands";
 const read = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
 const chat = (id: string, over: Partial<Chat> = {}): Chat => ({
   id, projectId: "p", title: id, kind: "project", agentRole: "flashmaster", harness: null, model: null, superpowers: false, mode: null,
-  autopilot: false, archived: false, pinned: false, createdAt: 0, ...over,
+  autopilot: false, archived: false, pinned: false, createdAt: 0, coordinator: false, parentChatId: null, feature: null, ...over,
 });
 
 describe("chat switcher and project rows", () => {

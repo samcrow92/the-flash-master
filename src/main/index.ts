@@ -831,13 +831,14 @@ const api: FlashApi = {
   },
   createProject: async (path, name) => {
     const p = db.createProject(name || basename(path), path);
-    if (!db.listChats(p.id).length) db.createChat({ projectId: p.id, title: "General", kind: "project", agentRole: "flashmaster" });
+    db.ensureCoordinator(p.id);
     return p;
   },
   removeProject: async (id) => db.removeProject(id),
   listChats: async (projectId) => db.listChats(projectId),
   getMasterChat: async () => db.getOrCreateMasterChat(),
   createChat: async (i) => db.createChat({ projectId: i.projectId, title: i.title || "New chat", kind: "project", agentRole: i.agentRole || "flashmaster" }),
+  ensureCoordinator: async (projectId) => db.ensureCoordinator(projectId),
   updateChat: async (id, patch) => {
     const c = db.updateChat(id, patch);
     // New mode/harness/model: idle agent sessions of this chat restart with it on the next message.
