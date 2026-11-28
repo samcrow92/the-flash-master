@@ -249,11 +249,11 @@ describe("quiet UI", () => {
     const buttons = actions.split("\n").filter((l) => l.includes("<button"));
     expect(buttons.length).toBeGreaterThan(4);
     for (const b of buttons) expect(b, "msg action without a title").toMatch(/title=/);
-    for (const label of ["Reply", "Edit", "Retry"]) expect(tsx).toContain(`<span className="sr-only">${label}</span>`);
+    for (const label of ["Edit", "Retry"]) expect(tsx).toContain(`<span className="sr-only">${label}</span>`);
     const css = read("src/renderer/styles.css");
     expect(css).toMatch(/^\.sr-only \{[^}]*clip: rect\(0 0 0 0\)/m);
     // The side sheet toggles show their name; a narrow chat folds it to the icon, still read out (clipped, not display: none).
-    for (const label of ["Threads", "Progress", "Artifacts"]) expect(tsx).toContain(`<span className="sheet-btn-label">${label}</span>`);
+    for (const label of ["Progress", "Artifacts"]) expect(tsx).toContain(`<span className="sheet-btn-label">${label}</span>`);
     expect(css).toMatch(/@container chat \(max-width: 900px\) \{ \.sheet-btn-label \{[^}]*clip: rect\(0 0 0 0\)/);
   });
   it("hides only the caption span in header fields, never the model input wrapper", () => {

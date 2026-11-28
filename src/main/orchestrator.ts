@@ -1972,28 +1972,6 @@ export class Orchestrator {
     if (removed.length) this.d.emit({ type: "messages.removed", chatId, removed });
   }
 
-  /** Archive (hide) or restore a thread. */
-  archiveThread(rootId: string, archived: boolean): Message {
-    const m = this.d.db.setThreadArchived(rootId, archived);
-    if (!m) throw new Error("That message is gone, or it is a reply (only a thread's first message holds the thread).");
-    this.d.emit({ type: "message.updated", message: m });
-    return m;
-  }
-
-  /**
-   * Delete a thread's replies for good; the message it hangs off stays in the chat. The thread's idle agent sessions
-   * are closed so a new reply there starts fresh.
-   */
-  deleteThread(rootId: string): void {
-    const root = this.d.db.getMessage(rootId);
-    if (!root || root.parentId) throw new Error("That thread is gone.");
-    this.closeSessions((l) => l.chatId === root.chatId && l.threadRoot === rootId,
-      "An agent is still working in this thread — stop it first, then delete it.", "Thread deleted");
-    this.removeStored(root.chatId, this.d.db.threadReplyIds(rootId));
-    const m = this.d.db.setThreadArchived(rootId, false);
-    if (m) this.d.emit({ type: "message.updated", message: m });
-  }
-
   /**
    * Delete one message (and the thread under it) to clean up a chat. Agents keep what they already read in their
    * session; Reset context or Clear chat makes them forget it too.

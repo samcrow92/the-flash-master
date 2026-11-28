@@ -114,6 +114,47 @@ export class Db {
     this.searchIndex = this.ensureSearchIndex();
     const r = this.raw.prepare("SELECT COALESCE(MAX(seq),0) AS s FROM messages").get() as Row;
     this.seq = Number(r.s);
+    this.migrateReplyThreads();
+  }
+
+  /**
+   * Reply threads (the old "N replies" under a message) were replaced by thread chats. Each one becomes a thread chat
+   * of its chat under the feature "Earlier replies": a copy of the message it hung off, then its replies. Runs at
+   * every start and does nothing once no reply is left.
+   */
+  private migrateReplyThreads(): void {
+    const roots = this.all("SELECT DISTINCT parent_id AS id FROM messages WHERE parent_id IS NOT NULL");
+    if (!roots.length) return;
+    this.raw.exec("BEGIN");
+    try {
+      for (const { id } of roots) {
+        const root = this.get("SELECT * FROM messages WHERE id=?", id);
+        const chat = root ? this.get("SELECT * FROM chats WHERE id=?", root.chat_id) : null;
+        if (!root || !chat) { this.run("UPDATE messages SET parent_id=NULL WHERE parent_id=?", id); continue; }
+        const meta = (() => { try { return JSON.parse(String(root.meta ?? "{}")) as { threadArchived?: boolean }; } catch { return {}; } })();
+        const snippet = String(root.content).replace(/[#*_`>]/g, "").replace(/\s+/g, " ").trim().slice(0, 48) || "Earlier thread";
+        const t = this.createChat({ projectId: chat.project_id ?? null, title: snippet, kind: "project", agentRole: chat.agent_role,
+          autopilot: !!chat.autopilot, parentChatId: chat.id, feature: "Earlier replies" });
+        if (meta.threadArchived) this.run("UPDATE chats SET archived=1 WHERE id=?", t.id);
+        this.run("UPDATE chats SET created_at=? WHERE id=?", Number(root.created_at), t.id);
+        // seq orders a chat and keys the search index, so the copy and the moved replies get new numbers in order.
+        this.seq += 1;
+        this.run("INSERT INTO messages(id,chat_id,parent_id,author,agent_id,role,content,status,tokens_in,tokens_out,estimated,seq,created_at,meta) VALUES(?,?,NULL,?,?,?,?,?,0,0,1,?,?,NULL)",
+          newId(), t.id, root.author, root.agent_id ?? null, root.role ?? null, root.content, root.status === "streaming" ? "done" : root.status, this.seq, Number(root.created_at));
+        for (const r of this.all("SELECT id, seq, content FROM messages WHERE parent_id=? ORDER BY seq", id)) {
+          this.seq += 1;
+          this.run("UPDATE messages SET chat_id=?, parent_id=NULL, seq=? WHERE id=?", t.id, this.seq, r.id);
+          if (this.searchIndex === "fts") {
+            this.run("DELETE FROM messages_fts WHERE rowid=?", Number(r.seq));
+            this.run("INSERT INTO messages_fts(rowid, content) VALUES (?, ?)", this.seq, r.content);
+          }
+        }
+      }
+      this.raw.exec("COMMIT");
+    } catch (e) {
+      this.raw.exec("ROLLBACK");
+      throw e;
+    }
   }
 
   private migrate(): void {

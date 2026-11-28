@@ -42,14 +42,7 @@ interface State {
   messages: Record<string, Message[]>; // chatId → main-thread messages
   /** Thread messages per root (root first, then replies), loaded on first open and kept live by events. */
   threads: Record<string, Message[]>;
-  /** The Threads tab of the chat's side sheet is open. Remembered across launches; opens on its own only in chats with threads. */
-  threadsPanelOpen: boolean;
-  /** The chat whose Threads tab you opened explicitly, so it shows even before the chat has any thread. */
-  threadsShownEmpty: string | null;
-  /** Thread roots expanded inside the Threads tab (a thread's replies are read and answered there, not inline). */
-  panelThreads: Record<string, boolean>;
   /** A thread for the panel to scroll to once it is shown (`reply`: also focus its reply box); `at` makes repeat requests fire again. */
-  panelFocus: { rootId: string; at: number; reply?: boolean } | null;
   /** The chat last opened in each project (key: chatKey(projectId)), which the project's sidebar row reopens. */
   lastChatByProject: Record<string, string>;
   /** The sidebar is folded away (title bar button or Ctrl/Cmd+B); remembered across launches. */
@@ -90,20 +83,7 @@ interface State {
   chatWithAgent(role: string, opts?: { showFlow?: boolean }): Promise<void>;
   /** Open the agent's dedicated chat in its own window (creating the chat if it has none); focuses the window if already open. */
   openAgentWindow(role: string): Promise<void>;
-  /** Open a thread in the side sheet's Threads tab (same as openSideThread), resolving once its replies are loaded. */
-  openThread(chatId: string, rootId: string): Promise<void>;
-  closeThread(rootId: string): void;
-  /** The "N replies" chip: shows the thread in the side sheet, or folds it there when it is already showing. */
-  toggleThread(chatId: string, rootId: string): void;
-  loadThread(chatId: string, rootId: string): Promise<void>;
-  /** Show a thread in the side sheet's Threads tab: opens it, expands the thread there and scrolls to it (`reply`: focus its reply box). */
-  openSideThread(chatId: string, rootId: string, opts?: { reply?: boolean }): void;
-  /** `chatId`: opened explicitly for this chat, so the tab shows even when the chat has no thread yet. */
-  setThreadsPanel(open: boolean, chatId?: string): void;
   toggleSidebar(collapsed?: boolean): void;
-  togglePanelThread(chatId: string, rootId: string): void;
-  /** Expand or collapse every listed thread in the panel. */
-  setPanelThreads(chatId: string, rootIds: string[], open: boolean): void;
   refreshProjects(): Promise<void>;
   /** Reload one project's chats, or (null) the chats that belong to no project. */
   refreshChats(projectId: string | null): Promise<void>;
@@ -116,10 +96,6 @@ interface State {
 
 let toastId = 0;
 
-const PANEL_PREF = "threadsPanel";
-function readPanelPref(): boolean {
-  try { return globalThis.localStorage?.getItem(PANEL_PREF) !== "0"; } catch { return true; }
-}
 
 const LAST_CHATS = "lastChatByProject";
 /** The chat last opened in each project, kept across launches so a project row reopens where you left off. */
@@ -178,10 +154,6 @@ export const useStore = create<State>((set, get) => ({
   currentProjectId: null,
   messages: {},
   threads: {},
-  threadsPanelOpen: readPanelPref(),
-  threadsShownEmpty: null,
-  panelThreads: {},
-  panelFocus: null,
   lastChatByProject: readLastChats(),
   sidebarCollapsed: readSidebarPref(),
   flowPanel: null,
@@ -210,7 +182,6 @@ export const useStore = create<State>((set, get) => ({
   async jumpTo(hit) {
     set({ searchOpen: false });
     await get().openChat(hit.chatId);
-    if (hit.parentId) await get().openThread(hit.chatId, hit.parentId);
     set({ focusMessage: { id: hit.messageId, rootId: hit.parentId, at: Date.now() } });
   },
 
@@ -280,60 +251,13 @@ export const useStore = create<State>((set, get) => ({
     await api().openChatWindow(chatId);
   },
 
-  async openThread(chatId, rootId) {
-    get().openSideThread(chatId, rootId);
-    await get().loadThread(chatId, rootId);
-  },
-
-  async loadThread(chatId, rootId) {
-    const msgs = await api().listMessages(chatId, rootId);
-    set((st) => ({ threads: { ...st.threads, [rootId]: mergeLoaded(msgs, st.threads[rootId]) } }));
-  },
-
-  openSideThread(chatId, rootId, opts) {
-    get().setThreadsPanel(true, chatId);
-    set((st) => ({ flowPanel: null, artifactsPanel: null,
-      panelThreads: { ...st.panelThreads, [rootId]: true }, panelFocus: { rootId, at: Date.now(), reply: opts?.reply } }));
-    void get().loadThread(chatId, rootId);
-  },
-
   toggleSidebar(collapsed) {
     const next = collapsed ?? !get().sidebarCollapsed;
     set({ sidebarCollapsed: next });
     try { globalThis.localStorage?.setItem(SIDEBAR_PREF, next ? "1" : "0"); } catch { /* storage unavailable */ }
   },
-  setThreadsPanel(open, chatId) {
-    set(open && chatId ? { threadsPanelOpen: true, threadsShownEmpty: chatId, flowPanel: null, artifactsPanel: null } : { threadsPanelOpen: open });
-    try { localStorage.setItem(PANEL_PREF, open ? "1" : "0"); } catch { /* storage unavailable */ }
-  },
-
-  togglePanelThread(chatId, rootId) {
-    const open = !get().panelThreads[rootId];
-    get().setPanelThreads(chatId, [rootId], open);
-  },
-
-  setPanelThreads(chatId, rootIds, open) {
-    set((st) => {
-      const panelThreads = { ...st.panelThreads };
-      for (const id of rootIds) panelThreads[id] = open;
-      return { panelThreads };
-    });
-    if (open) for (const id of rootIds) if (!get().threads[id]) void get().loadThread(chatId, id);
-  },
-
   openFlow(chatId, agentId) {
     set({ flowPanel: { chatId, agentId }, artifactsPanel: null });
-  },
-
-  closeThread(rootId) {
-    set((st) => ({ panelThreads: { ...st.panelThreads, [rootId]: false } }));
-  },
-
-  toggleThread(chatId, rootId) {
-    const st = get();
-    const showing = st.threadsPanelOpen && st.panelThreads[rootId] && st.flowPanel?.chatId !== chatId && st.artifactsPanel !== chatId;
-    if (showing) st.closeThread(rootId);
-    else st.openSideThread(chatId, rootId);
   },
 
   async refreshProjects() {

@@ -1,21 +1,17 @@
 import type { ReactNode } from "react";
 import { useStore } from "../store";
 import type { SheetTab } from "../layout";
-import { Compass, MessagesSquare, Package, X } from "./icons";
+import { Compass, Package, X } from "./icons";
 
-/** Switch the chat's side sheet to a tab (or close it). Threads, Progress and Artifacts share the one floating sheet. */
+/** Switch the chat's side sheet to a tab (or close it). Progress and Artifacts share the one floating sheet. */
 export function showSheet(chatId: string, tab: SheetTab | null): void {
   const st = useStore.getState();
-  if (tab === "threads") { st.setThreadsPanel(true, chatId); return; }
   if (tab === "progress") { st.openFlow(chatId, st.flowPanel?.chatId === chatId ? st.flowPanel.agentId : null); return; }
   if (tab === "artifacts") { useStore.setState({ artifactsPanel: chatId, flowPanel: null }); return; }
-  // Closing: the Threads tab stays closed until you open it again (remembered), Progress / Artifacts just close.
   useStore.setState({ flowPanel: null, artifactsPanel: null });
-  st.setThreadsPanel(false);
 }
 
 const TABS: { id: SheetTab; label: string; icon: typeof Compass; tip: string }[] = [
-  { id: "threads", label: "Threads", icon: MessagesSquare, tip: "Every thread in this chat" },
   { id: "progress", label: "Progress", icon: Compass, tip: "Flow chart of where the agents are in their task" },
   { id: "artifacts", label: "Artifacts", icon: Package, tip: "Files changed, saved artifacts and code from this chat" },
 ];

@@ -174,7 +174,6 @@ code.inline-code.copied { box-shadow: 0 0 0 1px var(--green); background: color-
 .suggest button.sel, .suggest button:hover { background: var(--bg3); }
 .thread { position: relative; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
 .thread-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.thread-sep { color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); margin: 4px 10px 8px; padding-bottom: 4px; }
 
 /* ---------- pages ---------- */
 .page { height: 100%; overflow: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
@@ -860,19 +859,6 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 /* ===================== thread chip ===================== */
 /* The "N replies" chip under a message; the thread itself opens in the side sheet's Threads tab. */
 :root { --it-ease: cubic-bezier(.22,.9,.24,1); }
-.thread-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 4px; border-radius: 999px; font-size: 12px; font-weight: 500;
-  color: var(--blue); border: 1px solid color-mix(in srgb, var(--blue) 26%, var(--line)); background: color-mix(in srgb, var(--blue) 9%, transparent);
-  backdrop-filter: blur(12px) saturate(1.3); transition: background .2s, border-color .2s, box-shadow .2s, transform .12s; }
-.thread-pill:hover { background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: 0 4px 14px -8px color-mix(in srgb, var(--blue) 70%, transparent); }
-.thread-pill:active { transform: scale(.97); }
-.thread-pill.open { background: color-mix(in srgb, var(--blue) 18%, transparent); border-color: color-mix(in srgb, var(--blue) 45%, var(--line)); }
-.tp-faces { display: inline-flex; align-items: center; padding-left: 2px; }
-.tp-face { display: inline-grid; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
-.tp-face + .tp-face { margin-left: -6px; }
-.tp-face .role-badge.sys { width: 18px; height: 18px; }
-.tp-last { color: var(--muted); font-weight: 400; }
-.tp-chev { transition: transform .34s var(--it-ease); opacity: .8; }
-.thread-pill.open .tp-chev { transform: translateX(2px); }
 
 .it-collapse { display: inline-grid; place-content: center; width: 26px; height: 26px; padding: 0; border-radius: 50%;
   background: transparent; border: 1px solid transparent; color: var(--muted); }
@@ -880,22 +866,16 @@ mark.wa { background: color-mix(in srgb, var(--green) 38%, transparent); color: 
 .it-item { position: relative; }
 @keyframes it-item-in { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
 .it-empty { color: var(--muted); font-size: 12.5px; padding: 4px 10px 8px; }
-.it-loading { padding: 6px 12px 10px; }
 
 /* Header tools on a thread: open in side panel, open in new window, collapse / close. */
 .it-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
 /* The side panel (and a pop-out thread window) share the inline thread's compact replies. */
-.thread-side { animation: side-in .34s var(--it-ease); min-width: 0; }
 @keyframes side-in { from { opacity: 0; transform: translateX(14px); } }
-.thread-side .thread-header { gap: 8px; padding: 10px 10px 10px 14px; }
 .thread-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .thread-title strong { display: inline-flex; align-items: center; gap: 6px; }
 .thread-title strong svg { color: var(--blue); }
 .thread-title .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-side .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 10px; }
-.thread-side .avatar { width: 24px; height: 24px; font-size: 12px; }
 .thread-window { height: 100vh; display: grid; background: var(--bg); }
-.thread-standalone { border-left: none; animation: none; }
 .thread-window .sys-line { margin-left: 32px; }
 .chat-window { height: 100vh; display: grid; background: var(--bg); min-height: 0; }
 .chat-window > .chat-layout { min-height: 0; }
@@ -1344,67 +1324,12 @@ pre.code, .tool-run-pre { background: var(--code); border-color: var(--line); bo
 .msg.side-right .msg-atts { justify-content: flex-end; }
 /* Agent replies leave a gutter on the right so the two sides read apart (not in narrow thread columns). */
 .messages-inner > .vl-item > .msg.side-left:not(.msg-system) > .msg-body { padding-right: 44px; }
-.thread-side .msg.side-right, .threads-panel .msg.side-right { grid-template-columns: minmax(0, 1fr) 24px; }
-.thread-side .msg.side-right > .msg-body > .msg-content,
-.threads-panel .msg.side-right > .msg-body > .msg-content { max-width: 88%; }
 
 /* ===================== Threads panel ===================== */
 /* Every thread of the open chat on the right: rows expand in place (replies + reply box), expand/collapse all, and the
    whole panel folds to a slim rail. Same frosted surface as the other side panels. */
-.threads-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line);
-  background: color-mix(in srgb, var(--fg) 3%, transparent); }
-.tpl-full { position: relative; width: min(var(--threads-w, 340px), max(260px, 45vw)); animation: side-in .34s var(--it-ease); }
-.tpl-dot { position: absolute; top: -2px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); animation: breathe 1.6s ease-in-out infinite; }
-.tpl-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); }
-.tpl-head strong { display: inline-flex; align-items: center; gap: 6px; }
-.tpl-head strong svg { color: var(--blue); }
-.tpl-count { font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, transparent); }
-.tpl-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.tpl-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; color: var(--muted); padding: 24px 16px; }
-.tpl-empty svg { color: var(--blue); opacity: .7; }
-.tpl-item { min-width: 0; border-radius: 14px; border: 1px solid transparent; transition: background .2s, border-color .2s; }
-.tpl-item:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-.tpl-item.open { border-color: color-mix(in srgb, var(--fg) 9%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent), 0 12px 32px -22px rgba(0,0,0,.55);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg2) 82%, transparent), color-mix(in srgb, var(--bg2) 62%, transparent)); backdrop-filter: blur(20px) saturate(1.5); }
-.tpl-item.tpl-flash { animation: msg-flash 1.8s ease-out; }
-.tpl-row { display: flex; align-items: flex-start; gap: 2px; padding-right: 4px; }
-.tpl-toggle { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 6px; padding: 8px 4px 8px 6px; text-align: left;
-  background: transparent; border: none; box-shadow: none; border-radius: 12px; color: var(--fg); }
-.tpl-chev { flex: none; margin-top: 4px; color: var(--muted); transition: transform .3s var(--it-ease); }
-.tpl-item.open .tpl-chev { transform: rotate(90deg); }
-.tpl-av { flex: none; display: inline-grid; }
-.tpl-av .role-badge.sys { width: 20px; height: 20px; }
-.tpl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.tpl-line1 { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
-.tpl-who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tpl-time { margin-left: auto; flex: none; color: var(--muted); font-size: 11px; }
-.tpl-preview { font-size: 12.5px; color: color-mix(in srgb, var(--fg) 82%, transparent); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
-.tpl-meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--blue); }
-.tpl-meta .tp-face { box-shadow: 0 0 0 2px var(--bg2); }
-.tpl-meta .tp-face .role-badge.sys { width: 16px; height: 16px; }
-.tpl-jump { flex: none; margin-top: 6px; opacity: 0; transition: opacity .15s; }
-.tpl-item:hover .tpl-jump, .tpl-jump:focus-visible { opacity: 1; }
-.tpl-body { animation: it-item-in .36s var(--it-ease) both; }
 /* Archived threads: a quiet section at the end of the panel list, folded by default. */
-.tpl-archived { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.tpl-archived-head { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600;
-  color: var(--muted); background: transparent; border: none; box-shadow: none; border-radius: 999px; }
-.tpl-archived-head:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.tpl-archived-head .tpl-chev { margin-top: 0; }
-.tpl-archived.open .tpl-archived-head .tpl-chev { transform: rotate(90deg); }
-.tpl-archived .tpl-item:not(.open) { opacity: .72; }
 /* An archived thread in the chat: a small muted chip instead of the "N replies" pill. */
-.thread-pill.archived { color: var(--muted); background: color-mix(in srgb, var(--fg) 5%, transparent); padding-left: 8px; }
-.thread-pill.archived:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 9%, transparent); box-shadow: none; }
-.tpl-replies { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 2px 4px; }
-.tpl-replies .msg { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 6px 8px; animation: none; }
-.tpl-replies .msg-body { min-width: 0; }
-.tpl-replies .avatar { width: 24px; height: 24px; font-size: 12px; }
-.tpl-replies .msg-head { font-size: 12.5px; }
-.tpl-replies .msg-footer { min-height: 0; }
-.tpl-replies .it-item { animation: it-item-in .42s var(--it-ease) both; animation-delay: calc(60ms + var(--i, 0) * 35ms); }
-.tpl-body .composer-wrap { background: color-mix(in srgb, var(--bg) 35%, transparent); border-top: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); border-radius: 0 0 14px 14px; }
-@media (prefers-reduced-motion: reduce) { .tpl-full, .tpl-body, .tpl-replies .it-item { animation: none; } }
 /* ---------- Review: an agent's branch with diffs, line comments, Merge/Discard ---------- */
 .review-page { gap: 12px; }
 .review-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px; }
@@ -1516,8 +1441,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .msg-actions button:hover:not(:disabled) { background: var(--quiet); color: var(--fg); }
 .msg-actions button.msg-delete:hover:not(:disabled) { color: var(--red); }
 .reaction { border-color: transparent; background: var(--quiet); }
-.thread-pill { border-color: transparent; background: color-mix(in srgb, var(--blue) 8%, transparent); backdrop-filter: none; }
-.thread-pill:hover { box-shadow: none; }
 .thought { border-left-color: var(--line); }
 .thought-head { text-transform: none; letter-spacing: 0; font-size: var(--fs-s); font-weight: 500; }
 .tokens { opacity: .7; }
@@ -1549,8 +1472,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 /* Specialists / Agents pills and the Threads panel: lighter glass, plain counts. */
 .spec-pill { height: 28px; font-size: var(--fs-s); box-shadow: var(--hi), 0 6px 18px -12px rgba(0, 0, 0, .5); border-color: color-mix(in srgb, var(--rim) 70%, transparent); }
 .spec-pill.is-paused { box-shadow: var(--hi), 0 0 0 1.5px color-mix(in srgb, var(--amber) 60%, transparent); }
-.tpl-head { border-bottom-color: transparent; }
-.tpl-count { padding: 0; background: none; color: var(--muted); font-weight: 500; }
 .thread-header, .term-head, .pal-input, .pal-foot { border-color: transparent; }
 .thread { border-left-color: var(--line); }
 
@@ -1931,7 +1852,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
    instead of being covered; in a narrow window the sheet floats over it. */
 .chat-layout, .chat-layout.with-thread { position: relative; display: block; height: 100%; container: chatlayout / inline-size; grid-template-columns: none; }
 .chat-layout > .chat { height: 100%; transition: padding-right .32s var(--it-ease); }
-.chat-layout.sheet-threads { --sheet-w: min(var(--threads-w, 340px), max(260px, 45vw)); }
 .chat-layout.sheet-side { --sheet-w: min(var(--side-w, 380px), max(300px, 50vw)); }
 /* Floating over a narrow chat, the sheet starts under the top bar so its toggles stay reachable. */
 @container chatlayout (min-width: 1000px) { .sheet-open > .chat { padding-right: calc(var(--sheet-w) + 12px); } .chat-layout > .side-sheet { top: 8px; } }
@@ -1941,7 +1861,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 @keyframes sheet-in { from { opacity: 0; transform: translateX(18px) scale(.985); } }
 @media (prefers-reduced-motion: reduce) { .side-sheet { animation: none; } .chat-layout > .chat { transition: none; } }
 .side-sheet > aside { position: relative; flex: 1; width: auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: none; background: transparent; animation: none; }
-.side-sheet > .tpl-full { width: auto; }
 .sheet-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 10px; flex: none; }
 .sheet-tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: color-mix(in srgb, var(--fg) 6%, transparent); min-width: 0; }
 .sheet-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: none; border-radius: 8px; background: transparent;
@@ -2027,15 +1946,6 @@ input, select, textarea { border-color: transparent; background: var(--quiet); }
 .art-repo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .art-repo > button { flex: none; }
 /* "N replies" chip: faces sit side by side (no stacking), each an opaque 18px chip, and the chip never squeezes them. */
-.thread-pill { flex: none; max-width: 100%; white-space: nowrap; gap: 7px; padding-left: 5px; }
-.thread-pill > .tp-faces { display: inline-flex; align-items: center; gap: 3px; padding-left: 0; flex: none; }
-.thread-pill .tp-face { flex: none; width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 50%; box-shadow: none; overflow: hidden; }
-.thread-pill .tp-face + .tp-face { margin-left: 0; }
-.thread-pill .tp-face > .role-badge { width: 18px; height: 18px; border-radius: 50%; background: color-mix(in srgb, var(--fg) 9%, var(--bg)); box-shadow: inset 0 0 0 1px var(--line); }
-.thread-pill .tp-face > .role-badge.sys { background: color-mix(in srgb, var(--amber) 14%, var(--bg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 35%, var(--line)); }
-.thread-pill .tp-more { flex: none; font-size: 10.5px; font-weight: 600; color: var(--muted); padding-left: 1px; font-variant-numeric: tabular-nums; }
-.thread-pill > .tp-count, .thread-pill > .tp-chev { flex: none; }
-.thread-pill > .tp-last { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* Checks before merge: status chip, Run checks, failing output */
 .checks-status { position: relative; display: inline-flex; align-items: center; gap: 4px; }

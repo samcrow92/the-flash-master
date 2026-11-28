@@ -58,17 +58,11 @@ export interface FlashApi {
   /** A local .html report named in a chat, as a `flash-report://` URL the page shows in a sandboxed frame (offline,
    *  no access to the app); its folder's images/scripts load too. Same path rules as openLink (src/main/html-preview.ts). */
   previewHtml(target: string, chatId: string | null): Promise<{ ok: true; url: string; path: string; name: string } | { ok: false; detail: string }>;
-  /** Pop a thread out into its own window (it stays live like the main one). */
-  openThreadWindow(chatId: string, rootId: string): Promise<void>;
   /** A whole chat (an agent's dedicated chat) in its own window; focuses the window if that chat is already open in one. */
   openChatWindow(chatId: string): Promise<void>;
   toggleReaction(messageId: string, emoji: string): Promise<string[]>;
   /** Answer a "needs you" card (an option or your own words); the agent that asked continues with it. */
   answerAsk(messageId: string, answer: string): Promise<Message>;
-  /** Archive (hide) or restore the thread under a message; returns the updated root message. */
-  archiveThread(rootId: string, archived: boolean): Promise<Message>;
-  /** Delete a thread's replies for good (the message it hangs off stays). Refused while an agent is working in it. */
-  deleteThread(rootId: string): Promise<void>;
   /** Delete one message and the thread under it (cleanup). Refused while it is still being written. */
   deleteMessage(messageId: string): Promise<void>;
   /** Delete every message of a chat; its agents start fresh. Refused while an agent is working there. */
@@ -307,7 +301,7 @@ export interface ExamSetupResult {
 
 export const API_METHODS: (keyof FlashApi)[] = [
   "listProjects", "pickFolder", "createProject", "removeProject", "listChats", "getMasterChat", "createChat",
-  "updateChat", "ensureCoordinator", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openThreadWindow", "openChatWindow", "toggleReaction", "answerAsk", "archiveThread", "deleteThread", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "listTraces", "getTrace", "exportTrace", "listEvalSuites", "runEvals", "cancelEvals", "evalState", "evalResults", "getPlan", "updatePlan", "approvePlan", "cancelPlan", "agentState", "traceMatrix", "traceReport", "inbox", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
+  "updateChat", "ensureCoordinator", "resetContext", "exportChat", "renameProject", "openProjectFolder", "deleteChat", "listMessages", "prepareChat", "sendMessage", "saveAttachment", "pickAttachments", "openAttachment", "readImage", "openLink", "previewHtml", "openChatWindow", "toggleReaction", "answerAsk", "deleteMessage", "clearChat", "searchMessages", "editMessage", "retryMessage", "listAgents", "startAgent", "resumeInterrupted", "resumeAllInterrupted", "agentWorkState", "mergeAgentWork", "agentChecks", "runAgentChecks", "listTraces", "getTrace", "exportTrace", "listEvalSuites", "runEvals", "cancelEvals", "evalState", "evalResults", "getPlan", "updatePlan", "approvePlan", "cancelPlan", "agentState", "traceMatrix", "traceReport", "inbox", "testPermissions", "discardAgentWork", "agentWorkChanges", "agentWorkFileDiff", "requestAgentFixes",
   "pauseAgent", "resumeAgent", "stopAgent", "stopToolCall", "stopAll", "getAgentFlow", "listRoles", "listSkills", "openRolesFolder", "agentTemplate", "saveAgentTemplate", "validateAgent", "importAgentText",
   "importAgentFiles", "removeAgent", "exportAgent", "listTasks",
   "createTask", "updateTask", "deleteTask", "cleanupTasks", "runTask", "listMemories", "saveMemory", "deleteMemory", "promoteMemory", "memoryHealth", "mergeMemories", "confirmMemory", "knowledgeStatus", "syncKnowledge", "resolveKnowledgeConflict", "buildKnowledge", "codeGraphStatus", "scanCodeGraph", "openCodeGraph", "openKnowledgeFolder", "getArtifact", "chatArtifacts", "getFileChange", "gitChanges", "gitFileDiff", "saveTextFile", "usageSummary", "copilotUsage", "detectHarnesses", "pickHarnessExecutable", "launchHarness", "checkHarness", "setCopilotToken", "copilotTokenSet", "marketplaceList", "marketplaceInstall", "marketplaceUninstall", "marketplaceUpdateAll",

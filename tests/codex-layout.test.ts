@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Chat, Message } from "../src/shared/types";
-import { chatToOpen, sheetTab, switcherChats, threadFaces } from "../src/renderer/layout";
+import type { AgentRun, Chat } from "../src/shared/types";
+import { chatToOpen, projectTree, sheetTab, switcherChats, threadStatus } from "../src/renderer/layout";
 import { matchShortcut } from "../src/renderer/commands";
 
 const read = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
@@ -32,37 +32,30 @@ describe("chat switcher and project rows", () => {
 });
 
 describe("side sheet", () => {
-  const base = { chatId: "x", flowChat: null, artifactsChat: null, threadsOpen: false, threadCount: 0, shownEmptyFor: null };
+  const base = { chatId: "x", flowChat: null, artifactsChat: null };
 
   it("shows Progress or Artifacts when opened for this chat, and only for this chat", () => {
-    expect(sheetTab({ ...base, flowChat: "x", threadsOpen: true, threadCount: 3 })).toBe("progress");
+    expect(sheetTab({ ...base, flowChat: "x" })).toBe("progress");
     expect(sheetTab({ ...base, artifactsChat: "x" })).toBe("artifacts");
     expect(sheetTab({ ...base, flowChat: "y", artifactsChat: "y" })).toBeNull();
   });
 
-  it("opens Threads on its own only in chats with threads, or when you opened it for this chat", () => {
-    expect(sheetTab({ ...base, threadsOpen: true, threadCount: 2 })).toBe("threads");
-    expect(sheetTab({ ...base, threadsOpen: true })).toBeNull();
-    expect(sheetTab({ ...base, threadsOpen: true, shownEmptyFor: "x" })).toBe("threads");
-    expect(sheetTab({ ...base, threadsOpen: false, threadCount: 2 })).toBeNull();
-  });
-
-  it("Threads, Progress and Artifacts render inside the one floating sheet, never as fixed columns", () => {
+  it("Progress and Artifacts render inside the one floating sheet, never as fixed columns", () => {
     const tsx = read("src/renderer/views/ChatView.tsx");
     const sheet = tsx.slice(tsx.indexOf('<div className="side-sheet"'));
-    for (const panel of ["<ThreadsPanel", "<ArtifactsPanel", "<FlowPanel"]) {
+    for (const panel of ["<ArtifactsPanel", "<FlowPanel"]) {
       expect(tsx.split(panel).length - 1, panel).toBe(1);
       expect(sheet, panel).toContain(panel);
     }
-    for (const f of ["ThreadsPanel.tsx", "ArtifactsPanel.tsx", "FlowView.tsx"]) expect(read(`src/renderer/views/${f}`), f).toContain("<SheetTabs");
+    for (const f of ["ArtifactsPanel.tsx", "FlowView.tsx"]) expect(read(`src/renderer/views/${f}`), f).toContain("<SheetTabs");
     expect(read("src/renderer/styles.css")).toMatch(/\.side-sheet \{ position: absolute;/);
   });
 
-  it("threads open in the sheet: the chat shows only the reply chip, no inline thread", () => {
+  it("reply threads are gone: no reply chip, Threads tab or thread window (project threads replaced them, 2026-11-28)", () => {
     const tsx = read("src/renderer/views/ChatView.tsx");
-    expect(tsx).not.toContain("InlineThread");
-    expect(tsx).toContain("openSideThread(m.chatId, m.id, { reply: true })");
-    expect(read("src/renderer/store.ts")).not.toContain("openThreads");
+    for (const gone of ["ThreadPill", "ThreadPanel", "openSideThread", "Reply in thread", "<ThreadsPanel"]) expect(tsx, gone).not.toContain(gone);
+    expect(read("src/renderer/components/SheetTabs.tsx")).not.toContain('"threads"');
+    expect(read("src/shared/api.ts")).not.toMatch(/openThreadWindow|archiveThread|deleteThread/);
   });
 });
 
@@ -79,18 +72,18 @@ describe("artifacts tab", () => {
 });
 
 describe("sidebar", () => {
-  it("project rows expand to list their chats, remembered across launches; threads never show there", () => {
+  it("project rows expand into their tree (coordinator, features, threads), remembered across launches", () => {
     const tsx = read("src/renderer/components/Sidebar.tsx");
     expect(tsx).toContain('className="new-chat-btn"');
     // Regression (2026-11-20): layout A dropped the chat lists, so a project row only jumped to a chat and never expanded.
     expect(tsx).toMatch(/className="project-name"[^>]*aria-expanded=\{!!open\[p\.id\]\} onClick=\{\(\) => setOpen\(p\.id, !open\[p\.id\]\)\}/);
-    expect(tsx).toContain("{open[p.id] && chatList(p.id)}");
+    expect(tsx).toContain("{open[p.id] && projectList(p)}");
+    expect(tsx).toContain("projectTree(st.chats[key]");
     expect(tsx).toContain('className={`chat-link');
     expect(tsx).toMatch(/localStorage\.setItem\(OPEN_PREF/);
-    expect(tsx).toContain("switcherChats(st.chats[key]");
-    expect(tsx).not.toMatch(/thread/i);
     expect(read("src/renderer/styles.css")).toMatch(/\.chat-link \{ cursor: pointer;/);
   });
+
 });
 
 describe("composer", () => {
@@ -146,21 +139,25 @@ describe("collapsible sidebar", () => {
   });
 });
 
-describe("thread replies chip", () => {
-  const msg = (id: string, author: Message["author"], role: string | null = null, status: Message["status"] = "done") => ({ id, author, role, status }) as Message;
+describe("project tree", () => {
+  const t = (id: string, createdAt: number, over: Partial<Chat> = {}) => chat(id, { createdAt, parentChatId: "coord", ...over });
 
-  it("shows one face per author, all system notes as one, and counts the rest", () => {
-    const r = threadFaces([msg("1", "system"), msg("2", "agent", "reviewer"), msg("3", "system"), msg("4", "user"), msg("5", "agent", "architect"), msg("6", "agent", "reviewer", "streaming")]);
-    expect(r.faces.map((f) => f.m.id)).toEqual(["1", "2", "4"]);
-    expect(r.more).toBe(1);
-    expect(r.faces[1]?.working).toBe(true);
+  it("puts the coordinator first, then features (newest first) with their threads in start order, then other chats", () => {
+    const coord = chat("coord", { coordinator: true, createdAt: 1 });
+    const tree = projectTree([coord, t("a1", 2, { feature: "Export" }), t("b1", 3, { feature: "XCP" }), t("a2", 5, { feature: "Export" }),
+      chat("loose", { createdAt: 4 }), t("nofeat", 6), t("gone", 7, { feature: "XCP", archived: true })]);
+    expect(tree.coordinator?.id).toBe("coord");
+    expect(tree.features.map((f) => [f.name, f.threads.map((c) => c.id)])).toEqual([["Export", ["a1", "a2"]], ["XCP", ["b1"]]]);
+    expect(tree.other.map((c) => c.id)).toEqual(["nofeat", "loose"]);
+    expect(tree.archived.map((c) => c.id)).toEqual(["gone"]);
   });
 
-  it("lays the faces side by side, never stacked on top of each other", () => {
-    const css = read("src/renderer/styles.css");
-    const last = (sel: string) => [...css.matchAll(new RegExp(`(^|\\n)${sel.replace(/[.+]/g, "\\$&")} \\{([^}]*)\\}`, "g"))].at(-1)?.[2] ?? "";
-    expect(last(".thread-pill .tp-face + .tp-face")).toMatch(/margin-left: 0/);
-    expect(last(".thread-pill .tp-face")).toMatch(/flex: none/);
-    expect(last(".thread-pill > .tp-faces")).toMatch(/gap: 3px/);
+  it("a thread is working while one of its agents runs, and needs you while one waits on a card", () => {
+    const a = (status: AgentRun["status"], lastActivity: string | null = null) => ({ chatId: "t", status, lastActivity }) as AgentRun;
+    expect(threadStatus("t", [a("running")])).toBe("working");
+    expect(threadStatus("t", [a("idle", "❓ Needs you: which bus?")])).toBe("needs_you");
+    expect(threadStatus("t", [a("idle", "Done")])).toBe("idle");
+    expect(threadStatus("other", [a("running")])).toBe("idle");
   });
 });
+

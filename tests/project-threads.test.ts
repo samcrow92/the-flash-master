@@ -130,3 +130,29 @@ describe("start_thread", () => {
     await expect(orch.messageThread(coordAgent, { threadId: other.id, message: "hi" })).rejects.toThrow(/no such thread/);
   });
 });
+
+describe("old reply threads", () => {
+  it("become thread chats of their chat on start, with the message they hung off and their replies", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "db-")), "app.db");
+    const db = new Db(file);
+    const project = db.createProject("demo", mkdtempSync(join(tmpdir(), "proj-")));
+    const chat = db.createChat({ projectId: project.id, title: "General", kind: "project", agentRole: "flashmaster" });
+    const root = db.addMessage({ chatId: chat.id, author: "agent", role: "flashmaster", content: "## Plan for the **brake light**" });
+    db.addMessage({ chatId: chat.id, parentId: root.id, author: "user", content: "Why LED?" });
+    db.addMessage({ chatId: chat.id, parentId: root.id, author: "agent", role: "flashmaster", content: "Cheaper." });
+    const archivedRoot = db.addMessage({ chatId: chat.id, author: "user", content: "Old question" });
+    db.addMessage({ chatId: chat.id, parentId: archivedRoot.id, author: "agent", content: "Old answer" });
+    db.setThreadArchived(archivedRoot.id, true);
+    db.raw.close();
+
+    const again = new Db(file);
+    expect(again.listMessages(chat.id, null).map((m) => m.content)).toEqual(["## Plan for the **brake light**", "Old question"]);
+    expect(again.raw.prepare("SELECT COUNT(*) AS c FROM messages WHERE parent_id IS NOT NULL").get()).toMatchObject({ c: 0 });
+    const threads = again.listThreads(chat.id);
+    expect(threads.map((t) => [t.title, t.feature, t.archived])).toEqual([["Plan for the brake light", "Earlier replies", false], ["Old question", "Earlier replies", true]]);
+    expect(again.listMessages(threads[0]!.id, null).map((m) => [m.author, m.content])).toEqual([
+      ["agent", "## Plan for the **brake light**"], ["user", "Why LED?"], ["agent", "Cheaper."]]);
+    again.raw.close();
+    expect(() => new Db(file).raw.close()).not.toThrow(); // nothing left to move the next time
+  });
+});

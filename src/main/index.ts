@@ -898,7 +898,6 @@ const api: FlashApi = {
     catch (e) { return { ok: false, detail: String((e as Error)?.message ?? e) }; }
     return { ok: true, url: reportFolders.urlFor(r.dir, r.file), path: r.path, name: r.file };
   },
-  openThreadWindow: async (chatId, rootId) => openThreadWindow(chatId, rootId),
   openChatWindow: async (chatId) => openChatWindow(chatId),
   searchMessages: async (query, limit) => db.searchMessages(String(query ?? ""), Math.min(Math.max(Number(limit) || 50, 1), 200)),
   editMessage: async (i) => orch.editAndResend(i.messageId, i.content),
@@ -910,8 +909,6 @@ const api: FlashApi = {
     orch.onReaction(messageId, emoji, reactions);
     return reactions;
   },
-  archiveThread: async (rootId, archived) => orch.archiveThread(String(rootId), !!archived),
-  deleteThread: async (rootId) => orch.deleteThread(String(rootId)),
   deleteMessage: async (messageId) => orch.deleteMessage(String(messageId)),
   answerAsk: async (messageId, answer) => orch.answerAsk(String(messageId), String(answer ?? "")),
   clearChat: async (chatId) => orch.clearChat(String(chatId)),
@@ -1370,12 +1367,6 @@ async function rendererGaveUp(w: BrowserWindow | null, reason: string): Promise<
   });
   if (response === 0 && !w.isDestroyed()) w.webContents.reload();
   else if (response === 1) app.quit();
-}
-
-/** A thread in its own window: same renderer, started on `#thread/<chat>/<root>`, which shows only that thread. */
-function openThreadWindow(chatId: string, rootId: string): void {
-  openPopout(`thread:${rootId}`, `thread/${encodeURIComponent(chatId)}/${encodeURIComponent(rootId)}`,
-    { width: 560, height: 820, minWidth: 380, minHeight: 420, title: "Thread — TheFlashMaster" });
 }
 
 /** A chat (an agent's dedicated chat, from the Specialists / Agents pills) in its own window, on `#chat/<chat>`. */
