@@ -2126,3 +2126,31 @@ button.card.trace-card { text-align: left; cursor: pointer; color: var(--fg); fo
 .inbox-detail { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .inbox-item.k-ask > svg { color: var(--blue); } .inbox-item.k-plan > svg { color: var(--accent); }
 .inbox-item.k-checks > svg { color: var(--red); } .inbox-item.k-merge > svg { color: var(--green); }
+
+/* ---------- Project threads (sidebar tree) ---------- */
+/* Navigation as one row of icons, so the project tree has room. Labels are the tooltips. */
+.nav.compact { flex-direction: row; flex-wrap: wrap; gap: 2px; padding: 2px 0 4px; }
+.nav.compact .nav-btn { width: 32px; height: 32px; padding: 0; justify-content: center; position: relative; }
+.nav.compact .nav-label, .nav.compact .nav-kbd { display: none; }
+.nav.compact .badge, .nav.compact .count { position: absolute; top: 0; right: -2px; margin: 0; font-size: 9.5px; line-height: 14px; min-width: 14px; padding: 0 3px; text-align: center; border-radius: 7px; }
+.nav.compact .count { background: var(--bg3); color: var(--muted); }
+.chat-list.tree { display: flex; flex-direction: column; gap: 1px; }
+.chat-link.coord { font-weight: 600; }
+.coord-icon { color: var(--accent); flex: none; }
+[data-theme="light"] .coord-icon { color: #c88a00; }
+.feature-row { background: transparent; border: none; display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 8px 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; text-align: left; border-radius: 6px; }
+.feature-row:not(.static):hover { color: var(--fg); }
+.feature-row .feature-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feature-row .count { font-weight: 400; color: var(--muted); opacity: .8; }
+.feature-row .chev { transition: transform .15s; }
+.feature-row .chev.open { transform: rotate(90deg); }
+.chat-link.thread { padding-left: 22px; }
+.thread-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); opacity: .45; }
+.thread-dot.working { background: var(--blue); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 25%, transparent); animation: pulse 1.2s infinite; }
+.thread-dot.needs_you { background: var(--amber); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent); }
+a.chat-ref { color: var(--blue); cursor: pointer; }
+.crumb-feature { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.thread-banner { display: flex; align-items: center; gap: 8px; margin: 4px auto 0; width: min(760px, calc(100% - 32px)); padding: 7px 12px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 12.5px; }
+.thread-banner b { color: var(--fg); font-weight: 600; }
+.thread-banner > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-banner .link { white-space: nowrap; }

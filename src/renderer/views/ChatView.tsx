@@ -130,6 +130,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
         <header className="chat-top">
           <div className="chat-crumb" title={project ? project.path : isMaster ? "Coordinator across all projects" : "Chats and agents that don't belong to a project"}>
             {where && <><button className="crumb-project" onClick={switchChat}>{where}</button><span className="crumb-sep">/</span></>}
+            {chat.parentChatId && chat.feature && <><span className="crumb-feature" title="Feature">{chat.feature}</span><span className="crumb-sep">/</span></>}
             {editingTitle ? (
               <input autoFocus className="title-input" defaultValue={chat.title}
                 onBlur={(e) => { setEditingTitle(false); if (e.target.value.trim()) void update({ title: e.target.value.trim() }); }}
@@ -176,6 +177,7 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
           </div>
         </header>
 
+        {chat.parentChatId && <ThreadBanner chat={chat} />}
         <div className="messages-area">
           <div className="messages" ref={listRef}>
             <div className="messages-inner virtual">
@@ -222,6 +224,19 @@ export function ChatView({ chatId, popout }: { chatId: string; popout?: boolean 
           {tab === "progress" && <FlowPanel chatId={chatId} agentId={st.flowPanel?.agentId ?? null} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Top of a thread: which coordinator chat started it and for which feature, with a way back. */
+function ThreadBanner({ chat }: { chat: Chat }) {
+  const home = useStore((s) => (chat.parentChatId ? s.chatById[chat.parentChatId] : undefined));
+  if (!home) return null;
+  return (
+    <div className="thread-banner">
+      <Zap size={14} className="coord-icon" />
+      <span>Started by <b>{home.title}</b>{chat.feature ? <> for <b>{chat.feature}</b></> : null} · reports back when done</span>
+      <button className="link" onClick={() => void useStore.getState().openChat(home.id)}>Open {home.coordinator ? "coordinator" : "parent chat"}</button>
     </div>
   );
 }
@@ -295,7 +310,9 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
   const showTokens = useStore((s) => s.settings?.tokens.showTokenCounts);
   const [picker, setPicker] = useState(false);
   const myName = useStore((s) => s.settings?.profile?.name);
-  const who = m.author === "user" ? myName || "You" : m.author === "system" ? "System" : agent?.name ? agentTitle(agent) : role?.title ?? m.role ?? "Agent";
+  // A message the coordinator sent into this thread (its brief, or message_thread) shows as the coordinator's.
+  const fromAgent = m.author === "user" && !!m.agentId;
+  const who = fromAgent ? `${agent?.name ? agentTitle(agent) : role?.title ?? "Coordinator"} · Coordinator` : m.author === "user" ? myName || "You" : m.author === "system" ? "System" : agent?.name ? agentTitle(agent) : role?.title ?? m.role ?? "Agent";
   const react = (e: string) => { setPicker(false); void api().toggleReaction(m.id, e); };
   // Edit & resend (your last message) / Retry (the latest reply): same rules as the main process enforces.
   const rewind = useStore((s) => {
@@ -317,12 +334,13 @@ export const MessageItem = memo(function MessageItem({ m, inThread }: { m: Messa
     return <div className="sys-line" data-msg-id={m.id} title={new Date(m.createdAt).toLocaleString()}><Info size={12} /><Markdown text={m.content} /></div>;
   }
   const sz = inThread ? 24 : 32;
-  const avatar = m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={sz} /></button>
+  const avatar = fromAgent ? <RoleIcon role={m.role} size={sz} framed />
+    : m.author === "user" ? <button className="avatar-btn" title="Change your picture" onClick={() => useStore.getState().setView({ kind: "settings", tab: "general" })}><UserAvatar size={sz} /></button>
     : m.author === "system" ? <span className="role-badge sys"><Info size={inThread ? 12 : 15} /></span>
     : <RoleIcon role={m.role} size={sz} framed state={m.status === "streaming" ? "working" : undefined} />;
 
   return (
-    <div className={`msg msg-${m.author} side-${messageSide(m)} ${m.status === "error" ? "msg-error" : ""}`} data-msg-id={m.id}>
+    <div className={`msg msg-${m.author} side-${messageSide(m)} ${fromAgent ? "msg-from-agent" : ""} ${m.status === "error" ? "msg-error" : ""}`} data-msg-id={m.id}>
       <div className={`avatar ${m.status === "streaming" ? "avatar-working" : ""}`}>{avatar}</div>
       <div className="msg-body">
         <div className="msg-head">

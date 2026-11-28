@@ -11,7 +11,7 @@ import { Archive, ArchiveRestore, Brain, ChevronRight, Copy, Pin, PinOff, Rotate
 import { SHORTCUTS, shortcutLabel } from "../commands";
 import { chatKey, NO_PROJECT } from "../agentChat";
 import { newChatIn } from "../chatNav";
-import { switcherChats } from "../layout";
+import { projectTree, switcherChats, threadStatus } from "../layout";
 
 const OPEN_PREF = "sidebarOpenProjects";
 /** Which project rows are expanded (key: chatKey(projectId)), kept across launches. */
@@ -23,8 +23,8 @@ function readOpen(): Record<string, boolean> {
 }
 
 /**
- * Navigation and projects. A project row expands to list its chats (pinned first, then newest; archived behind a
- * toggle). Replies are not listed here: they open in the chat's side sheet.
+ * Navigation (one row of icons) and projects. A project row expands into its tree: the coordinator chat, the threads it
+ * started grouped by feature, then other chats (archived behind a toggle). Each row opens that chat.
  */
 export function Sidebar() {
   const st = useStore();
@@ -37,6 +37,7 @@ export function Sidebar() {
     try { localStorage.setItem(OPEN_PREF, JSON.stringify(next)); } catch { /* storage unavailable */ }
     return next;
   });
+  const agentList = Object.values(st.agents);
   const running = Object.values(st.agents).filter((a) => a.status === "running" || a.status === "paused").length;
   const toReview = Object.values(st.agents).filter((a) => a.branch && a.worktree && a.status !== "running").length;
   const view = st.view;
@@ -47,6 +48,11 @@ export function Sidebar() {
   // Opening a chat from the switcher, search or a shortcut reveals it here too.
   const currentKey = inChat ? chatKey(st.currentProjectId) : null;
   useEffect(() => { if (currentKey) setOpen(currentKey, true); }, [currentKey]);
+  // An expanded project always has its coordinator chat (older projects get one the first time they are opened).
+  const missingCoord = st.projects.filter((p) => open[p.id] && st.chats[p.id] && !st.chats[p.id]!.some((c) => c.coordinator)).map((p) => p.id).join(",");
+  useEffect(() => {
+    for (const id of missingCoord ? missingCoord.split(",") : []) void api().ensureCoordinator(id).then((c) => st.upsertChat(c)).catch(() => {});
+  }, [missingCoord]);
   const busyKeys = new Set(Object.values(st.agents).filter((a) => a.status === "running" && a.chatId).map((a) => chatKey(st.chatById[a.chatId!]?.projectId ?? null)));
 
   const addProject = async () => {
@@ -78,17 +84,18 @@ export function Sidebar() {
 
   // Plain render function, not a component defined in render: a component made here would remount on every sidebar
   // re-render (agent status, streaming…) and reset the rename field.
-  const chatRow = (c: Chat) => renaming === c.id ? (
+  const chatRow = (c: Chat, extraClass = "") => renaming === c.id ? (
     <RenameInput key={c.id} initial={c.title} onCancel={() => setRenaming(null)}
       onDone={async (t) => { setRenaming(null); if (t && t !== c.title) await patchChat(c, { title: t }); }} />
   ) : (
-    <div key={c.id} className={`chat-link ${isChat(c.id) ? "active" : ""} ${c.archived ? "archived" : ""}`} role="button" tabIndex={0}
+    <div key={c.id} className={`chat-link ${extraClass} ${c.coordinator ? "coord" : ""} ${isChat(c.id) ? "active" : ""} ${c.archived ? "archived" : ""}`} role="button" tabIndex={0}
       onClick={() => void st.openChat(c.id)} onDoubleClick={() => setRenaming(c.id)} onContextMenu={(e) => openMenu(e, chatMenu(c))}
       onKeyDown={(e) => { if (e.key === "F2") setRenaming(c.id); if (e.key === "Enter") void st.openChat(c.id); }}>
-      {c.pinned && <Pin size={12} className="chat-pin" />}
+      {c.coordinator ? <Zap size={14} className="coord-icon" /> : c.parentChatId ? <ThreadDot status={threadStatus(c.id, agentList)} /> : null}
+      {c.pinned && !c.coordinator && <Pin size={12} className="chat-pin" />}
       {c.archived && <Archive size={12} className="chat-pin" />}
       <span className="chat-title">{c.title}</span>
-      {isBusy(c.id) && <span className="pulse" />}
+      {isBusy(c.id) && !c.parentChatId && <span className="pulse" />}
       <button className="row-more" title="More" aria-label={`More for ${c.title}`} onClick={(e) => { e.stopPropagation(); openMenu(e, chatMenu(c), true); }}><MoreHorizontal size={15} /></button>
     </div>
   );
@@ -97,14 +104,53 @@ export function Sidebar() {
     const { active, archived } = switcherChats(st.chats[key] ?? []);
     return (
       <div className="chat-list">
-        {active.map(chatRow)}
+        {active.map((c) => chatRow(c))}
         {!active.length && <button className="archived-toggle" onClick={() => newChat(key === NO_PROJECT ? null : key)}><Plus size={12} /> New chat</button>}
         {archived.length > 0 && (
           <button className="archived-toggle" onClick={() => setShowArchived((o) => ({ ...o, [key]: !o[key] }))}>
             <Archive size={12} /> {showArchived[key] ? "Hide" : "Show"} archived ({archived.length})
           </button>
         )}
-        {showArchived[key] && archived.map(chatRow)}
+        {showArchived[key] && archived.map((c) => chatRow(c))}
+      </div>
+    );
+  };
+
+  /** A project's tree: coordinator, features with their threads, other chats, archived behind a toggle. */
+  const projectList = (p: Project) => {
+    const key = p.id;
+    const tree = projectTree(st.chats[key] ?? []);
+    const featureKey = (name: string) => `feature:${key}:${name}`;
+    return (
+      <div className="chat-list tree">
+        {tree.coordinator ? chatRow(tree.coordinator) : (
+          <button className="archived-toggle" onClick={() => void api().ensureCoordinator(p.id).then((c) => { st.upsertChat(c); return st.openChat(c.id); }).catch(fail)}>
+            <Zap size={12} /> Start the coordinator
+          </button>
+        )}
+        {tree.features.map((f) => {
+          const closed = !!open[featureKey(f.name)];
+          const working = f.threads.filter((c) => threadStatus(c.id, agentList) === "working").length;
+          return (
+            <div key={f.name} className="feature">
+              <button className="feature-row" aria-expanded={!closed} title={f.name} onClick={() => setOpen(featureKey(f.name), !closed)}>
+                <ChevronRight size={12} className={`chev ${closed ? "" : "open"}`} />
+                <span className="feature-name">{f.name}</span>
+                {closed && working > 0 && <span className="pulse" title={`${working} working`} />}
+                <span className="count">{f.threads.length}</span>
+              </button>
+              {!closed && f.threads.map((c) => chatRow(c, "thread"))}
+            </div>
+          );
+        })}
+        {tree.other.length > 0 && (tree.coordinator || tree.features.length > 0) && <div className="feature-row static"><span className="feature-name">Chats</span></div>}
+        {tree.other.map((c) => chatRow(c))}
+        {tree.archived.length > 0 && (
+          <button className="archived-toggle" onClick={() => setShowArchived((o) => ({ ...o, [key]: !o[key] }))}>
+            <Archive size={12} /> {showArchived[key] ? "Hide" : "Show"} archived ({tree.archived.length})
+          </button>
+        )}
+        {showArchived[key] && tree.archived.map((c) => chatRow(c))}
       </div>
     );
   };
@@ -128,7 +174,7 @@ export function Sidebar() {
         <Plus size={16} /> <span>New chat</span><kbd className="nav-kbd">{shortcutLabel(SHORTCUTS.newChat.keys, mac)}</kbd>
       </button>
 
-      <nav className="nav">
+      <nav className="nav compact">
         <NavBtn active={isChat(st.masterChatId ?? "")} working={Object.values(st.agents).some((a) => a.role === "flashmaster" && a.status === "running")}
           onClick={() => st.masterChatId && st.openChat(st.masterChatId)} icon={<Zap size={17} />} label="Master chat" />
         <NavBtn active={st.searchOpen} onClick={() => useStore.setState({ searchOpen: true })} icon={<Search size={17} />} label="Search chats"
@@ -172,7 +218,7 @@ export function Sidebar() {
               <button className="icon-btn" title="More" onClick={(e) => openMenu(e, projectMenu(p), true)}><MoreHorizontal size={15} /></button>
               <button className="icon-btn" title="New chat" onClick={() => newChat(p.id)}><Plus size={15} /></button>
             </div>
-            {open[p.id] && chatList(p.id)}
+            {open[p.id] && projectList(p)}
           </div>
         ))}
         <NoProjectSection count={(st.chats[NO_PROJECT] ?? []).length} open={!!open[NO_PROJECT]} current={currentKey === NO_PROJECT}
@@ -218,10 +264,16 @@ function NoProjectSection({ count, open, current, busy, onToggle, children }: {
 /** Sidebar navigation button (top-level component: stable identity across re-renders). */
 function NavBtn({ active, onClick, icon, label, extra, working }: { active: boolean; onClick: () => void; icon: ReactNode; label: string; extra?: ReactNode; working?: boolean }) {
   return (
-    <button className={`nav-btn ${active ? "active" : ""} ${working ? "nav-working" : ""}`} onClick={onClick}>
+    <button className={`nav-btn ${active ? "active" : ""} ${working ? "nav-working" : ""}`} onClick={onClick} title={label} aria-label={label}>
       <span className="nav-icon">{icon}</span><span className="nav-label">{label}</span>{extra}
     </button>
   );
+}
+
+/** A thread's state in the tree: working (blue pulse), needs you (amber), or idle (a quiet dot). */
+function ThreadDot({ status }: { status: "working" | "needs_you" | "idle" }) {
+  const title = status === "working" ? "Working" : status === "needs_you" ? "Needs you" : "Idle";
+  return <span className={`thread-dot ${status}`} title={title} aria-label={title} />;
 }
 
 /** Inline rename field with its own state, so sidebar updates while typing cannot reset it. */

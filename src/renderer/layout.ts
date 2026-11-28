@@ -1,4 +1,4 @@
-import type { Chat, Message } from "@shared/types";
+import type { AgentRun, Chat, Message } from "@shared/types";
 
 /**
  * App layout rules kept pure so tests cover them without a DOM: which chat a project row opens, what the chat
@@ -18,6 +18,37 @@ export function switcherChats(chats: Chat[]): { active: Chat[]; archived: Chat[]
 export function chatToOpen(chats: Chat[], lastId?: string | null): Chat | null {
   const last = lastId ? chats.find((c) => c.id === lastId && !c.archived) : undefined;
   return last ?? switcherChats(chats).active[0] ?? null;
+}
+
+/**
+ * A project's chats as the sidebar tree: its coordinator chat, then the threads it started grouped by feature (the
+ * feature with the newest thread first; threads in the order they were started), then other chats (top-level chats and
+ * threads without a feature, newest first). Archived chats are kept apart.
+ */
+export function projectTree(chats: Chat[]): { coordinator: Chat | null; features: { name: string; threads: Chat[] }[]; other: Chat[]; archived: Chat[] } {
+  const active = chats.filter((c) => !c.archived);
+  const coordinator = active.find((c) => c.coordinator) ?? null;
+  const byFeature = new Map<string, Chat[]>();
+  const other: Chat[] = [];
+  for (const c of active) {
+    if (c === coordinator) continue;
+    const f = c.parentChatId && c.feature ? c.feature : null;
+    if (f) byFeature.set(f, [...(byFeature.get(f) ?? []), c]); else other.push(c);
+  }
+  const newest = (l: Chat[]) => Math.max(...l.map((c) => c.createdAt));
+  const features = [...byFeature].map(([name, threads]) => ({ name, threads: threads.sort((a, b) => a.createdAt - b.createdAt) }))
+    .sort((a, b) => newest(b.threads) - newest(a.threads));
+  return { coordinator, features, other: switcherChats(other).active, archived: switcherChats(chats).archived };
+}
+
+export type ThreadStatus = "working" | "needs_you" | "idle";
+
+/** A thread's dot in the sidebar: an agent of that chat is working, one waits for the user ("needs you" card), or idle. */
+export function threadStatus(chatId: string, agents: AgentRun[]): ThreadStatus {
+  const mine = agents.filter((a) => a.chatId === chatId);
+  if (mine.some((a) => a.status === "running")) return "working";
+  if (mine.some((a) => a.lastActivity?.startsWith("❓ Needs you"))) return "needs_you";
+  return "idle";
 }
 
 export type SheetTab = "threads" | "progress" | "artifacts";

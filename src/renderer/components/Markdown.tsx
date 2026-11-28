@@ -12,6 +12,9 @@ const attr = (s: string) => esc(s).replace(/"/g, "&quot;");
 /** Web links and local files (an agent's .html report, a doc it wrote) become clickable; a click goes through
  *  api.openLink, where the main process decides what may be opened (src/main/links.ts). Other schemes stay text. */
 function linkHtml(href: string, inner: string): string | null {
+  // A link to another chat (a thread's notice in its coordinator chat): opens it in the app.
+  const chat = /^flash-chat:\/\/([\w-]{1,64})$/.exec(href);
+  if (chat) return `<a href="#" class="chat-ref" data-chat-link="${attr(chat[1]!)}">${inner}</a>`;
   if (WEB_LINK.test(href)) return `<a href="${attr(href)}" data-link="${attr(href)}" target="_blank" rel="noreferrer" title="${attr(href)}">${inner}</a>`;
   if (isLocalPathLink(href)) return `<a href="#" class="file-link" data-link="${attr(href)}" title="Open ${attr(href)}">${FILE_SVG}${inner}</a>`;
   return null;
@@ -115,6 +118,13 @@ function onCopyClick(e: MouseEvent<HTMLDivElement>): void {
     e.preventDefault();
     const path = target.dataset.img;
     openImage({ src: target.src, name: target.alt || path?.split(/[\\/]/).pop(), path, chatId: chatOf(target) });
+    return;
+  }
+  const chatLink = target.closest<HTMLAnchorElement>("a[data-chat-link]");
+  if (chatLink) {
+    e.preventDefault();
+    const id = chatLink.dataset.chatLink!;
+    void import("../store").then(({ useStore }) => useStore.getState().openChat(id));
     return;
   }
   const link = target.closest<HTMLAnchorElement>("a[data-link]");
